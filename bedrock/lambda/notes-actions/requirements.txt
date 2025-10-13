@@ -1,0 +1,8 @@
+# Lambda Dependencies for Notes Actions
+# Python 3.11+
+
+# HTTP requests
+requests>=2.31.0
+
+# AWS SDK (included in Lambda runtime, but specify for local testing)
+boto3>=1.28.0

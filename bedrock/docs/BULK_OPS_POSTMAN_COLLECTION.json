@@ -1,0 +1,526 @@
+{
+  "info": {
+    "name": "Bulk Scheduling Operations API",
+    "description": "Postman collection for testing Bulk Scheduling Operations API\n\n**Features:**\n- Route optimization (2-50 projects)\n- Bulk team assignments (1-100 projects)\n- Project validation\n- Conflict detection\n\n**Base URL:** AWS Lambda\n**Region:** us-east-1\n**Function:** scheduling-agent-bulk-ops-dev",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "auth": {
+    "type": "awsv4",
+    "awsv4": [
+      {
+        "key": "region",
+        "value": "us-east-1",
+        "type": "string"
+      },
+      {
+        "key": "service",
+        "value": "lambda",
+        "type": "string"
+      },
+      {
+        "key": "sessionToken",
+        "value": "",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Route Optimization",
+      "item": [
+        {
+          "name": "Optimize Route - Basic (3 projects)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"optimize_route\\\", \\\"project_ids\\\": [\\\"12345\\\", \\\"12347\\\", \\\"12350\\\"], \\\"date\\\": \\\"2025-10-15\\\", \\\"optimize_for\\\": \\\"time\\\"}\"\n}"
+            },
+            "url": {
+              "raw": "https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/scheduling-agent-bulk-ops-dev/invocations",
+              "protocol": "https",
+              "host": [
+                "lambda",
+                "us-east-1",
+                "amazonaws",
+                "com"
+              ],
+              "path": [
+                "2015-03-31",
+                "functions",
+                "scheduling-agent-bulk-ops-dev",
+                "invocations"
+              ]
+            },
+            "description": "Optimize route for 3 projects with time optimization"
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"optimize_route\\\", \\\"project_ids\\\": [\\\"12345\\\", \\\"12347\\\", \\\"12350\\\"], \\\"date\\\": \\\"2025-10-15\\\", \\\"optimize_for\\\": \\\"time\\\"}\"\n}"
+                },
+                "url": {
+                  "raw": "https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/scheduling-agent-bulk-ops-dev/invocations",
+                  "protocol": "https",
+                  "host": [
+                    "lambda",
+                    "us-east-1",
+                    "amazonaws",
+                    "com"
+                  ],
+                  "path": [
+                    "2015-03-31",
+                    "functions",
+                    "scheduling-agent-bulk-ops-dev",
+                    "invocations"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"statusCode\": 200,\n  \"body\": {\n    \"operation\": \"route_optimize\",\n    \"project_count\": 3,\n    \"optimized_route\": [\n      {\n        \"sequence\": 1,\n        \"project_id\": \"12345\",\n        \"address\": \"123 Main St, Tampa, FL\",\n        \"arrival_time\": \"2025-10-15T08:00:00\",\n        \"duration_minutes\": 120,\n        \"drive_time_to_next_minutes\": 15,\n        \"coordinates\": [27.9506, -82.4572]\n      }\n    ],\n    \"metrics\": {\n      \"total_distance_miles\": 45.2,\n      \"total_drive_time_minutes\": 45,\n      \"time_saved_minutes\": 77,\n      \"savings_percentage\": 30.0\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Optimize Route - Distance (5 projects)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"optimize_route\\\", \\\"project_ids\\\": [\\\"15001\\\", \\\"15002\\\", \\\"15003\\\", \\\"15004\\\", \\\"15005\\\"], \\\"date\\\": \\\"2025-10-20\\\", \\\"optimize_for\\\": \\\"distance\\\"}\"\n}"
+            },
+            "url": {
+              "raw": "https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/scheduling-agent-bulk-ops-dev/invocations",
+              "protocol": "https",
+              "host": [
+                "lambda",
+                "us-east-1",
+                "amazonaws",
+                "com"
+              ],
+              "path": [
+                "2015-03-31",
+                "functions",
+                "scheduling-agent-bulk-ops-dev",
+                "invocations"
+              ]
+            },
+            "description": "Optimize route for 5 projects with distance optimization"
+          }
+        },
+        {
+          "name": "Optimize Route - With Start Location",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"optimize_route\\\", \\\"project_ids\\\": [\\\"16001\\\", \\\"16002\\\", \\\"16003\\\"], \\\"date\\\": \\\"2025-10-22\\\", \\\"optimize_for\\\": \\\"time\\\", \\\"start_location\\\": {\\\"latitude\\\": 27.9506, \\\"longitude\\\": -82.4572}}\"\n}"
+            },
+            "url": {
+              "raw": "https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/scheduling-agent-bulk-ops-dev/invocations",
+              "protocol": "https",
+              "host": [
+                "lambda",
+                "us-east-1",
+                "amazonaws",
+                "com"
+              ],
+              "path": [
+                "2015-03-31",
+                "functions",
+                "scheduling-agent-bulk-ops-dev",
+                "invocations"
+              ]
+            },
+            "description": "Optimize route with custom starting location"
+          }
+        }
+      ],
+      "description": "Route optimization endpoints for TSP-based route planning"
+    },
+    {
+      "name": "Bulk Assignment",
+      "item": [
+        {
+          "name": "Bulk Assign - Basic (3 projects)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"bulk_assign_teams\\\", \\\"project_ids\\\": [\\\"15001\\\", \\\"15002\\\", \\\"15003\\\"], \\\"team\\\": \\\"Team A\\\", \\\"date_range\\\": [\\\"2025-10-15\\\", \\\"2025-10-20\\\"]}\"\n}"
+            },
+            "url": {
+              "raw": "https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/scheduling-agent-bulk-ops-dev/invocations",
+              "protocol": "https",
+              "host": [
+                "lambda",
+                "us-east-1",
+                "amazonaws",
+                "com"
+              ],
+              "path": [
+                "2015-03-31",
+                "functions",
+                "scheduling-agent-bulk-ops-dev",
+                "invocations"
+              ]
+            },
+            "description": "Bulk assign 3 projects to Team A"
+          },
+          "response": [
+            {
+              "name": "Success with Conflicts",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"bulk_assign_teams\\\", \\\"project_ids\\\": [\\\"15001\\\", \\\"15002\\\", \\\"15003\\\"], \\\"team\\\": \\\"Team A\\\", \\\"date_range\\\": [\\\"2025-10-15\\\", \\\"2025-10-20\\\"]}\"\n}"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"statusCode\": 200,\n  \"body\": {\n    \"operation\": \"bulk_assign\",\n    \"requested_count\": 3,\n    \"successful\": 2,\n    \"failed\": 1,\n    \"assignments\": [\n      {\n        \"project_id\": \"15001\",\n        \"team\": \"Team A\",\n        \"scheduled_date\": \"2025-10-15\",\n        \"estimated_hours\": 2,\n        \"status\": \"assigned\"\n      }\n    ],\n    \"conflicts\": [\n      {\n        \"project_id\": \"15003\",\n        \"reason\": \"Team A on vacation Oct 20\",\n        \"severity\": \"error\",\n        \"suggested_resolution\": \"Assign to Team B\"\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Bulk Assign - Ignore Conflicts",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"bulk_assign_teams\\\", \\\"project_ids\\\": [\\\"16001\\\", \\\"16002\\\", \\\"16003\\\"], \\\"team\\\": \\\"Team B\\\", \\\"date_range\\\": [\\\"2025-10-22\\\", \\\"2025-10-27\\\"], \\\"ignore_conflicts\\\": true}\"\n}"
+            },
+            "url": {
+              "raw": "https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/scheduling-agent-bulk-ops-dev/invocations",
+              "protocol": "https",
+              "host": [
+                "lambda",
+                "us-east-1",
+                "amazonaws",
+                "com"
+              ],
+              "path": [
+                "2015-03-31",
+                "functions",
+                "scheduling-agent-bulk-ops-dev",
+                "invocations"
+              ]
+            },
+            "description": "Force bulk assignment even if conflicts detected"
+          }
+        },
+        {
+          "name": "Bulk Assign - Large Batch (20 projects)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"bulk_assign_teams\\\", \\\"project_ids\\\": [\\\"20001\\\", \\\"20002\\\", \\\"20003\\\", \\\"20004\\\", \\\"20005\\\", \\\"20006\\\", \\\"20007\\\", \\\"20008\\\", \\\"20009\\\", \\\"20010\\\", \\\"20011\\\", \\\"20012\\\", \\\"20013\\\", \\\"20014\\\", \\\"20015\\\", \\\"20016\\\", \\\"20017\\\", \\\"20018\\\", \\\"20019\\\", \\\"20020\\\"], \\\"team\\\": \\\"Team C\\\", \\\"date_range\\\": [\\\"2025-11-01\\\", \\\"2025-11-15\\\"]}\"\n}"
+            },
+            "url": {
+              "raw": "https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/scheduling-agent-bulk-ops-dev/invocations",
+              "protocol": "https",
+              "host": [
+                "lambda",
+                "us-east-1",
+                "amazonaws",
+                "com"
+              ],
+              "path": [
+                "2015-03-31",
+                "functions",
+                "scheduling-agent-bulk-ops-dev",
+                "invocations"
+              ]
+            },
+            "description": "Bulk assign 20 projects to test performance"
+          }
+        }
+      ],
+      "description": "Bulk team assignment endpoints with conflict detection"
+    },
+    {
+      "name": "Project Validation",
+      "item": [
+        {
+          "name": "Validate Projects - All Checks",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"validate_projects\\\", \\\"project_ids\\\": [\\\"10001\\\", \\\"10002\\\", \\\"10003\\\"], \\\"validation_checks\\\": [\\\"permit\\\", \\\"measurement\\\", \\\"access\\\", \\\"conflicts\\\"]}\"\n}"
+            },
+            "url": {
+              "raw": "https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/scheduling-agent-bulk-ops-dev/invocations",
+              "protocol": "https",
+              "host": [
+                "lambda",
+                "us-east-1",
+                "amazonaws",
+                "com"
+              ],
+              "path": [
+                "2015-03-31",
+                "functions",
+                "scheduling-agent-bulk-ops-dev",
+                "invocations"
+              ]
+            },
+            "description": "Validate projects with all checks enabled"
+          },
+          "response": [
+            {
+              "name": "Validation Results",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"validate_projects\\\", \\\"project_ids\\\": [\\\"10001\\\", \\\"10002\\\"], \\\"validation_checks\\\": [\\\"permit\\\", \\\"measurement\\\"]}\"\n}"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"statusCode\": 200,\n  \"body\": {\n    \"operation\": \"validate\",\n    \"total_projects\": 2,\n    \"valid_count\": 2,\n    \"issues_count\": 0,\n    \"projects\": [\n      {\n        \"project_id\": \"10001\",\n        \"is_valid\": true,\n        \"checks\": {\n          \"permit_valid\": true,\n          \"measurements_complete\": true\n        },\n        \"issues\": []\n      }\n    ],\n    \"summary\": {\n      \"ready_to_schedule\": [\"10001\", \"10002\"],\n      \"blocked\": []\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Validate Projects - Permits Only",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"validate_projects\\\", \\\"project_ids\\\": [\\\"10010\\\", \\\"10011\\\", \\\"10012\\\"], \\\"validation_checks\\\": [\\\"permit\\\"]}\"\n}"
+            },
+            "url": {
+              "raw": "https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/scheduling-agent-bulk-ops-dev/invocations",
+              "protocol": "https",
+              "host": [
+                "lambda",
+                "us-east-1",
+                "amazonaws",
+                "com"
+              ],
+              "path": [
+                "2015-03-31",
+                "functions",
+                "scheduling-agent-bulk-ops-dev",
+                "invocations"
+              ]
+            },
+            "description": "Validate only permit status"
+          }
+        },
+        {
+          "name": "Validate Projects - Large Batch (50 projects)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"validate_projects\\\", \\\"project_ids\\\": [\\\"30001\\\", \\\"30002\\\", \\\"30003\\\", \\\"30004\\\", \\\"30005\\\", \\\"30006\\\", \\\"30007\\\", \\\"30008\\\", \\\"30009\\\", \\\"30010\\\", \\\"30011\\\", \\\"30012\\\", \\\"30013\\\", \\\"30014\\\", \\\"30015\\\", \\\"30016\\\", \\\"30017\\\", \\\"30018\\\", \\\"30019\\\", \\\"30020\\\", \\\"30021\\\", \\\"30022\\\", \\\"30023\\\", \\\"30024\\\", \\\"30025\\\", \\\"30026\\\", \\\"30027\\\", \\\"30028\\\", \\\"30029\\\", \\\"30030\\\", \\\"30031\\\", \\\"30032\\\", \\\"30033\\\", \\\"30034\\\", \\\"30035\\\", \\\"30036\\\", \\\"30037\\\", \\\"30038\\\", \\\"30039\\\", \\\"30040\\\", \\\"30041\\\", \\\"30042\\\", \\\"30043\\\", \\\"30044\\\", \\\"30045\\\", \\\"30046\\\", \\\"30047\\\", \\\"30048\\\", \\\"30049\\\", \\\"30050\\\"], \\\"validation_checks\\\": [\\\"permit\\\", \\\"measurement\\\"]}\"\n}"
+            },
+            "url": {
+              "raw": "https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/scheduling-agent-bulk-ops-dev/invocations",
+              "protocol": "https",
+              "host": [
+                "lambda",
+                "us-east-1",
+                "amazonaws",
+                "com"
+              ],
+              "path": [
+                "2015-03-31",
+                "functions",
+                "scheduling-agent-bulk-ops-dev",
+                "invocations"
+              ]
+            },
+            "description": "Validate 50 projects to test performance"
+          }
+        }
+      ],
+      "description": "Project validation endpoints for permit, measurement, and access checks"
+    },
+    {
+      "name": "Conflict Detection",
+      "item": [
+        {
+          "name": "Detect Conflicts - Specific Team",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"detect_conflicts\\\", \\\"project_ids\\\": [\\\"12345\\\", \\\"12347\\\"], \\\"team\\\": \\\"Team A\\\", \\\"date_range\\\": [\\\"2025-10-15\\\", \\\"2025-10-20\\\"]}\"\n}"
+            },
+            "url": {
+              "raw": "https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/scheduling-agent-bulk-ops-dev/invocations",
+              "protocol": "https",
+              "host": [
+                "lambda",
+                "us-east-1",
+                "amazonaws",
+                "com"
+              ],
+              "path": [
+                "2015-03-31",
+                "functions",
+                "scheduling-agent-bulk-ops-dev",
+                "invocations"
+              ]
+            },
+            "description": "Check conflicts for specific team"
+          },
+          "response": [
+            {
+              "name": "Conflicts Found",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"detect_conflicts\\\", \\\"project_ids\\\": [\\\"12345\\\"], \\\"team\\\": \\\"Team A\\\", \\\"date_range\\\": [\\\"2025-10-15\\\", \\\"2025-10-20\\\"]}\"\n}"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"statusCode\": 200,\n  \"body\": {\n    \"conflicts_found\": 1,\n    \"conflicts\": [\n      {\n        \"project_id\": \"12345\",\n        \"reason\": \"Team A at capacity for Oct 15\",\n        \"severity\": \"warning\",\n        \"suggested_resolution\": \"Consider Team C or delay to Oct 18\"\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Detect Conflicts - All Teams",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"{\\\"operation\\\": \\\"detect_conflicts\\\", \\\"project_ids\\\": [\\\"13001\\\", \\\"13002\\\", \\\"13003\\\"], \\\"date_range\\\": [\\\"2025-10-22\\\", \\\"2025-10-27\\\"]}\"\n}"
+            },
+            "url": {
+              "raw": "https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/scheduling-agent-bulk-ops-dev/invocations",
+              "protocol": "https",
+              "host": [
+                "lambda",
+                "us-east-1",
+                "amazonaws",
+                "com"
+              ],
+              "path": [
+                "2015-03-31",
+                "functions",
+                "scheduling-agent-bulk-ops-dev",
+                "invocations"
+              ]
+            },
+            "description": "Check conflicts across all teams"
+          }
+        }
+      ],
+      "description": "Conflict detection endpoints for schedule validation"
+    }
+  ],
+  "variable": [
+    {
+      "key": "lambda_function_name",
+      "value": "scheduling-agent-bulk-ops-dev",
+      "type": "string"
+    },
+    {
+      "key": "region",
+      "value": "us-east-1",
+      "type": "string"
+    },
+    {
+      "key": "lambda_url",
+      "value": "https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/scheduling-agent-bulk-ops-dev/invocations",
+      "type": "string"
+    }
+  ]
+}

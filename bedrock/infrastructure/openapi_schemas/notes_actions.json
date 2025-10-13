@@ -1,0 +1,151 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Notes Actions API",
+    "version": "1.0.0",
+    "description": "API for managing notes associated with appointments"
+  },
+  "paths": {
+    "/add_note": {
+      "post": {
+        "summary": "Add a note to an appointment",
+        "description": "Creates a new note and associates it with a specific appointment",
+        "operationId": "add_note",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "appointment_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the appointment"
+                  },
+                  "customer_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the customer (for verification)"
+                  },
+                  "note_text": {
+                    "type": "string",
+                    "description": "The content of the note to add",
+                    "maxLength": 2000
+                  }
+                },
+                "required": ["appointment_id", "customer_id", "note_text"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Note added successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "note_id": {
+                      "type": "string",
+                      "description": "Unique identifier for the created note"
+                    },
+                    "appointment_id": {
+                      "type": "string"
+                    },
+                    "note_text": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Timestamp when note was created"
+                    },
+                    "created_by": {
+                      "type": "string",
+                      "description": "Who created the note (e.g., 'Customer', 'System', 'Agent')"
+                    },
+                    "confirmation_message": {
+                      "type": "string",
+                      "description": "Human-readable confirmation message"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/list_notes": {
+      "post": {
+        "summary": "List all notes for an appointment",
+        "description": "Retrieves all notes associated with a specific appointment",
+        "operationId": "list_notes",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "appointment_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the appointment"
+                  },
+                  "customer_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the customer (for verification)"
+                  }
+                },
+                "required": ["appointment_id", "customer_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of notes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "appointment_id": {
+                      "type": "string"
+                    },
+                    "notes_count": {
+                      "type": "integer",
+                      "description": "Total number of notes"
+                    },
+                    "notes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "note_id": {
+                            "type": "string"
+                          },
+                          "note_text": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "created_by": {
+                            "type": "string",
+                            "description": "Who created the note"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+# Lambda requirements for Bulk Operations Handler
+# Python 3.11+
+
+# AWS SDK (included in Lambda runtime, but specify for local dev)
+boto3>=1.34.0
+
+# Async HTTP client for parallel API calls
+aiohttp>=3.9.0
+
+# Optional: OR-Tools for advanced TSP solving
+# ortools>=9.8.0  # Uncomment if using advanced route optimization

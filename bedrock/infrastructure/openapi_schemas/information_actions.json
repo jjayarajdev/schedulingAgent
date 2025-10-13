@@ -1,0 +1,314 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Information Actions API",
+    "version": "1.0.0",
+    "description": "API for retrieving information about projects, appointments, working hours, and weather"
+  },
+  "paths": {
+    "/get_project_details": {
+      "post": {
+        "summary": "Get detailed information about a project",
+        "description": "Retrieves comprehensive details about a specific project including description, location, requirements, and duration",
+        "operationId": "get_project_details",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the project"
+                  }
+                },
+                "required": ["project_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Project details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "project_name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "location": {
+                      "type": "string",
+                      "description": "Project location or meeting type (e.g., 'Remote', 'On-site')"
+                    },
+                    "duration_minutes": {
+                      "type": "integer",
+                      "description": "Estimated duration in minutes"
+                    },
+                    "requirements": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "List of things customer should bring or prepare"
+                    },
+                    "project_manager": {
+                      "type": "string",
+                      "description": "Name of the project manager"
+                    },
+                    "contact_email": {
+                      "type": "string",
+                      "format": "email"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_appointment_status": {
+      "post": {
+        "summary": "Get status and details of an appointment",
+        "description": "Retrieves current status and full details of an existing appointment",
+        "operationId": "get_appointment_status",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "appointment_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the appointment"
+                  },
+                  "customer_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the customer"
+                  }
+                },
+                "required": ["appointment_id", "customer_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Appointment status and details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "appointment_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["confirmed", "rescheduled", "cancelled", "completed"],
+                      "description": "Current status of the appointment"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "project_name": {
+                      "type": "string"
+                    },
+                    "date": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "start_time": {
+                      "type": "string",
+                      "format": "time"
+                    },
+                    "end_time": {
+                      "type": "string",
+                      "format": "time"
+                    },
+                    "location": {
+                      "type": "string"
+                    },
+                    "notes_count": {
+                      "type": "integer",
+                      "description": "Number of notes attached to this appointment"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_working_hours": {
+      "post": {
+        "summary": "Get company working hours and availability",
+        "description": "Retrieves business hours, days of operation, and holiday information",
+        "operationId": "get_working_hours",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Optional: Check hours for a specific date"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Working hours information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "regular_hours": {
+                      "type": "object",
+                      "properties": {
+                        "monday": {
+                          "type": "string",
+                          "description": "e.g., '9:00 AM - 6:00 PM'"
+                        },
+                        "tuesday": {
+                          "type": "string"
+                        },
+                        "wednesday": {
+                          "type": "string"
+                        },
+                        "thursday": {
+                          "type": "string"
+                        },
+                        "friday": {
+                          "type": "string"
+                        },
+                        "saturday": {
+                          "type": "string"
+                        },
+                        "sunday": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "timezone": {
+                      "type": "string",
+                      "description": "e.g., 'America/New_York'"
+                    },
+                    "holidays": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "description": "Upcoming holidays when business is closed"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_weather": {
+      "post": {
+        "summary": "Get weather forecast for a specific date and location",
+        "description": "Retrieves weather forecast to help customers plan for appointments",
+        "operationId": "get_weather",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Date to get weather forecast for"
+                  },
+                  "location": {
+                    "type": "string",
+                    "description": "Location (city, zip code, or coordinates)"
+                  }
+                },
+                "required": ["date", "location"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Weather forecast",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "date": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "location": {
+                      "type": "string"
+                    },
+                    "temperature_high": {
+                      "type": "number",
+                      "description": "High temperature in Fahrenheit"
+                    },
+                    "temperature_low": {
+                      "type": "number",
+                      "description": "Low temperature in Fahrenheit"
+                    },
+                    "conditions": {
+                      "type": "string",
+                      "description": "e.g., 'Partly Cloudy', 'Rain', 'Sunny'"
+                    },
+                    "precipitation_chance": {
+                      "type": "integer",
+                      "description": "Chance of precipitation as percentage (0-100)"
+                    },
+                    "wind_speed": {
+                      "type": "string",
+                      "description": "e.g., '5-10 mph'"
+                    },
+                    "advisory": {
+                      "type": "string",
+                      "description": "Optional weather advisory or warning"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

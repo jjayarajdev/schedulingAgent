@@ -1,0 +1,927 @@
+openapi: 3.0.3
+info:
+  title: Bulk Scheduling Operations API
+  description: |
+    **Bulk Scheduling Operations API** for ProjectsForce 360 Coordinators
+
+    This API enables field coordinators to perform bulk scheduling operations including:
+    - Route optimization for multiple projects
+    - Bulk team assignments with conflict detection
+    - Project validation (permits, measurements, access)
+    - Schedule conflict detection
+
+    ## Features
+    - Process 2-50 projects for route optimization
+    - Assign up to 100 projects in bulk
+    - Parallel validation checks
+    - Real-time conflict detection
+    - 80-99% time savings vs manual operations
+
+    ## Authentication
+    This API is invoked internally by AWS Bedrock Agents. External access requires AWS IAM credentials.
+
+    ## Rate Limits
+    - Max 50 projects per route optimization request
+    - Max 100 projects per bulk assignment request
+    - Max 100 projects per validation request
+    - Lambda timeout: 60 seconds
+
+    ## Base URL
+    Invoked via AWS Lambda: `arn:aws:lambda:us-east-1:618048437522:function:scheduling-agent-bulk-ops-dev`
+  version: 1.0.0
+  contact:
+    name: ProjectsForce 360 API Support
+    email: support@projectsforce.com
+  license:
+    name: Proprietary
+    url: https://projectsforce.com/license
+
+servers:
+  - url: https://lambda.us-east-1.amazonaws.com
+    description: Production (AWS Lambda)
+  - url: http://localhost:9000
+    description: Local Development (Lambda Runtime Interface Emulator)
+
+tags:
+  - name: Route Optimization
+    description: Optimize routes for multiple projects using TSP algorithms
+  - name: Bulk Assignment
+    description: Assign multiple projects to teams with conflict detection
+  - name: Validation
+    description: Validate projects for scheduling readiness
+  - name: Conflict Detection
+    description: Detect scheduling conflicts across projects and teams
+
+paths:
+  /optimize_route:
+    post:
+      tags:
+        - Route Optimization
+      summary: Optimize route for multiple projects
+      description: |
+        Calculate the optimal route sequence for 2-50 projects to minimize travel time and distance.
+
+        **Algorithm:** Nearest Neighbor TSP (Traveling Salesman Problem) heuristic
+
+        **Performance:**
+        - 10 projects: ~2 seconds
+        - 25 projects: ~5 seconds
+        - 50 projects: ~10 seconds
+
+        **Optimization Criteria:**
+        - `time`: Minimize total drive time (default)
+        - `distance`: Minimize total distance traveled
+        - `cost`: Balance time and fuel costs
+
+        **Returns:**
+        - Optimized route sequence with arrival times
+        - Drive time between stops
+        - Total metrics (distance, time, savings)
+      operationId: optimize_route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RouteOptimizationRequest'
+            examples:
+              basic:
+                summary: Basic route optimization
+                value:
+                  project_ids:
+                    - "12345"
+                    - "12347"
+                    - "12350"
+                    - "12352"
+                  date: "2025-10-15"
+                  optimize_for: "time"
+              advanced:
+                summary: With custom start location
+                value:
+                  project_ids:
+                    - "15001"
+                    - "15002"
+                    - "15003"
+                    - "15004"
+                    - "15005"
+                  date: "2025-10-20"
+                  optimize_for: "distance"
+                  start_location:
+                    latitude: 27.9506
+                    longitude: -82.4572
+      responses:
+        '200':
+          description: Route optimized successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteOptimizationResponse'
+              examples:
+                success:
+                  summary: Successful optimization
+                  value:
+                    operation: "route_optimize"
+                    project_count: 4
+                    optimized_route:
+                      - sequence: 1
+                        project_id: "12345"
+                        address: "123 Main St, Tampa, FL 33602"
+                        arrival_time: "2025-10-15T08:00:00"
+                        duration_minutes: 120
+                        drive_time_to_next_minutes: 15
+                        coordinates: [27.9506, -82.4572]
+                      - sequence: 2
+                        project_id: "12347"
+                        address: "456 Oak Ave, Tampa, FL 33610"
+                        arrival_time: "2025-10-15T10:15:00"
+                        duration_minutes: 90
+                        drive_time_to_next_minutes: 10
+                        coordinates: [27.9704, -82.4485]
+                      - sequence: 3
+                        project_id: "12350"
+                        address: "789 Pine Rd, Tampa, FL 33615"
+                        arrival_time: "2025-10-15T11:55:00"
+                        duration_minutes: 120
+                        drive_time_to_next_minutes: 20
+                        coordinates: [27.9850, -82.4900]
+                      - sequence: 4
+                        project_id: "12352"
+                        address: "321 Elm St, Tampa, FL 33620"
+                        arrival_time: "2025-10-15T13:55:00"
+                        duration_minutes: 90
+                        drive_time_to_next_minutes: 0
+                        coordinates: [28.0100, -82.5000]
+                    metrics:
+                      total_distance_miles: 45.2
+                      total_drive_time_minutes: 45
+                      time_saved_minutes: 77
+                      savings_percentage: 30.0
+                    warnings: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /bulk_assign:
+    post:
+      tags:
+        - Bulk Assignment
+      summary: Assign multiple projects to a team
+      description: |
+        Bulk assign 1-100 projects to a team with automatic conflict detection.
+
+        **Conflict Checks:**
+        - Team availability (vacation, capacity)
+        - Time overlaps with existing assignments
+        - Skill requirements and certifications
+        - Resource conflicts (equipment, tools)
+
+        **Performance:**
+        - 10 projects: ~2 seconds
+        - 50 projects: ~7 seconds
+        - 100 projects: ~15 seconds
+
+        **Options:**
+        - `ignore_conflicts`: Force assignment even if conflicts detected (default: false)
+        - `date_range`: Specify start and end dates for assignments
+
+        **Returns:**
+        - List of successful assignments
+        - List of conflicts with resolutions
+        - Summary metrics (total assigned, total hours)
+      operationId: bulk_assign_teams
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkAssignmentRequest'
+            examples:
+              basic:
+                summary: Basic bulk assignment
+                value:
+                  project_ids:
+                    - "15001"
+                    - "15002"
+                    - "15003"
+                  team: "Team A"
+                  date_range:
+                    - "2025-10-15"
+                    - "2025-10-20"
+              with_conflicts_ignored:
+                summary: Force assignment (ignore conflicts)
+                value:
+                  project_ids:
+                    - "16001"
+                    - "16002"
+                    - "16003"
+                    - "16004"
+                    - "16005"
+                  team: "Team B"
+                  date_range:
+                    - "2025-10-22"
+                    - "2025-10-27"
+                  ignore_conflicts: true
+      responses:
+        '200':
+          description: Bulk assignment completed (may include conflicts)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkAssignmentResponse'
+              examples:
+                success_with_conflicts:
+                  summary: Partial success with conflicts
+                  value:
+                    operation: "bulk_assign"
+                    requested_count: 5
+                    successful: 3
+                    failed: 2
+                    assignments:
+                      - project_id: "15001"
+                        team: "Team A"
+                        scheduled_date: "2025-10-15"
+                        estimated_hours: 2
+                        status: "assigned"
+                      - project_id: "15002"
+                        team: "Team A"
+                        scheduled_date: "2025-10-16"
+                        estimated_hours: 3
+                        status: "assigned"
+                      - project_id: "15003"
+                        team: "Team A"
+                        scheduled_date: "2025-10-17"
+                        estimated_hours: 2.5
+                        status: "assigned"
+                    conflicts:
+                      - project_id: "15004"
+                        reason: "Team A on vacation Oct 20"
+                        severity: "error"
+                        suggested_resolution: "Assign to Team B or reschedule to Oct 21"
+                      - project_id: "15005"
+                        reason: "Missing required certification for electrical work"
+                        severity: "error"
+                        suggested_resolution: "Assign to certified team or complete training"
+                    summary:
+                      team: "Team A"
+                      assigned_projects: ["15001", "15002", "15003"]
+                      total_hours_allocated: 7.5
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /validate_projects:
+    post:
+      tags:
+        - Validation
+      summary: Validate multiple projects for scheduling
+      description: |
+        Validate 1-100 projects for scheduling readiness by checking permits, measurements, access, and conflicts.
+
+        **Validation Checks:**
+        - `permit`: Building permits approved and active
+        - `measurement`: Site measurements completed
+        - `access`: Property access approved by customer
+        - `conflicts`: No scheduling conflicts
+
+        **Performance:**
+        - 25 projects: ~3 seconds
+        - 50 projects: ~5 seconds
+        - 100 projects: ~10 seconds
+
+        **Issue Severity:**
+        - `warning`: Can proceed with caution
+        - `error`: Should be resolved before scheduling
+        - `blocking`: Must be resolved before scheduling
+
+        **Returns:**
+        - Per-project validation results
+        - List of issues with resolution steps
+        - Summary of ready/blocked projects
+      operationId: validate_projects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectValidationRequest'
+            examples:
+              all_checks:
+                summary: Validate all checks
+                value:
+                  project_ids:
+                    - "10001"
+                    - "10002"
+                    - "10003"
+                  validation_checks:
+                    - "permit"
+                    - "measurement"
+                    - "access"
+                    - "conflicts"
+              permit_only:
+                summary: Validate permits only
+                value:
+                  project_ids:
+                    - "10010"
+                    - "10011"
+                    - "10012"
+                  validation_checks:
+                    - "permit"
+      responses:
+        '200':
+          description: Validation completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectValidationResponse'
+              examples:
+                mixed_results:
+                  summary: Mixed validation results
+                  value:
+                    operation: "validate"
+                    total_projects: 3
+                    valid_count: 2
+                    issues_count: 1
+                    projects:
+                      - project_id: "10001"
+                        is_valid: true
+                        checks:
+                          permit_valid: true
+                          measurements_complete: true
+                          access_approved: true
+                          no_conflicts: true
+                        issues: []
+                      - project_id: "10002"
+                        is_valid: true
+                        checks:
+                          permit_valid: true
+                          measurements_complete: true
+                          access_approved: true
+                          no_conflicts: true
+                        issues: []
+                      - project_id: "10003"
+                        is_valid: false
+                        checks:
+                          permit_valid: false
+                          measurements_complete: true
+                          access_approved: true
+                          no_conflicts: true
+                        issues:
+                          - type: "permit"
+                            severity: "blocking"
+                            message: "Building permit not approved"
+                            resolution_steps:
+                              - "Contact permitting department at (555) 123-4567"
+                              - "Submit updated site plans if required"
+                              - "Expected approval time: 3-5 business days"
+                    summary:
+                      ready_to_schedule: ["10001", "10002"]
+                      requires_action: []
+                      blocked: ["10003"]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /detect_conflicts:
+    post:
+      tags:
+        - Conflict Detection
+      summary: Detect scheduling conflicts
+      description: |
+        Check for scheduling conflicts across projects and teams for a given date range.
+
+        **Conflict Types:**
+        - Time overlaps with existing appointments
+        - Team unavailability (vacation, capacity)
+        - Resource conflicts (equipment, tools)
+        - Skill mismatches
+
+        **Performance:**
+        - Checks all conflicts in parallel
+        - Real-time validation against current schedule
+        - ~2 seconds for typical workload
+
+        **Returns:**
+        - List of conflicts with severity
+        - Suggested resolutions
+        - Alternative dates/teams
+      operationId: detect_conflicts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConflictDetectionRequest'
+            examples:
+              team_specific:
+                summary: Check conflicts for specific team
+                value:
+                  project_ids:
+                    - "12345"
+                    - "12347"
+                  team: "Team A"
+                  date_range:
+                    - "2025-10-15"
+                    - "2025-10-20"
+              all_teams:
+                summary: Check conflicts across all teams
+                value:
+                  project_ids:
+                    - "13001"
+                    - "13002"
+                    - "13003"
+                  date_range:
+                    - "2025-10-22"
+                    - "2025-10-27"
+      responses:
+        '200':
+          description: Conflict detection completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictDetectionResponse'
+              examples:
+                conflicts_found:
+                  summary: Conflicts detected
+                  value:
+                    conflicts_found: 2
+                    conflicts:
+                      - project_id: "12347"
+                        reason: "Overlaps with existing appointment on Oct 16, 2:00 PM"
+                        severity: "error"
+                        suggested_resolution: "Reschedule to Oct 17 or assign to Team B"
+                      - project_id: "12345"
+                        reason: "Team A at capacity for Oct 15"
+                        severity: "warning"
+                        suggested_resolution: "Consider Team C or delay to Oct 18"
+                no_conflicts:
+                  summary: No conflicts
+                  value:
+                    conflicts_found: 0
+                    conflicts: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  schemas:
+    RouteOptimizationRequest:
+      type: object
+      required:
+        - project_ids
+      properties:
+        project_ids:
+          type: array
+          items:
+            type: string
+          minItems: 2
+          maxItems: 50
+          description: List of project IDs to optimize (2-50 projects)
+          example: ["12345", "12347", "12350", "12352"]
+        date:
+          type: string
+          format: date
+          description: Target date for route (ISO 8601 format)
+          example: "2025-10-15"
+        optimize_for:
+          type: string
+          enum: [time, distance, cost]
+          default: time
+          description: Optimization criteria
+          example: "time"
+        start_location:
+          type: object
+          description: Optional starting location (default is office)
+          properties:
+            latitude:
+              type: number
+              format: double
+              minimum: -90
+              maximum: 90
+              example: 27.9506
+            longitude:
+              type: number
+              format: double
+              minimum: -180
+              maximum: 180
+              example: -82.4572
+
+    RouteOptimizationResponse:
+      type: object
+      properties:
+        operation:
+          type: string
+          example: "route_optimize"
+        project_count:
+          type: integer
+          example: 12
+        optimized_route:
+          type: array
+          items:
+            $ref: '#/components/schemas/RouteStop'
+        metrics:
+          $ref: '#/components/schemas/RouteMetrics'
+        warnings:
+          type: array
+          items:
+            type: string
+          example: []
+
+    RouteStop:
+      type: object
+      properties:
+        sequence:
+          type: integer
+          description: Stop number in optimized sequence
+          example: 1
+        project_id:
+          type: string
+          example: "12345"
+        address:
+          type: string
+          example: "123 Main St, Tampa, FL 33602"
+        arrival_time:
+          type: string
+          format: date-time
+          description: Estimated arrival time (ISO 8601)
+          example: "2025-10-15T08:00:00"
+        duration_minutes:
+          type: integer
+          description: Estimated work duration at this location
+          example: 120
+        drive_time_to_next_minutes:
+          type: integer
+          description: Drive time to next stop (0 for last stop)
+          example: 15
+        coordinates:
+          type: array
+          items:
+            type: number
+          minItems: 2
+          maxItems: 2
+          description: "[latitude, longitude]"
+          example: [27.9506, -82.4572]
+
+    RouteMetrics:
+      type: object
+      properties:
+        total_distance_miles:
+          type: number
+          format: double
+          example: 45.2
+        total_drive_time_minutes:
+          type: integer
+          example: 180
+        time_saved_minutes:
+          type: integer
+          description: Time saved vs unoptimized route
+          example: 77
+        savings_percentage:
+          type: number
+          format: double
+          description: Percentage improvement
+          example: 30.0
+
+    BulkAssignmentRequest:
+      type: object
+      required:
+        - project_ids
+        - team
+      properties:
+        project_ids:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 100
+          description: List of project IDs to assign (1-100 projects)
+          example: ["15001", "15002", "15003"]
+        team:
+          type: string
+          description: Team ID or name
+          example: "Team A"
+        date_range:
+          type: array
+          items:
+            type: string
+            format: date
+          minItems: 2
+          maxItems: 2
+          description: "[start_date, end_date] in ISO 8601 format"
+          example: ["2025-10-15", "2025-10-20"]
+        ignore_conflicts:
+          type: boolean
+          default: false
+          description: Force assignment even if conflicts detected
+          example: false
+
+    BulkAssignmentResponse:
+      type: object
+      properties:
+        operation:
+          type: string
+          example: "bulk_assign"
+        requested_count:
+          type: integer
+          example: 3
+        successful:
+          type: integer
+          example: 2
+        failed:
+          type: integer
+          example: 1
+        assignments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Assignment'
+        conflicts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Conflict'
+        summary:
+          $ref: '#/components/schemas/AssignmentSummary'
+
+    Assignment:
+      type: object
+      properties:
+        project_id:
+          type: string
+          example: "15001"
+        team:
+          type: string
+          example: "Team A"
+        scheduled_date:
+          type: string
+          format: date
+          example: "2025-10-15"
+        estimated_hours:
+          type: number
+          format: double
+          example: 2.0
+        status:
+          type: string
+          enum: [assigned, failed]
+          example: "assigned"
+
+    Conflict:
+      type: object
+      properties:
+        project_id:
+          type: string
+          example: "15003"
+        reason:
+          type: string
+          example: "Team A on vacation Oct 20"
+        severity:
+          type: string
+          enum: [warning, error]
+          example: "error"
+        suggested_resolution:
+          type: string
+          example: "Assign to Team B or reschedule"
+
+    AssignmentSummary:
+      type: object
+      properties:
+        team:
+          type: string
+          example: "Team A"
+        assigned_projects:
+          type: array
+          items:
+            type: string
+          example: ["15001", "15002"]
+        total_hours_allocated:
+          type: number
+          format: double
+          example: 5.0
+
+    ProjectValidationRequest:
+      type: object
+      required:
+        - project_ids
+      properties:
+        project_ids:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 100
+          description: List of project IDs to validate (1-100 projects)
+          example: ["10001", "10002", "10003"]
+        validation_checks:
+          type: array
+          items:
+            type: string
+            enum: [permit, measurement, access, conflicts]
+          default: [permit, measurement, access, conflicts]
+          description: Which checks to run (default is all)
+          example: ["permit", "measurement", "access", "conflicts"]
+
+    ProjectValidationResponse:
+      type: object
+      properties:
+        operation:
+          type: string
+          example: "validate"
+        total_projects:
+          type: integer
+          example: 3
+        valid_count:
+          type: integer
+          example: 2
+        issues_count:
+          type: integer
+          example: 1
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectValidation'
+        summary:
+          $ref: '#/components/schemas/ValidationSummary'
+
+    ProjectValidation:
+      type: object
+      properties:
+        project_id:
+          type: string
+          example: "10001"
+        is_valid:
+          type: boolean
+          example: true
+        checks:
+          type: object
+          properties:
+            permit_valid:
+              type: boolean
+              example: true
+            measurements_complete:
+              type: boolean
+              example: true
+            access_approved:
+              type: boolean
+              example: true
+            no_conflicts:
+              type: boolean
+              example: true
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationIssue'
+
+    ValidationIssue:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [permit, measurement, access, conflict]
+          example: "permit"
+        severity:
+          type: string
+          enum: [warning, error, blocking]
+          example: "blocking"
+        message:
+          type: string
+          example: "Permit not approved"
+        resolution_steps:
+          type: array
+          items:
+            type: string
+          example: ["Contact permitting dept"]
+
+    ValidationSummary:
+      type: object
+      properties:
+        ready_to_schedule:
+          type: array
+          items:
+            type: string
+          example: ["10001", "10002"]
+        requires_action:
+          type: array
+          items:
+            type: string
+          example: []
+        blocked:
+          type: array
+          items:
+            type: string
+          example: ["10003"]
+
+    ConflictDetectionRequest:
+      type: object
+      required:
+        - project_ids
+      properties:
+        project_ids:
+          type: array
+          items:
+            type: string
+          description: List of project IDs to check
+          example: ["12345", "12347"]
+        team:
+          type: string
+          description: Check conflicts for specific team (optional)
+          example: "Team A"
+        date_range:
+          type: array
+          items:
+            type: string
+            format: date
+          minItems: 2
+          maxItems: 2
+          description: Date range to check conflicts
+          example: ["2025-10-15", "2025-10-20"]
+
+    ConflictDetectionResponse:
+      type: object
+      properties:
+        conflicts_found:
+          type: integer
+          example: 1
+        conflicts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Conflict'
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: "Invalid request"
+        code:
+          type: string
+          description: Error code
+          example: "INVALID_INPUT"
+        details:
+          type: object
+          description: Additional error details
+          additionalProperties: true
+
+  responses:
+    BadRequest:
+      description: Bad request - invalid parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Invalid request parameters"
+            code: "BAD_REQUEST"
+            details:
+              field: "project_ids"
+              message: "Must provide at least 2 project IDs"
+
+    ValidationError:
+      description: Validation error - request doesn't meet requirements
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Validation failed"
+            code: "VALIDATION_ERROR"
+            details:
+              field: "project_ids"
+              message: "Cannot exceed 50 projects for route optimization"
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Internal server error"
+            code: "INTERNAL_ERROR"
+            details:
+              message: "An unexpected error occurred"
+              request_id: "abc123-def456"
+
+  securitySchemes:
+    AWSSignature:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: AWS Signature Version 4 authentication
+      x-amazon-apigateway-authtype: awsSigv4
+
+security:
+  - AWSSignature: []
+
+externalDocs:
+  description: Full documentation and deployment guide
+  url: https://github.com/projectsforce/scheduling-agent/blob/main/docs/BULK_SCHEDULING_DESIGN.md

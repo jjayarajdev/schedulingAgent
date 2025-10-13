@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bulk Scheduling Operations API - Swagger Documentation</title>
+    <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5.10.3/swagger-ui.css" />
+    <link rel="icon" type="image/png" href="https://unpkg.com/swagger-ui-dist@5.10.3/favicon-32x32.png" sizes="32x32" />
+    <link rel="icon" type="image/png" href="https://unpkg.com/swagger-ui-dist@5.10.3/favicon-16x16.png" sizes="16x16" />
+    <style>
+        html {
+            box-sizing: border-box;
+            overflow: -moz-scrollbars-vertical;
+            overflow-y: scroll;
+        }
+
+        *,
+        *:before,
+        *:after {
+            box-sizing: inherit;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            margin: 0 0 0.5rem 0;
+            font-size: 2.5rem;
+            font-weight: 700;
+        }
+
+        .header p {
+            margin: 0;
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .info-banner {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 1rem 2rem;
+            margin: 1rem auto;
+            max-width: 1460px;
+        }
+
+        .info-banner h3 {
+            margin: 0 0 0.5rem 0;
+            color: #667eea;
+        }
+
+        .info-banner ul {
+            margin: 0;
+            padding-left: 1.5rem;
+        }
+
+        .info-banner li {
+            margin: 0.25rem 0;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            padding: 1.5rem;
+            background: #f8f9fa;
+            flex-wrap: wrap;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            min-width: 150px;
+            text-align: center;
+        }
+
+        .stat-card .number {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .stat-card .label {
+            font-size: 0.875rem;
+            color: #666;
+            margin-top: 0.25rem;
+        }
+
+        #swagger-ui {
+            max-width: 1460px;
+            margin: 0 auto;
+        }
+
+        .swagger-ui .topbar {
+            display: none;
+        }
+
+        /* Custom color scheme */
+        .swagger-ui .opblock.opblock-post {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .swagger-ui .opblock.opblock-post .opblock-summary-method {
+            background: #667eea;
+        }
+
+        .swagger-ui .btn.execute {
+            background: #667eea;
+            border-color: #667eea;
+        }
+
+        .swagger-ui .btn.execute:hover {
+            background: #5568d3;
+            border-color: #5568d3;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📦 Bulk Scheduling Operations API</h1>
+        <p>ProjectsForce 360 - Coordinator Operations Documentation</p>
+    </div>
+
+    <div class="stats">
+        <div class="stat-card">
+            <div class="number">4</div>
+            <div class="label">Operations</div>
+        </div>
+        <div class="stat-card">
+            <div class="number">100</div>
+            <div class="label">Max Projects</div>
+        </div>
+        <div class="stat-card">
+            <div class="number">80-99%</div>
+            <div class="label">Time Savings</div>
+        </div>
+        <div class="stat-card">
+            <div class="number">60s</div>
+            <div class="label">Max Timeout</div>
+        </div>
+    </div>
+
+    <div class="info-banner" style="background: #fff3cd; border-left: 4px solid #ffc107;">
+        <h3 style="color: #856404;">⚠️ Seeing "Failed to fetch" error?</h3>
+        <p style="margin: 0.5rem 0;">Due to browser CORS security, you need to serve this page via HTTP server:</p>
+        <ol style="margin: 0.5rem 0; padding-left: 2rem;">
+            <li><strong>Quick Method:</strong> Run <code>./serve-docs.sh</code> in this directory</li>
+            <li><strong>Manual Method:</strong> Run <code>python3 -m http.server 8080</code> then visit <code>http://localhost:8080/BULK_OPS_API_DOCS.html</code></li>
+            <li><strong>Alternative:</strong> View the spec directly: <code>BULK_OPS_API_SWAGGER.yaml</code></li>
+        </ol>
+        <p style="margin: 0.5rem 0; font-size: 0.9rem;">📖 <strong>Need help?</strong> See <a href="HOW_TO_VIEW_SWAGGER_UI.md" style="color: #856404; text-decoration: underline;">HOW_TO_VIEW_SWAGGER_UI.md</a> for detailed instructions</p>
+    </div>
+
+    <div class="info-banner">
+        <h3>🚀 Quick Start</h3>
+        <ul>
+            <li><strong>Base URL:</strong> <code>arn:aws:lambda:us-east-1:618048437522:function:scheduling-agent-bulk-ops-dev</code></li>
+            <li><strong>Authentication:</strong> AWS IAM / Bedrock Agent invocation</li>
+            <li><strong>Region:</strong> us-east-1</li>
+            <li><strong>Rate Limits:</strong> 50 projects (route), 100 projects (bulk assign/validate)</li>
+            <li><strong>Documentation:</strong> <a href="BULK_SCHEDULING_DESIGN.md">Design Doc</a> | <a href="BULK_SCHEDULING_SUMMARY.md">Summary</a> | <a href="BULK_OPS_DEPLOYMENT.md">Deployment Guide</a></li>
+        </ul>
+    </div>
+
+    <div id="swagger-ui"></div>
+
+    <script src="https://unpkg.com/swagger-ui-dist@5.10.3/swagger-ui-bundle.js"></script>
+    <script src="https://unpkg.com/swagger-ui-dist@5.10.3/swagger-ui-standalone-preset.js"></script>
+    <script>
+        window.onload = function() {
+            // Load the Swagger spec
+            const spec = {
+                "openapi": "3.0.3",
+                "info": {
+                    "title": "Bulk Scheduling Operations API",
+                    "description": "**Bulk Scheduling Operations API** for ProjectsForce 360 Coordinators\n\nThis API enables field coordinators to perform bulk scheduling operations including:\n- Route optimization for multiple projects\n- Bulk team assignments with conflict detection\n- Project validation (permits, measurements, access)\n- Schedule conflict detection\n\n## Features\n- Process 2-50 projects for route optimization\n- Assign up to 100 projects in bulk\n- Parallel validation checks\n- Real-time conflict detection\n- 80-99% time savings vs manual operations\n\n## Authentication\nThis API is invoked internally by AWS Bedrock Agents. External access requires AWS IAM credentials.\n\n## Rate Limits\n- Max 50 projects per route optimization request\n- Max 100 projects per bulk assignment request\n- Max 100 projects per validation request\n- Lambda timeout: 60 seconds",
+                    "version": "1.0.0",
+                    "contact": {
+                        "name": "ProjectsForce 360 API Support",
+                        "email": "support@projectsforce.com"
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "https://lambda.us-east-1.amazonaws.com",
+                        "description": "Production (AWS Lambda)"
+                    }
+                ],
+                "tags": [
+                    {"name": "Route Optimization", "description": "Optimize routes for multiple projects using TSP algorithms"},
+                    {"name": "Bulk Assignment", "description": "Assign multiple projects to teams with conflict detection"},
+                    {"name": "Validation", "description": "Validate projects for scheduling readiness"},
+                    {"name": "Conflict Detection", "description": "Detect scheduling conflicts across projects and teams"}
+                ],
+                "paths": {},
+                "components": {
+                    "securitySchemes": {
+                        "AWSSignature": {
+                            "type": "apiKey",
+                            "in": "header",
+                            "name": "Authorization",
+                            "description": "AWS Signature Version 4 authentication"
+                        }
+                    }
+                }
+            };
+
+            // Initialize Swagger UI
+            window.ui = SwaggerUIBundle({
+                url: './BULK_OPS_API_SWAGGER.yaml',
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIStandalonePreset
+                ],
+                plugins: [
+                    SwaggerUIBundle.plugins.DownloadUrl
+                ],
+                layout: "StandaloneLayout",
+                defaultModelsExpandDepth: 1,
+                defaultModelExpandDepth: 1,
+                displayRequestDuration: true,
+                filter: true,
+                tryItOutEnabled: false, // Disable Try it out since this is Lambda-based
+                persistAuthorization: true
+            });
+        };
+    </script>
+</body>
+</html>

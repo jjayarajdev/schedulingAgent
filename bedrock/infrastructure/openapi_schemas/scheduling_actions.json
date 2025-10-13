@@ -1,0 +1,401 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Scheduling Actions API",
+    "version": "1.0.0",
+    "description": "API for scheduling appointment operations including listing projects, checking availability, and managing appointments"
+  },
+  "paths": {
+    "/list_projects": {
+      "post": {
+        "summary": "List available projects for a customer",
+        "description": "Retrieves all projects available for scheduling for a specific customer and client",
+        "operationId": "list_projects",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "customer_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the customer"
+                  },
+                  "client_id": {
+                    "type": "string",
+                    "description": "Client identifier (e.g., 'projectsforce-validation')"
+                  }
+                },
+                "required": ["customer_id", "client_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of available projects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "projects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "project_id": {
+                            "type": "string"
+                          },
+                          "project_name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_available_dates": {
+      "post": {
+        "summary": "Get available dates for a project",
+        "description": "Retrieves available appointment dates for a specific project",
+        "operationId": "get_available_dates",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the project"
+                  },
+                  "customer_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the customer"
+                  }
+                },
+                "required": ["project_id", "customer_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of available dates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available_dates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "string",
+                            "format": "date",
+                            "description": "Date in YYYY-MM-DD format"
+                          },
+                          "day_of_week": {
+                            "type": "string",
+                            "description": "Day name (e.g., 'Monday')"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_time_slots": {
+      "post": {
+        "summary": "Get available time slots for a specific date",
+        "description": "Retrieves available appointment time slots for a project on a specific date",
+        "operationId": "get_time_slots",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the project"
+                  },
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Date in YYYY-MM-DD format"
+                  },
+                  "customer_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the customer"
+                  }
+                },
+                "required": ["project_id", "date", "customer_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of available time slots",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "time_slots": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "start_time": {
+                            "type": "string",
+                            "format": "time",
+                            "description": "Start time in HH:MM format"
+                          },
+                          "end_time": {
+                            "type": "string",
+                            "format": "time",
+                            "description": "End time in HH:MM format"
+                          },
+                          "slot_id": {
+                            "type": "string",
+                            "description": "Unique identifier for the time slot"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/confirm_appointment": {
+      "post": {
+        "summary": "Confirm and book an appointment",
+        "description": "Creates a confirmed appointment booking with all details",
+        "operationId": "confirm_appointment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the project"
+                  },
+                  "customer_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the customer"
+                  },
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Appointment date in YYYY-MM-DD format"
+                  },
+                  "time_slot_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the selected time slot"
+                  },
+                  "start_time": {
+                    "type": "string",
+                    "format": "time",
+                    "description": "Start time in HH:MM format"
+                  },
+                  "end_time": {
+                    "type": "string",
+                    "format": "time",
+                    "description": "End time in HH:MM format"
+                  },
+                  "notes": {
+                    "type": "string",
+                    "description": "Optional notes for the appointment"
+                  }
+                },
+                "required": ["project_id", "customer_id", "date", "time_slot_id", "start_time", "end_time"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Appointment confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "appointment_id": {
+                      "type": "string",
+                      "description": "Unique identifier for the confirmed appointment"
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "Appointment status (e.g., 'confirmed')"
+                    },
+                    "confirmation_message": {
+                      "type": "string",
+                      "description": "Human-readable confirmation message"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reschedule_appointment": {
+      "post": {
+        "summary": "Reschedule an existing appointment",
+        "description": "Changes the date and/or time of an existing appointment",
+        "operationId": "reschedule_appointment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "appointment_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the appointment to reschedule"
+                  },
+                  "customer_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the customer"
+                  },
+                  "new_date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "New appointment date in YYYY-MM-DD format"
+                  },
+                  "new_time_slot_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the new time slot"
+                  },
+                  "new_start_time": {
+                    "type": "string",
+                    "format": "time",
+                    "description": "New start time in HH:MM format"
+                  },
+                  "new_end_time": {
+                    "type": "string",
+                    "format": "time",
+                    "description": "New end time in HH:MM format"
+                  }
+                },
+                "required": ["appointment_id", "customer_id", "new_date", "new_time_slot_id", "new_start_time", "new_end_time"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Appointment rescheduled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "appointment_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "New status (e.g., 'rescheduled')"
+                    },
+                    "confirmation_message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cancel_appointment": {
+      "post": {
+        "summary": "Cancel an existing appointment",
+        "description": "Cancels an appointment and frees up the time slot",
+        "operationId": "cancel_appointment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "appointment_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the appointment to cancel"
+                  },
+                  "customer_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the customer"
+                  },
+                  "cancellation_reason": {
+                    "type": "string",
+                    "description": "Optional reason for cancellation"
+                  }
+                },
+                "required": ["appointment_id", "customer_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Appointment cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "appointment_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "New status (e.g., 'cancelled')"
+                    },
+                    "confirmation_message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

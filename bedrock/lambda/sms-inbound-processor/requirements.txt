@@ -1,0 +1,3 @@
+# Lambda requirements for SMS Inbound Processor
+# No external dependencies needed - using only boto3 which is included in Lambda runtime
+boto3>=1.34.0
