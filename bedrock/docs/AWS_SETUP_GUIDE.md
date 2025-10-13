@@ -136,9 +136,9 @@ aws service-quotas list-service-quotas \
 
 **AWS Bedrock Model Access:**
 ```bash
-# Request access to Claude 3.5 Sonnet
+# Request access to Claude Sonnet 4.5
 # Go to: AWS Console → Bedrock → Model access
-# Request access to: anthropic.claude-3-5-sonnet-20240620-v1:0
+# Request access to: us.anthropic.claude-sonnet-4-5-20250929-v1:0
 
 # This may take 24-48 hours for approval
 ```
@@ -239,10 +239,10 @@ aws sts get-caller-identity
    - Click "Model access" in left sidebar
    - Click "Manage model access"
 
-3. **Request Claude 3.5 Sonnet**:
+3. **Request Claude Sonnet 4.5**:
    - Find "Anthropic" section
-   - Check box for: `Claude 3.5 Sonnet`
-   - Model ID: `anthropic.claude-3-5-sonnet-20240620-v1:0`
+   - Check box for: `Claude Sonnet 4.5` (US Anthropic)
+   - Model ID: `us.anthropic.claude-sonnet-4-5-20250929-v1:0`
    - Click "Request model access"
 
 4. **Fill out Use Case Form**:
@@ -259,7 +259,7 @@ aws sts get-caller-identity
 ```bash
 aws bedrock list-foundation-models \
   --region us-east-1 \
-  --query 'modelSummaries[?contains(modelId, `claude-3-5-sonnet`)].modelId'
+  --query 'modelSummaries[?contains(modelId, `claude-sonnet-4-5`)].modelId'
 ```
 
 ---
@@ -532,7 +532,7 @@ After completing setup, verify:
 aws sts get-caller-identity
 
 # 2. Bedrock access granted
-aws bedrock list-foundation-models --region us-east-1 | grep claude-3-5
+aws bedrock list-foundation-models --region us-east-1 | grep claude-sonnet-4-5
 
 # 3. S3 bucket created
 aws s3 ls | grep terraform-state

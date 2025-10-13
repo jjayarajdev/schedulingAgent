@@ -109,7 +109,7 @@ open https://console.aws.amazon.com/bedrock/
 1. Click **"Model access"** in left sidebar
 2. Click **"Manage model access"** (orange button top right)
 3. Scroll to **"Anthropic"** section
-4. Check the box for **"Claude 3.5 Sonnet"**
+4. Check the box for **"Claude Sonnet 4.5"** (US Anthropic)
 5. Click **"Request model access"** (orange button bottom right)
 
 ### 2.3 Fill Use Case Form
@@ -131,13 +131,13 @@ open https://console.aws.amazon.com/bedrock/
 ```bash
 aws bedrock list-foundation-models \
   --region us-east-1 \
-  --query 'modelSummaries[?contains(modelId, `claude-3-5-sonnet`)].modelId' \
+  --query 'modelSummaries[?contains(modelId, `claude-sonnet-4-5`)].modelId' \
   --output text
 ```
 
 **Expected Output:**
 ```
-anthropic.claude-3-5-sonnet-20240620-v1:0
+us.anthropic.claude-sonnet-4-5-20250929-v1:0
 ```
 
 ✅ **Success:** Model ID is displayed
@@ -747,7 +747,7 @@ aws cloudwatch describe-alarms --alarm-name-prefix "SchedulingAgent" --query 'Me
 echo ""
 
 echo "7. Bedrock Model Access (requires approval):"
-aws bedrock list-foundation-models --region us-east-1 --query 'modelSummaries[?contains(modelId, `claude-3-5-sonnet`)].modelId' --output text 2>/dev/null || echo "NOT YET APPROVED (check after 24-48 hours)"
+aws bedrock list-foundation-models --region us-east-1 --query 'modelSummaries[?contains(modelId, `claude-sonnet-4-5`)].modelId' --output text 2>/dev/null || echo "NOT YET APPROVED (check after 24-48 hours)"
 echo ""
 
 echo "=== Verification Complete ==="
@@ -857,7 +857,7 @@ redis_node_type = "cache.t4g.micro"
 redis_num_cache_nodes = 1
 
 # Bedrock Configuration
-bedrock_model_id = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+bedrock_model_id = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 bedrock_agent_name = "scheduling-agent"
 
 # Tags
@@ -898,13 +898,13 @@ Look for email from AWS with subject: **"Amazon Bedrock model access granted"**
 ```bash
 aws bedrock list-foundation-models \
   --region us-east-1 \
-  --query 'modelSummaries[?contains(modelId, `claude-3-5-sonnet`)].modelId' \
+  --query 'modelSummaries[?contains(modelId, `claude-sonnet-4-5`)].modelId' \
   --output text
 ```
 
 **Expected Output:**
 ```
-anthropic.claude-3-5-sonnet-20240620-v1:0
+us.anthropic.claude-sonnet-4-5-20250929-v1:0
 ```
 
 ✅ **Success:** Model ID is shown - YOU CAN NOW PROCEED WITH TERRAFORM
