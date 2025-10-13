@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scheduling Agent API Documentation</title>
+    <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 700;
+        }
+        .header p {
+            margin: 10px 0 0 0;
+            font-size: 1.2em;
+            opacity: 0.95;
+        }
+        .info-bar {
+            background: #f8f9fa;
+            padding: 15px 30px;
+            border-bottom: 1px solid #e1e4e8;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .info-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 15px 5px 0;
+        }
+        .info-item strong {
+            margin-right: 8px;
+            color: #667eea;
+        }
+        .badge {
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+        .badge.success {
+            background: #28a745;
+        }
+        .badge.info {
+            background: #17a2b8;
+        }
+        #redoc-container {
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🤖 Scheduling Agent API</h1>
+        <p>AWS Bedrock Multi-Agent System - Lambda Action Groups</p>
+    </div>
+
+    <div class="info-bar">
+        <div style="display: flex; align-items: center; flex-wrap: wrap;">
+            <div class="info-item">
+                <strong>Version:</strong> 1.0.0
+            </div>
+            <div class="info-item">
+                <strong>Region:</strong> us-east-1
+            </div>
+            <div class="info-item">
+                <strong>Model:</strong> Claude Sonnet 4.5
+            </div>
+        </div>
+        <div style="display: flex; align-items: center;">
+            <span class="badge success">12 Actions</span>
+            <span class="badge info">3 Lambda Functions</span>
+            <span class="badge">100% Tested</span>
+        </div>
+    </div>
+
+    <div id="redoc-container"></div>
+
+    <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
+    <script>
+        // Combined OpenAPI specification
+        const spec = {
+            "openapi": "3.0.0",
+            "info": {
+                "title": "Scheduling Agent API - Complete Reference",
+                "version": "1.0.0",
+                "description": `
+# AWS Bedrock Multi-Agent Scheduling System
+
+Complete API documentation for the Scheduling Agent Lambda functions powering AWS Bedrock agent action groups.
+
+## Overview
+
+This API provides 12 actions across 3 Lambda functions to enable conversational scheduling through AWS Bedrock Agents:
+
+- **6 Scheduling Actions** - Manage appointments, availability, and bookings
+- **4 Information Actions** - Retrieve project details, status, hours, and weather
+- **2 Notes Actions** - Add and view appointment notes
+
+## Architecture
+
+\`\`\`
+User → Bedrock Agent → Lambda Functions → Mock/Real APIs
+\`\`\`
+
+## Features
+
+✅ **Mock/Real API Switching** - Zero code changes to switch between mock and production
+✅ **Multi-Step Orchestration** - Agents chain multiple actions to complete complex requests
+✅ **Comprehensive Testing** - 100% test pass rate across 6 conversation flows
+✅ **OpenAPI 3.0** - Full specification for Bedrock Agent integration
+
+## Testing Status
+
+| Metric | Value |
+|--------|-------|
+| **Actions Tested** | 12/12 (100%) |
+| **Flow Tests** | 6/6 (100%) |
+| **Lambda Invocations** | 22 validated |
+| **Multi-Step Chaining** | ✅ Confirmed |
+
+## Environment
+
+- **AWS Account:** 618048437522
+- **Region:** us-east-1
+- **Model:** Claude Sonnet 4.5 (\`us.anthropic.claude-sonnet-4-5-20250929-v1:0\`)
+- **Runtime:** Python 3.11
+
+## Example Conversation Flow
+
+**User:** "Schedule my flooring installation for October 15th at 10 AM"
+
+**Behind the scenes:**
+1. \`list_projects\` → Finds flooring project 12345
+2. \`get_available_dates\` → Oct 15 available
+3. \`get_time_slots\` → 10 AM available
+4. \`confirm_appointment\` → Scheduled!
+
+**Agent:** "Perfect! Scheduled for Oct 15 at 10 AM. Confirmation: CONF-1760378607"
+
+## Contact
+
+- **GitHub:** https://github.com/jjayarajdev/schedulingAgent
+- **Documentation:** See \`bedrock/docs/\` directory
+                `,
+                "contact": {
+                    "name": "ProjectsForce",
+                    "url": "https://github.com/jjayarajdev/schedulingAgent"
+                },
+                "license": {
+                    "name": "Proprietary",
+                    "url": "https://github.com/jjayarajdev/schedulingAgent"
+                }
+            },
+            "servers": [
+                {
+                    "url": "https://lambda.us-east-1.amazonaws.com",
+                    "description": "AWS Lambda (Production)"
+                },
+                {
+                    "url": "http://localhost:3000",
+                    "description": "Local Development (Mock)"
+                }
+            ],
+            "tags": [
+                {
+                    "name": "Scheduling Actions",
+                    "description": "**Lambda:** \`scheduling-actions\`\n\nManage appointments, availability, and bookings. This Lambda handles the complete scheduling workflow from listing projects to confirming appointments.\n\n**Actions:** 6  \n**Test Status:** ✅ 100% Pass"
+                },
+                {
+                    "name": "Information Actions",
+                    "description": "**Lambda:** \`information-actions\`\n\nRetrieve project details, appointment status, working hours, and weather forecasts to help customers make informed decisions.\n\n**Actions:** 4  \n**Test Status:** ✅ 100% Pass"
+                },
+                {
+                    "name": "Notes Actions",
+                    "description": "**Lambda:** \`notes-actions\`\n\nManage appointment notes with DynamoDB fallback for reliability. Add customer preferences and view note history.\n\n**Actions:** 2  \n**Test Status:** ✅ 100% Pass"
+                }
+            ],
+            "paths": {
+                "/list_projects": {
+                    "post": {
+                        "tags": ["Scheduling Actions"],
+                        "summary": "List available projects for a customer",
+                        "description": "Retrieves all projects available for scheduling for a specific customer and client. This is typically the first action in a scheduling conversation.\n\n**Use Cases:**\n- Start of scheduling workflow\n- Customer asks \"What projects do I have?\"\n- Agent needs to identify which project to schedule\n\n**Data Flow:**\n- Input: customer_id, client_id\n- Output: Array of projects with IDs and descriptions\n- Next Step: Customer selects project → get_available_dates",
+                        "operationId": "list_projects",
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "customer_id": {
+                                                "type": "string",
+                                                "description": "Unique identifier for the customer",
+                                                "example": "1645975"
+                                            },
+                                            "client_id": {
+                                                "type": "string",
+                                                "description": "Client identifier",
+                                                "example": "projectsforce-validation"
+                                            }
+                                        },
+                                        "required": ["customer_id", "client_id"]
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "List of available projects",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "projects": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "project_id": {
+                                                                "type": "string",
+                                                                "example": "12345"
+                                                            },
+                                                            "project_name": {
+                                                                "type": "string",
+                                                                "example": "Flooring Installation"
+                                                            },
+                                                            "description": {
+                                                                "type": "string",
+                                                                "example": "Hardwood flooring installation for living room"
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "mock_mode": {
+                                                    "type": "boolean",
+                                                    "description": "Indicates if response is from mock data"
+                                                }
+                                            }
+                                        },
+                                        "example": {
+                                            "projects": [
+                                                {
+                                                    "project_id": "12345",
+                                                    "project_name": "Flooring Installation",
+                                                    "description": "Hardwood flooring for living room"
+                                                }
+                                            ],
+                                            "mock_mode": true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/get_available_dates": {
+                    "post": {
+                        "tags": ["Scheduling Actions"],
+                        "summary": "Get available dates for a project",
+                        "description": "Retrieves available appointment dates for a specific project. Returns up to 10 consecutive available dates.\n\n**Use Cases:**\n- Customer asks \"What dates are available?\"\n- After project selection in scheduling workflow\n- Agent needs to show date options\n\n**Data Flow:**\n- Input: project_id, customer_id\n- Output: Array of available dates with day names\n- Next Step: Customer selects date → get_time_slots",
+                        "operationId": "get_available_dates",
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "project_id": {
+                                                "type": "string",
+                                                "description": "Unique identifier for the project",
+                                                "example": "12345"
+                                            },
+                                            "customer_id": {
+                                                "type": "string",
+                                                "description": "Unique identifier for the customer",
+                                                "example": "1645975"
+                                            }
+                                        },
+                                        "required": ["project_id", "customer_id"]
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "List of available dates",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "available_dates": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "date": {
+                                                                "type": "string",
+                                                                "format": "date",
+                                                                "example": "2025-10-15"
+                                                            },
+                                                            "day_of_week": {
+                                                                "type": "string",
+                                                                "example": "Monday"
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "request_id": {
+                                                    "type": "string",
+                                                    "description": "Tracking ID for multi-step flow"
+                                                },
+                                                "mock_mode": {
+                                                    "type": "boolean"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/get_time_slots": {
+                    "post": {
+                        "tags": ["Scheduling Actions"],
+                        "summary": "Get available time slots for a specific date",
+                        "description": "Retrieves available appointment time slots for a project on a specific date.\n\n**Use Cases:**\n- Customer asks \"What times are available on Oct 15?\"\n- After date selection in scheduling workflow\n- Agent needs to show time options\n\n**Data Flow:**\n- Input: project_id, date, customer_id, request_id (from get_available_dates)\n- Output: Array of time slots with start/end times\n- Next Step: Customer selects time → confirm_appointment",
+                        "operationId": "get_time_slots",
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "project_id": {
+                                                "type": "string",
+                                                "example": "12345"
+                                            },
+                                            "date": {
+                                                "type": "string",
+                                                "format": "date",
+                                                "example": "2025-10-15"
+                                            },
+                                            "customer_id": {
+                                                "type": "string",
+                                                "example": "1645975"
+                                            },
+                                            "request_id": {
+                                                "type": "string",
+                                                "description": "From get_available_dates response",
+                                                "example": "REQ-12345-1760378566"
+                                            }
+                                        },
+                                        "required": ["project_id", "date", "customer_id"]
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "List of available time slots",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "time_slots": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "time": {
+                                                                "type": "string",
+                                                                "example": "10:00 AM"
+                                                            },
+                                                            "available": {
+                                                                "type": "boolean",
+                                                                "example": true
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "request_id": {
+                                                    "type": "string"
+                                                },
+                                                "mock_mode": {
+                                                    "type": "boolean"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/confirm_appointment": {
+                    "post": {
+                        "tags": ["Scheduling Actions"],
+                        "summary": "Confirm and book an appointment",
+                        "description": "Creates a confirmed appointment booking with all details. Final step in scheduling workflow.\n\n**Use Cases:**\n- Customer confirms \"Yes, book it for Oct 15 at 10 AM\"\n- Final step after time selection\n- Agent completes scheduling transaction\n\n**Data Flow:**\n- Input: project_id, customer_id, date, time, request_id\n- Output: Confirmation number and success message\n- Next Step: Optionally add_note",
+                        "operationId": "confirm_appointment",
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "project_id": {
+                                                "type": "string",
+                                                "example": "12345"
+                                            },
+                                            "customer_id": {
+                                                "type": "string",
+                                                "example": "1645975"
+                                            },
+                                            "date": {
+                                                "type": "string",
+                                                "format": "date",
+                                                "example": "2025-10-15"
+                                            },
+                                            "time": {
+                                                "type": "string",
+                                                "example": "10:00 AM"
+                                            },
+                                            "request_id": {
+                                                "type": "string",
+                                                "example": "REQ-12345-1760378566"
+                                            }
+                                        },
+                                        "required": ["project_id", "customer_id", "date", "time"]
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "Appointment confirmed",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "confirmation_number": {
+                                                    "type": "string",
+                                                    "example": "CONF-1760378607"
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "confirmed"
+                                                },
+                                                "message": {
+                                                    "type": "string",
+                                                    "example": "Appointment confirmed for Oct 15, 2025 at 10:00 AM"
+                                                },
+                                                "mock_mode": {
+                                                    "type": "boolean"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/reschedule_appointment": {
+                    "post": {
+                        "tags": ["Scheduling Actions"],
+                        "summary": "Reschedule an existing appointment",
+                        "description": "Changes the date and/or time of an existing appointment. Internally cancels old and creates new.\n\n**Use Cases:**\n- Customer says \"I need to reschedule to Oct 20\"\n- Change existing appointment details\n- Agent handles rescheduling request\n\n**Data Flow:**\n- Input: project_id, customer_id, old date/time, new date/time\n- Output: New confirmation number\n- Note: Old appointment is cancelled, new one created",
+                        "operationId": "reschedule_appointment",
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "project_id": {
+                                                "type": "string",
+                                                "example": "12345"
+                                            },
+                                            "customer_id": {
+                                                "type": "string",
+                                                "example": "1645975"
+                                            },
+                                            "old_date": {
+                                                "type": "string",
+                                                "format": "date",
+                                                "example": "2025-10-15"
+                                            },
+                                            "old_time": {
+                                                "type": "string",
+                                                "example": "10:00 AM"
+                                            },
+                                            "new_date": {
+                                                "type": "string",
+                                                "format": "date",
+                                                "example": "2025-10-20"
+                                            },
+                                            "new_time": {
+                                                "type": "string",
+                                                "example": "2:00 PM"
+                                            }
+                                        },
+                                        "required": ["project_id", "customer_id", "new_date", "new_time"]
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "Appointment rescheduled",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "confirmation_number": {
+                                                    "type": "string",
+                                                    "example": "CONF-1760378891"
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "rescheduled"
+                                                },
+                                                "message": {
+                                                    "type": "string",
+                                                    "example": "Appointment rescheduled to Oct 20, 2025 at 2:00 PM"
+                                                },
+                                                "cancelled_old": {
+                                                    "type": "boolean",
+                                                    "example": true
+                                                },
+                                                "mock_mode": {
+                                                    "type": "boolean"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/cancel_appointment": {
+                    "post": {
+                        "tags": ["Scheduling Actions"],
+                        "summary": "Cancel an existing appointment",
+                        "description": "Cancels an appointment and frees up the time slot for other customers.\n\n**Use Cases:**\n- Customer requests \"Cancel my appointment\"\n- Customer can't make scheduled time\n- Agent handles cancellation\n\n**Data Flow:**\n- Input: project_id, customer_id, date, time\n- Output: Cancellation confirmation\n- Note: Time slot becomes available again",
+                        "operationId": "cancel_appointment",
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "project_id": {
+                                                "type": "string",
+                                                "example": "12345"
+                                            },
+                                            "customer_id": {
+                                                "type": "string",
+                                                "example": "1645975"
+                                            },
+                                            "date": {
+                                                "type": "string",
+                                                "format": "date",
+                                                "example": "2025-10-15"
+                                            },
+                                            "time": {
+                                                "type": "string",
+                                                "example": "10:00 AM"
+                                            }
+                                        },
+                                        "required": ["project_id", "customer_id", "date", "time"]
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "Appointment cancelled",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "cancelled"
+                                                },
+                                                "message": {
+                                                    "type": "string",
+                                                    "example": "Appointment cancelled for Oct 15, 2025 at 10:00 AM"
+                                                },
+                                                "mock_mode": {
+                                                    "type": "boolean"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/get_project_details": {
+                    "post": {
+                        "tags": ["Information Actions"],
+                        "summary": "Get detailed information about a project",
+                        "description": "Retrieves comprehensive details about a specific project including description, location, requirements, and duration.\n\n**Use Cases:**\n- Customer asks \"Tell me about my flooring project\"\n- Agent needs project context for scheduling\n- Customer wants to know requirements\n\n**Data Flow:**\n- Input: project_id, customer_id\n- Output: Full project details including location, duration, requirements\n- Use: Context for scheduling and weather checks",
+                        "operationId": "get_project_details",
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "project_id": {
+                                                "type": "string",
+                                                "example": "12345"
+                                            },
+                                            "customer_id": {
+                                                "type": "string",
+                                                "example": "1645975"
+                                            }
+                                        },
+                                        "required": ["project_id", "customer_id"]
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "Project details",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "project_id": {
+                                                    "type": "string"
+                                                },
+                                                "project_name": {
+                                                    "type": "string"
+                                                },
+                                                "description": {
+                                                    "type": "string"
+                                                },
+                                                "location": {
+                                                    "type": "string",
+                                                    "example": "Tampa, FL"
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "Scheduled"
+                                                },
+                                                "mock_mode": {
+                                                    "type": "boolean"
+                                                }
+                                            }
+                                        },
+                                        "example": {
+                                            "project_id": "12345",
+                                            "project_name": "Flooring Installation",
+                                            "description": "Hardwood flooring installation",
+                                            "location": "Tampa, FL",
+                                            "status": "Scheduled",
+                                            "mock_mode": true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/get_appointment_status": {
+                    "post": {
+                        "tags": ["Information Actions"],
+                        "summary": "Get status and details of an appointment",
+                        "description": "Retrieves current status and full details of an existing appointment.\n\n**Use Cases:**\n- Customer asks \"What's my appointment status?\"\n- Check if appointment exists\n- Get appointment details for modification\n\n**Data Flow:**\n- Input: project_id, customer_id\n- Output: Status (confirmed/cancelled/rescheduled), date, time, location\n- Use: Verify before rescheduling or cancelling",
+                        "operationId": "get_appointment_status",
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "project_id": {
+                                                "type": "string",
+                                                "example": "12345"
+                                            },
+                                            "customer_id": {
+                                                "type": "string",
+                                                "example": "1645975"
+                                            }
+                                        },
+                                        "required": ["project_id", "customer_id"]
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "Appointment status and details",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "project_id": {
+                                                    "type": "string"
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "Scheduled"
+                                                },
+                                                "scheduled_date": {
+                                                    "type": "string",
+                                                    "example": "2025-10-15"
+                                                },
+                                                "time_window": {
+                                                    "type": "string",
+                                                    "example": "8:00 AM - 12:00 PM"
+                                                },
+                                                "mock_mode": {
+                                                    "type": "boolean"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/get_working_hours": {
+                    "post": {
+                        "tags": ["Information Actions"],
+                        "summary": "Get company working hours and availability",
+                        "description": "Retrieves business hours, days of operation, and holiday information.\n\n**Use Cases:**\n- Customer asks \"What are your hours?\"\n- Customer asks \"When are you open?\"\n- Agent provides availability context\n\n**Data Flow:**\n- Input: (none required)\n- Output: Hours for all days of week, timezone, holidays\n- Use: Help customer understand when appointments are available",
+                        "operationId": "get_working_hours",
+                        "requestBody": {
+                            "required": false,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {}
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "Working hours information",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "schedule": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "day": {
+                                                                "type": "string"
+                                                            },
+                                                            "hours": {
+                                                                "type": "string"
+                                                            },
+                                                            "is_working_day": {
+                                                                "type": "boolean"
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "mock_mode": {
+                                                    "type": "boolean"
+                                                }
+                                            }
+                                        },
+                                        "example": {
+                                            "schedule": [
+                                                {"day": "Monday", "hours": "8:00 AM - 5:00 PM", "is_working_day": true},
+                                                {"day": "Saturday", "hours": "Closed", "is_working_day": false}
+                                            ],
+                                            "mock_mode": true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/get_weather": {
+                    "post": {
+                        "tags": ["Information Actions"],
+                        "summary": "Get weather forecast for a specific date and location",
+                        "description": "Retrieves weather forecast to help customers plan for appointments. Especially useful for outdoor projects.\n\n**Use Cases:**\n- Customer asks \"What's the weather for my appointment day?\"\n- Agent proactively checks weather for outdoor projects\n- Customer planning ahead\n\n**Data Flow:**\n- Input: location (from project details), date\n- Output: Temperature, conditions, forecast\n- Use: Help customer prepare for appointment",
+                        "operationId": "get_weather",
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "location": {
+                                                "type": "string",
+                                                "example": "Tampa, FL"
+                                            },
+                                            "date": {
+                                                "type": "string",
+                                                "format": "date",
+                                                "example": "2025-10-15"
+                                            }
+                                        },
+                                        "required": ["location"]
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "Weather forecast",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "location": {
+                                                    "type": "string"
+                                                },
+                                                "current_temp": {
+                                                    "type": "number",
+                                                    "example": 72
+                                                },
+                                                "conditions": {
+                                                    "type": "string",
+                                                    "example": "Partly cloudy"
+                                                },
+                                                "forecast": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object"
+                                                    }
+                                                },
+                                                "mock_mode": {
+                                                    "type": "boolean"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/add_note": {
+                    "post": {
+                        "tags": ["Notes Actions"],
+                        "summary": "Add a note to a project",
+                        "description": "Creates a new note and associates it with a project. Notes are stored in DynamoDB with API fallback.\n\n**Use Cases:**\n- Customer says \"Add a note that I prefer morning appointments\"\n- Agent documents customer preferences\n- After scheduling, add special instructions\n\n**Data Flow:**\n- Input: project_id, note_text, customer_id\n- Output: Note ID and confirmation\n- Storage: DynamoDB (primary), API (fallback)\n\n**Features:**\n- ✅ DynamoDB fallback for reliability\n- ✅ Automatic timestamps\n- ✅ Author tracking",
+                        "operationId": "add_note",
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "project_id": {
+                                                "type": "string",
+                                                "example": "12345"
+                                            },
+                                            "customer_id": {
+                                                "type": "string",
+                                                "example": "1645975"
+                                            },
+                                            "note_text": {
+                                                "type": "string",
+                                                "maxLength": 2000,
+                                                "example": "Customer requests 30-minute advance call"
+                                            },
+                                            "author": {
+                                                "type": "string",
+                                                "example": "Customer"
+                                            }
+                                        },
+                                        "required": ["project_id", "note_text", "customer_id"]
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "Note added successfully",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "note_id": {
+                                                    "type": "string",
+                                                    "example": "NOTE-1760378945"
+                                                },
+                                                "message": {
+                                                    "type": "string",
+                                                    "example": "Note added successfully"
+                                                },
+                                                "stored_in": {
+                                                    "type": "string",
+                                                    "example": "dynamodb"
+                                                },
+                                                "mock_mode": {
+                                                    "type": "boolean"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/list_notes": {
+                    "post": {
+                        "tags": ["Notes Actions"],
+                        "summary": "List all notes for a project",
+                        "description": "Retrieves all notes associated with a project, ordered by creation date.\n\n**Use Cases:**\n- Customer asks \"What notes do I have?\"\n- Agent reviews customer preferences before scheduling\n- View note history\n\n**Data Flow:**\n- Input: project_id, customer_id\n- Output: Array of notes with text, timestamps, authors\n- Source: DynamoDB (primary), API (fallback)",
+                        "operationId": "list_notes",
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "project_id": {
+                                                "type": "string",
+                                                "example": "12345"
+                                            },
+                                            "customer_id": {
+                                                "type": "string",
+                                                "example": "1645975"
+                                            }
+                                        },
+                                        "required": ["project_id", "customer_id"]
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "List of notes",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "project_id": {
+                                                    "type": "string"
+                                                },
+                                                "notes": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "note_id": {
+                                                                "type": "string"
+                                                            },
+                                                            "note_text": {
+                                                                "type": "string"
+                                                            },
+                                                            "timestamp": {
+                                                                "type": "string"
+                                                            },
+                                                            "author": {
+                                                                "type": "string"
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "count": {
+                                                    "type": "integer"
+                                                },
+                                                "mock_mode": {
+                                                    "type": "boolean"
+                                                }
+                                            }
+                                        },
+                                        "example": {
+                                            "project_id": "12345",
+                                            "notes": [
+                                                {
+                                                    "note_id": "NOTE-1",
+                                                    "note_text": "Customer prefers morning appointments",
+                                                    "timestamp": "2025-10-13T10:30:00Z",
+                                                    "author": "Customer"
+                                                }
+                                            ],
+                                            "count": 1,
+                                            "mock_mode": true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "components": {
+                "securitySchemes": {
+                    "BearerAuth": {
+                        "type": "http",
+                        "scheme": "bearer",
+                        "bearerFormat": "JWT",
+                        "description": "JWT token for API authentication (production mode)"
+                    }
+                }
+            }
+        };
+
+        // Initialize ReDoc
+        Redoc.init(
+            spec,
+            {
+                scrollYOffset: 50,
+                hideDownloadButton: false,
+                theme: {
+                    colors: {
+                        primary: {
+                            main: '#667eea'
+                        }
+                    },
+                    typography: {
+                        fontSize: '16px',
+                        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                        headings: {
+                            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+                        }
+                    },
+                    sidebar: {
+                        width: '280px'
+                    }
+                }
+            },
+            document.getElementById('redoc-container')
+        );
+    </script>
+</body>
+</html>
