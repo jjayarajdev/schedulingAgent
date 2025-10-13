@@ -80,7 +80,7 @@ variable "bedrock_agent_name" {
 variable "bedrock_model_id" {
   description = "Bedrock model ID"
   type        = string
-  default     = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+  default     = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 }
 
 # Tags
