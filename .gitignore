@@ -68,3 +68,6 @@ bedrock/infrastructure/terraform/.terraform.lock.hcl
 # Test outputs
 bedrock/tests/TEST_EXECUTION_REPORT.md
 bedrock/tests/response.txt
+
+# Context document (for AI context savings, not for version control)
+CONTEXT.md

@@ -65,6 +65,11 @@ dev = [
     # Test Data
     "faker>=33.1.0",
 
+    # Load Testing
+    "locust>=2.32.0",
+    "pyzmq>=26.2.0",
+    "gevent>=24.11.1",
+
     # Code Quality
     "ruff>=0.8.0",
     "mypy>=1.13.0",
