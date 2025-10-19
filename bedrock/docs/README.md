@@ -1,468 +1,369 @@
-# AWS Bedrock Multi-Agent Scheduling System
+# Bedrock Multi-Agent System - Documentation
 
-**Status**: ✅ Phase 1 Complete - Agents Deployed
-**Model**: Claude Sonnet 4.5 (us.anthropic.claude-sonnet-4-5-20250929-v1:0)
-**Region**: us-east-1
-**Deployment Date**: October 12, 2025
+**Last Updated:** 2025-10-19
+**Status:** Phase 1 Complete with B2B Multi-Client Support
 
 ---
 
-## 🚀 **NEW DEVELOPER? START HERE**
+## 📖 Documentation Structure
 
-**→ Read [DEVELOPER_HANDOVER.md](./DEVELOPER_HANDOVER.md) first!**
-
-This comprehensive handover document contains:
-- ✅ Complete AWS account information & credentials
-- ✅ All deployed resources with IDs and ARNs
-- ✅ Phase status (Phase 1 complete, Phases 2-3 research done)
-- ✅ Quick start guide & testing procedures
-- ✅ Known issues & manual configuration steps
-- ✅ Cost information & documentation index
-
-**It's your single source of truth for taking over this project.**
+This folder contains all current and active documentation for the AWS Bedrock Multi-Agent Scheduling System with B2C/B2B support. Historical and archived documents are in the `archive/` folder.
 
 ---
 
-## 🎯 Overview
+## 🚀 Quick Start
 
-This project implements an **AI-powered scheduling agent system** using **AWS Bedrock's Multi-Agent Collaboration** capability with a supervisor-collaborator architecture. The system uses 5 specialized agents powered by Claude Sonnet 4.5 to handle customer scheduling requests.
+### New to the Project? Start Here:
 
-### Architecture Decision
+**1. [`AWS_BEDROCK_COMPLETE_SETUP_GUIDE.md`](./AWS_BEDROCK_COMPLETE_SETUP_GUIDE.md)** ⭐
+   - Complete AWS setup from scratch
+   - 5 Bedrock agents with multi-agent collaboration
+   - 3 Lambda functions (12 actions total)
+   - B2C and B2B business model support
+   - **START HERE if setting up from scratch**
 
-After comprehensive research comparing AWS Bedrock Agents vs LangGraph ([see ARCHITECTURE_RESEARCH.md](./ARCHITECTURE_RESEARCH.md)), we chose **AWS Bedrock Agents native multi-agent collaboration** for:
+**2. [`MOCK_DATA_REFERENCE.md`](./MOCK_DATA_REFERENCE.md)** 🧪
+   - **Valid mock project IDs for testing**
+   - Test queries for each agent
+   - Complete workflow examples
+   - Common testing mistakes to avoid
+   - **USE THIS when testing agents**
 
-- **65-72% cost savings** vs self-managed LangGraph
-- **2 days vs 2 weeks** development time
-- **55% less code** to maintain (1,350 lines vs 3,000+)
-- **Built-in** session management, memory, and observability
-- **FREE** AgentCore until September 16, 2025
+**3. [`B2B_MULTI_CLIENT_INTEGRATION_GUIDE.md`](./B2B_MULTI_CLIENT_INTEGRATION_GUIDE.md)** 🏢
+   - Portal integration for B2B customers
+   - Session context and client selection
+   - API request formats
+   - Testing scenarios
+   - **READ THIS for portal integration**
+
+**4. [`TESTING_COMPLETE_WORKFLOWS.md`](./TESTING_COMPLETE_WORKFLOWS.md)** 🧪
+   - **AWS CLI testing commands**
+   - **Bedrock Console testing workflows**
+   - Complete multi-agent workflows
+   - Troubleshooting guide
+   - **USE THIS to test your setup**
+
+**5. [`HALLUCINATION_FIX_GUIDE.md`](./HALLUCINATION_FIX_GUIDE.md)** 🔧 **CRITICAL**
+   - **Fix agents hallucinating fake data**
+   - Root cause analysis (why agents don't use Lambda)
+   - Step-by-step solution
+   - Update agent instructions to reference action groups
+   - **READ THIS if agents return fake project data**
 
 ---
 
-## 🏗️ Architecture
+## 📚 Core Documentation (Current)
+
+### Agent Setup Guides (B2B-Ready)
+
+| Document | Agent | Purpose | Status |
+|----------|-------|---------|--------|
+| **[SUPERVISOR_AGENT_SETUP.md](./SUPERVISOR_AGENT_SETUP.md)** | Supervisor (5VTIWONUMO) | Orchestration & routing | ✅ B2B Ready |
+| **[SCHEDULING_AGENT_SETUP.md](./SCHEDULING_AGENT_SETUP.md)** | Scheduling (IX24FSMTQH) | Appointments & projects | ✅ B2B Ready |
+| **[INFORMATION_AGENT_SETUP.md](./INFORMATION_AGENT_SETUP.md)** | Information (C9ANXRIO8Y) | Project details & status | ✅ B2B Ready |
+| **[NOTES_AGENT_SETUP.md](./NOTES_AGENT_SETUP.md)** | Notes (G5BVBYEPUM) | Project notes | ✅ B2B Ready |
+| **[CHITCHAT_AGENT_SETUP.md](./CHITCHAT_AGENT_SETUP.md)** | Chitchat (2SUXQSWZOV) | Casual conversation | ✅ Current |
+| **[AGENT_INSTRUCTIONS_UPDATE_CHECKLIST.md](./AGENT_INSTRUCTIONS_UPDATE_CHECKLIST.md)** | All | Update checklist | ✅ Current |
+
+### Setup & Deployment Guides
+
+| Document | Purpose | Status |
+|----------|---------|--------|
+| **[AWS_BEDROCK_COMPLETE_SETUP_GUIDE.md](./AWS_BEDROCK_COMPLETE_SETUP_GUIDE.md)** | Complete AWS setup (main guide) | ✅ Current |
+| **[LAMBDA_DEPLOYMENT_GUIDE.md](./LAMBDA_DEPLOYMENT_GUIDE.md)** | Lambda deployment (automated) | ✅ Current |
+| **[ACTION_GROUPS_SETUP_GUIDE.md](./ACTION_GROUPS_SETUP_GUIDE.md)** | Action groups setup | ✅ Current |
+| **[WEB_CHAT_DEPLOYMENT_GUIDE.md](./WEB_CHAT_DEPLOYMENT_GUIDE.md)** | Web chat deployment | ✅ Current |
+| **[MONITORING_SETUP_GUIDE.md](./MONITORING_SETUP_GUIDE.md)** | CloudWatch monitoring | ✅ Current |
+
+### B2B Multi-Client Documentation
+
+| Document | Purpose | Status |
+|----------|---------|--------|
+| **[B2B_MULTI_CLIENT_INTEGRATION_GUIDE.md](./B2B_MULTI_CLIENT_INTEGRATION_GUIDE.md)** | Complete B2B portal integration | ✅ Current |
+| **[B2B_IMPLEMENTATION_SUMMARY.md](./B2B_IMPLEMENTATION_SUMMARY.md)** | B2B quick reference | ✅ Current |
+
+### API Documentation
+
+| Document | Purpose | Status |
+|----------|---------|--------|
+| **[api-documentation.html](./api-documentation.html)** | Interactive API docs (ReDoc) | ✅ Current |
+| **[API_DOCUMENTATION_README.md](./API_DOCUMENTATION_README.md)** | How to use API docs | ✅ Current |
+
+### Status & Planning
+
+| Document | Purpose | Status |
+|----------|---------|--------|
+| **[CURRENT_STATUS_SUMMARY.md](./CURRENT_STATUS_SUMMARY.md)** | Project status & achievements | ✅ Current |
+| **[CURRENT_PRIORITIES.md](./CURRENT_PRIORITIES.md)** | Actionable task list | ✅ Current |
+
+---
+
+## 📁 Phase-Specific Documentation
+
+### Phase 2: SMS Integration (Future)
+
+**Location:** [`phase2/`](./phase2/)
+
+| Document | Purpose | Status |
+|----------|---------|--------|
+| **[PHASE2_AWS_SMS_RESEARCH.md](./phase2/PHASE2_AWS_SMS_RESEARCH.md)** | SMS integration research (Twilio approach) | 📝 Planning |
+
+**Why Twilio?** AISPL account limitation prevents AWS SNS SMS usage
+
+---
+
+### Phase 3: Voice Integration (Future)
+
+**Location:** [`phase3/`](./phase3/)
+
+| Document | Purpose | Status |
+|----------|---------|--------|
+| **[PHASE3_AWS_CONNECT_RESEARCH.md](./phase3/PHASE3_AWS_CONNECT_RESEARCH.md)** | AWS Connect research | 📝 Planning |
+| **[PHASE3_AISPL_ACCOUNT_WORKAROUND.md](./phase3/PHASE3_AISPL_ACCOUNT_WORKAROUND.md)** | AISPL limitation workaround | 📝 Planning |
+| **[PHASE3_INDIAN_PHONE_SETUP.md](./phase3/PHASE3_INDIAN_PHONE_SETUP.md)** | Indian phone number setup | 📝 Planning |
+| **[PHASE3_US_PHONE_SETUP.md](./phase3/PHASE3_US_PHONE_SETUP.md)** | US phone number setup | 📝 Planning |
+
+**Why Twilio for Voice?** AISPL account cannot use AWS Connect
+
+---
+
+## 📦 Archive
+
+**Location:** [`archive/`](./archive/)
+
+Historical documents, outdated guides, and reference material that has been superseded by newer documentation.
+
+### Archive Structure
 
 ```
-                    ┌─────────────────────────────────┐
-                    │   Customer Request              │
-                    └──────────────┬──────────────────┘
-                                   │
-                                   ↓
-                    ┌─────────────────────────────────┐
-                    │   Supervisor Agent              │
-                    │   (Routes to specialists)       │
-                    └──────────────┬──────────────────┘
-                                   │
-                ┌──────────────────┼──────────────────┬─────────────┐
-                │                  │                  │             │
-                ↓                  ↓                  ↓             ↓
-    ┌───────────────────┐ ┌───────────────┐ ┌──────────────┐ ┌──────────┐
-    │ Scheduling Agent  │ │ Information   │ │ Notes Agent  │ │ Chitchat │
-    │ (6 actions)       │ │ Agent         │ │ (2 actions)  │ │ Agent    │
-    │                   │ │ (4 actions)   │ │              │ │          │
-    └─────────┬─────────┘ └───────┬───────┘ └──────┬───────┘ └────┬─────┘
-              │                   │                 │               │
-              └───────────────────┴─────────────────┴───────────────┘
-                                   │
-                                   ↓
-                        ┌────────────────────┐
-                        │ Lambda Functions   │
-                        │ (Phase 2 - TBD)    │
-                        └──────────┬─────────┘
-                                   │
-                                   ↓
-                        ┌────────────────────┐
-                        │  PF360 API         │
-                        └────────────────────┘
-```
-
-### Agent Responsibilities
-
-| Agent | ID | Role | Actions |
-|-------|-----|------|---------|
-| **Supervisor** | `5VTIWONUMO` | Routes requests to appropriate specialist | None (routing only) |
-| **Scheduling** | `IX24FSMTQH` | Manages appointments, availability, bookings | 6 scheduling actions |
-| **Information** | `C9ANXRIO8Y` | Provides project details, status, hours, weather | 4 information actions |
-| **Notes** | `G5BVBYEPUM` | Manages appointment notes and documentation | 2 note actions |
-| **Chitchat** | `BIUW1ARHGL` | Handles greetings, thanks, general conversation | None (conversational) |
-
----
-
-## 📁 Project Structure
-
-```
-bedrock/
-├── README.md                                # Main project guide
-├── QUICK_REFERENCE.md                       # Command cheat sheet
+archive/
+├── bulk-ops/           # Bulk operations (future feature, not in current scope)
+│   ├── BULK_OPS_API_DOCS.html
+│   ├── BULK_OPS_API_SWAGGER.yaml
+│   ├── BULK_OPS_DEPLOYMENT.md
+│   ├── BULK_OPS_POSTMAN_COLLECTION.json
+│   ├── BULK_SCHEDULING_DESIGN.md
+│   └── BULK_SCHEDULING_SUMMARY.md
 │
-├── docs/                                    # Documentation
-│   ├── README.md                            # This file
-│   ├── TESTING_GUIDE.md                     # Testing documentation
-│   ├── DEPLOYMENT_GUIDE.md                  # Deployment instructions
-│   ├── ENABLE_API_ACCESS.md                 # API access troubleshooting
-│   ├── AWS_SUPPORT_TICKET.md                # Support ticket template
-│   ├── ARCHITECTURE_RESEARCH.md             # Research & decision rationale
-│   ├── DOCUMENTATION_INDEX.md               # All docs index
-│   └── DEPLOYMENT_STATUS.md                 # Current deployment status
+├── historical/         # Historical status docs and reference material
+│   ├── 403_ERROR_RESOLUTION.md
+│   ├── API_DOCUMENTATION_INDEX.md
+│   ├── API_QUICK_REFERENCE.md
+│   ├── AWS_SUPPORT_TICKET.md
+│   ├── BEDROCK_LAMBDA_INTEGRATION_GUIDE.md
+│   ├── CREATED_FILES.md
+│   ├── DEPLOYMENT_STATUS.md
+│   ├── DEVELOPER_HANDOVER.md
+│   ├── DOCUMENTATION_INDEX.md
+│   ├── ENABLE_API_ACCESS.md
+│   ├── HANDOVER_SUMMARY.md
+│   ├── HOW_TO_VIEW_SWAGGER_UI.md
+│   ├── LAMBDA_MOCK_IMPLEMENTATION.md
+│   ├── PF360_API_ANALYSIS.md
+│   ├── QUICK_REFERENCE.md
+│   ├── READY_TO_DEPLOY.md
+│   ├── TERRAFORM_COMPLETE.md
+│   ├── tfplan.txt
+│   ├── UV_SETUP_COMPLETE.md
+│   └── WORK_COMPLETED_SESSION_2.md
 │
-├── tests/                                   # Test scripts
-│   ├── README.md                            # Testing documentation
-│   ├── test_api_access.py                   # API access validation
-│   ├── test_agents_interactive.py           # Interactive testing
-│   └── test_agent.py                        # Basic test (legacy)
+├── old-setup-guides/   # Superseded by AWS_BEDROCK_COMPLETE_SETUP_GUIDE.md
+│   ├── ARCHITECTURE.md
+│   ├── AWS_SETUP_GUIDE.md
+│   ├── AWS_SETUP_STEP_BY_STEP.md
+│   ├── DEPLOYMENT_GUIDE.md
+│   └── TESTING_GUIDE.md
 │
-├── utils/                                   # Utility scripts
-│   ├── README.md                            # Utilities documentation
-│   └── prepare_all_agents.py                # Agent preparation
+├── phase2/             # Old Phase 2 docs (superseded)
+│   ├── PHASE2_DEPLOYMENT_GUIDE.md
+│   ├── PHASE2_IMPLEMENTATION_SUMMARY.md
+│   └── PHONE_NUMBER_SETUP_GUIDE.md
 │
-├── scripts/                                 # Shell scripts
-│   ├── README.md                            # Scripts documentation
-│   ├── gather_diagnostics.sh                # Diagnostic collection
-│   └── verify_deployment.sh                 # Deployment verification
+├── planning/           # Early planning and research docs
+│   ├── ARCHITECTURE_RESEARCH.md
+│   ├── IMPLEMENTATION_PLAN.md
+│   ├── MIGRATION_PLAN.md
+│   ├── PHASE1_GETTING_STARTED.md
+│   ├── PHASE3_IMPLEMENTATION_PLAN.md
+│   └── PHASE3_QUICK_START.md
 │
-├── infrastructure/                          # Terraform IaC
-│   ├── terraform/
-│   │   ├── bedrock_agents.tf               # Main agent configuration
-│   │   ├── provider.tf                     # AWS provider setup
-│   │   ├── terraform.tfvars                # Variable values
-│   │   └── variables.tf                    # Variable definitions
-│   │
-│   ├── agent_instructions/                  # Agent prompt instructions
-│   │   ├── supervisor.txt                  # Supervisor routing logic
-│   │   ├── scheduling_collaborator.txt     # Scheduling workflows
-│   │   ├── information_collaborator.txt    # Information retrieval
-│   │   ├── notes_collaborator.txt          # Note management
-│   │   └── chitchat_collaborator.txt       # Conversational handling
-│   │
-│   └── openapi_schemas/                     # Action group definitions
-│       ├── scheduling_actions.json         # 6 scheduling actions
-│       ├── information_actions.json        # 4 information actions
-│       └── notes_actions.json              # 2 note actions
-│
-├── backend/                                 # Backend services (Phase 2)
-├── frontend/                                # Frontend app (Phase 2)
-├── lambda/                                  # Lambda functions
-└── knowledge-base/                          # Knowledge base content
+└── test-results/       # Historical test results (latest in tests/)
+    ├── COMPLETE_FLOW_TEST_RESULTS.md
+    ├── MOCK_API_TESTING_RESULTS.md
+    └── TEST_EXECUTION_REPORT.md
 ```
 
----
-
-## ✅ Current Status
-
-### Phase 1: Complete ✅
-
-**Deployed Infrastructure:**
-- ✅ 5 Bedrock Agents created and configured
-- ✅ Multi-agent collaboration enabled
-- ✅ All 4 collaborators associated with supervisor
-- ✅ Claude Sonnet 4.5 inference profile configured
-- ✅ IAM roles and policies set up
-- ✅ S3 bucket with 3 OpenAPI schemas
-- ✅ All agents in PREPARED status
-
-**Agent IDs:**
-- **Supervisor**: `5VTIWONUMO`
-  - Latest Alias: `HH2U7EZXMW` (version 6 with v4 collaborators)
-  - Test Alias: `TSTALIASID` (points to DRAFT)
-  - v1 Alias: `PEXPJRXIML` (deprecated - uses old model)
-
-- **Collaborator Agents** (all use Claude Sonnet 4.5):
-
-| Agent | ID | v4 Alias | Version |
-|-------|-----|----------|---------|
-| Scheduling | `IX24FSMTQH` | `TYJRF3CJ7F` | 4 |
-| Information | `C9ANXRIO8Y` | `YVNFXEKPWO` | 4 |
-| Notes | `G5BVBYEPUM` | `F9QQNLZUW8` | 4 |
-| Chitchat | `BIUW1ARHGL` | `THIPMPJCPI` | 5 |
-
-**Cost:** FREE until September 16, 2025 (AgentCore preview pricing)
-
-### Phase 2: Next Steps 🚧
-
-**Lambda Function Implementation** (12 actions total):
-1. **Scheduling Lambda** - 6 actions:
-   - `list_projects` - Show available projects
-   - `get_available_dates` - Get available dates for a project
-   - `get_time_slots` - Get available time slots for a date
-   - `confirm_appointment` - Confirm a new appointment
-   - `reschedule_appointment` - Reschedule existing appointment
-   - `cancel_appointment` - Cancel an appointment
-
-2. **Information Lambda** - 4 actions:
-   - `get_project_details` - Get project information
-   - `get_appointment_status` - Check appointment status
-   - `get_working_hours` - Get business hours
-   - `get_weather` - Get weather forecast
-
-3. **Notes Lambda** - 2 actions:
-   - `add_note` - Add note to appointment
-   - `list_notes` - List appointment notes
+**Note:** Archive documents are kept for historical reference but are outdated. Always use the main documentation in the root folder.
 
 ---
 
-## 🚀 Testing Your Agents
+## 🎯 Documentation by Use Case
 
-### Option 1: AWS Console (Recommended - Always Works)
+### I want to...
 
-1. Open the [Bedrock Agents Console](https://console.aws.amazon.com/bedrock/home?region=us-east-1#/agents)
-2. Click on **scheduling-agent-supervisor**
-3. Click the **"Test"** button (top right)
-4. Try these test scenarios:
+**Set up AWS from scratch:**
+→ [`AWS_BEDROCK_COMPLETE_SETUP_GUIDE.md`](./AWS_BEDROCK_COMPLETE_SETUP_GUIDE.md)
 
-| Test | Input | Expected Routing |
-|------|-------|------------------|
-| Chitchat | `Hello! How are you?` | → chitchat_collaborator |
-| Scheduling | `I want to schedule an appointment` | → scheduling_collaborator |
-| Information | `What are your working hours?` | → information_collaborator |
-| Notes | `Add a note that I prefer mornings` | → notes_collaborator |
+**Deploy Lambda functions:**
+→ [`LAMBDA_DEPLOYMENT_GUIDE.md`](./LAMBDA_DEPLOYMENT_GUIDE.md)
 
-### Option 2: Interactive Testing (Most Features)
+**Create action groups:**
+→ [`ACTION_GROUPS_SETUP_GUIDE.md`](./ACTION_GROUPS_SETUP_GUIDE.md)
+→ [`ACTION_GROUPS_QUICK_START.md`](./ACTION_GROUPS_QUICK_START.md) (quick reference)
 
+**Deploy web chat:**
+→ [`WEB_CHAT_DEPLOYMENT_GUIDE.md`](./WEB_CHAT_DEPLOYMENT_GUIDE.md)
+
+**Set up monitoring:**
+→ [`MONITORING_SETUP_GUIDE.md`](./MONITORING_SETUP_GUIDE.md)
+
+**Understand API endpoints:**
+→ [`api-documentation.html`](./api-documentation.html) (open in browser)
+
+**Check project status:**
+→ [`CURRENT_STATUS_SUMMARY.md`](./CURRENT_STATUS_SUMMARY.md)
+
+**Know what to do next:**
+→ [`CURRENT_PRIORITIES.md`](./CURRENT_PRIORITIES.md)
+
+**Plan SMS integration:**
+→ [`phase2/PHASE2_AWS_SMS_RESEARCH.md`](./phase2/PHASE2_AWS_SMS_RESEARCH.md)
+
+**Plan voice integration:**
+→ [`phase3/PHASE3_AWS_CONNECT_RESEARCH.md`](./phase3/PHASE3_AWS_CONNECT_RESEARCH.md)
+
+---
+
+## 🏗️ System Overview
+
+### Current Architecture
+
+```
+5 Bedrock Agents:
+├── Supervisor Agent (5VTIWONUMO) - Orchestrator
+├── Scheduling Agent (IX24FSMTQH) - Scheduling operations
+├── Information Agent (C9ANXRIO8Y) - Information queries
+├── Notes Agent (G5BVBYEPUM) - Notes management
+└── Chitchat Agent (2SUXQSWZOV) - Casual conversation
+
+3 Lambda Functions (12 actions):
+├── scheduling-agent-scheduling-actions - 6 actions
+├── scheduling-agent-information-actions - 4 actions
+└── scheduling-agent-notes-actions - 2 actions
+
+Supporting Infrastructure:
+├── OpenAPI schemas (3 files)
+├── Database models (5 SQLAlchemy models)
+├── Web chat interface (FastAPI + HTML)
+└── Monitoring setup (CloudWatch automation)
+```
+
+### Current Status
+
+- ✅ **Phase 1.0-1.2:** Complete (100% test pass rate)
+- ⏳ **Action Groups:** OpenAPI schemas created, manual setup pending
+- 📝 **Phase 2.0:** SMS integration (planned)
+- 📝 **Phase 3.0:** Voice integration (planned)
+
+---
+
+## 📊 Documentation Statistics
+
+| Category | Count | Total Lines |
+|----------|-------|-------------|
+| **Current Guides** | 9 | ~5,500 |
+| **Phase Docs** | 5 | ~200,000 |
+| **Archive** | 44 | ~500,000 |
+| **Total** | 58 | ~705,500 |
+
+---
+
+## 🔄 Documentation Updates
+
+### Latest Changes (2025-10-17)
+
+- ✅ Created comprehensive AWS setup guide
+- ✅ Reorganized docs into logical structure
+- ✅ Moved outdated docs to archive
+- ✅ Created phase-specific folders
+- ✅ Updated README with clear navigation
+
+### Version History
+
+| Date | Change | Files Affected |
+|------|--------|----------------|
+| 2025-10-17 | Major reorganization | All docs |
+| 2025-10-17 | Created comprehensive setup guide | AWS_BEDROCK_COMPLETE_SETUP_GUIDE.md |
+| 2025-10-17 | Action groups documentation | ACTION_GROUPS_* |
+| 2025-10-17 | Status summaries | CURRENT_STATUS_SUMMARY.md |
+| 2025-10-13 | Lambda deployment guide | LAMBDA_DEPLOYMENT_GUIDE.md |
+| 2025-10-13 | API documentation | api-documentation.html |
+
+---
+
+## 🛠️ Utilities
+
+### Viewing Documentation
+
+**Local web server for docs:**
 ```bash
-cd /Users/jjayaraj/workspaces/studios/projectsforce/schedulingAgent-bb/bedrock
-python3 tests/test_agents_interactive.py
+./serve-docs.sh
 ```
 
-**Features:**
-- Pre-flight checks (credentials, agent status, collaborators)
-- 4 predefined test scenarios
-- Interactive chat mode
-- Console testing instructions
+Opens documentation in browser with live reload.
 
-**See:** [tests/README.md](../tests/README.md) for detailed testing documentation
-
-### Option 3: API Access Validation
-
+**View API documentation:**
 ```bash
-cd /Users/jjayaraj/workspaces/studios/projectsforce/schedulingAgent-bb/bedrock
-python3 tests/test_api_access.py
+open api-documentation.html
 ```
 
-Tests three scenarios:
-- ✅ Direct model invocation (works)
-- ⚠️ Agent invocation (currently fails with 403 - pending AWS to enable on-demand API access)
-- ⚠️ Supervisor invocation (currently fails with 403)
-
-**Note:** API invocation currently fails due to missing on-demand access. See [ENABLE_API_ACCESS.md](./ENABLE_API_ACCESS.md) for solution.
-
-### Option 4: Deployment Verification
-
-```bash
-cd /Users/jjayaraj/workspaces/studios/projectsforce/schedulingAgent-bb/bedrock
-./scripts/verify_deployment.sh
-```
-
-This script checks:
-- ✅ All agent statuses
-- ✅ Collaborator associations
-- ✅ S3 bucket contents
-- ✅ Model access
-
-### Option 5: Gather Diagnostics
-
-```bash
-cd /Users/jjayaraj/workspaces/studios/projectsforce/schedulingAgent-bb/bedrock
-./scripts/gather_diagnostics.sh
-```
-
-Collects diagnostic information for troubleshooting or AWS Support tickets.
-See [AWS_SUPPORT_TICKET.md](./AWS_SUPPORT_TICKET.md) for support ticket template.
-
----
-
-## 🛠️ Technology Stack
-
-### Infrastructure
-- **IaC**: Terraform
-- **Region**: us-east-1
-- **Provider**: AWS (hashicorp/aws ~> 6.0)
-
-### AWS Services
-- **AI**: AWS Bedrock Agents with Multi-Agent Collaboration
-- **Model**: Claude Sonnet 4.5 (inference profile)
-- **Storage**: S3 (for OpenAPI schemas)
-- **Permissions**: IAM roles and policies
-- **Compute**: Lambda Functions (Phase 2)
-
-### Languages
-- **Infrastructure**: HCL (Terraform)
-- **Testing**: Python 3.11+
-- **Lambda Functions**: Python 3.11+ (Phase 2)
-
----
-
-## 📖 Documentation
-
-### Main Documentation
-- **[DEPLOYMENT_STATUS.md](../DEPLOYMENT_STATUS.md)** - Current deployment status and testing guide
-- **[DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)** - Step-by-step deployment instructions
-- **[ARCHITECTURE_RESEARCH.md](./ARCHITECTURE_RESEARCH.md)** - Research comparing Bedrock vs LangGraph (60+ pages)
-- **[CREATED_FILES.md](./CREATED_FILES.md)** - Complete list of files created
-
-### Additional Documentation
-- **[AWS_SETUP_GUIDE.md](./AWS_SETUP_GUIDE.md)** - AWS account setup
-- **[TERRAFORM_COMPLETE.md](./TERRAFORM_COMPLETE.md)** - Terraform configuration details
-- **tfplan.txt** - Terraform plan output
-
----
-
-## 🔧 Development Setup
-
-### Prerequisites
-- AWS CLI configured with credentials
-- Terraform 1.5+
-- Python 3.11+
-- Access to AWS Bedrock in us-east-1
-- Claude Sonnet 4.5 model access enabled
-
-### Quick Start
-
-1. **Clone and navigate**:
-   ```bash
-   cd /Users/jjayaraj/workspaces/studios/projectsforce/schedulingAgent-bb/bedrock
-   ```
-
-2. **Review configuration**:
-   ```bash
-   cat infrastructure/terraform/terraform.tfvars
-   ```
-
-3. **Verify deployment**:
-   ```bash
-   ./verify_deployment.sh
-   ```
-
-4. **Test agents**:
-   - Use AWS Console: https://console.aws.amazon.com/bedrock/home?region=us-east-1#/agents
-   - Select `scheduling-agent-supervisor`
-   - Click "Test" button
-
----
-
-## 📊 Key Metrics & Costs
-
-### Performance Targets
-- Intent accuracy: >95%
-- Response latency: <2s (p95)
-- Multi-agent routing: <500ms
-- Session completion rate: >70%
-
-### Cost Analysis
-
-**Current (Phase 1):**
-- AgentCore: **FREE** until Sept 16, 2025
-- S3 Storage: ~$0.01/month
-- **Total: $0.01/month**
-
-**Estimated (Phase 2 with Lambda):**
-- Model invocations: $204/month (estimated at 10,000 requests)
-- Lambda: $5-10/month
-- **Total: ~$215/month**
-
-**vs LangGraph Alternative:**
-- Self-hosted: $256-340/month
-- **Savings: 65-72%**
-
----
-
-## 🎯 Success Criteria
-
-### Phase 1 (Complete ✅)
-- ✅ 5 agents deployed with multi-agent collaboration
-- ✅ Claude Sonnet 4.5 integration working
-- ✅ Routing logic configured
-- ✅ All agents prepared and tested
-- ✅ Infrastructure as code (Terraform)
-- ✅ Documentation complete
-
-### Phase 2 (Next)
-- ⏳ 12 Lambda functions implemented
-- ⏳ PF360 API integration complete
-- ⏳ End-to-end testing passed
-- ⏳ Error handling and retry logic
-- ⏳ Monitoring and logging set up
-
----
-
-## 🚨 Troubleshooting
-
-### Common Issues
-
-**1. Access Denied Errors**
-```bash
-# Check model access
-aws bedrock get-inference-profile \
-  --inference-profile-identifier us.anthropic.claude-sonnet-4-5-20250929-v1:0 \
-  --region us-east-1
-```
-Solution: Verify Claude Sonnet 4.5 model access in AWS Console → Bedrock → Model access
-
-**2. Agent Not Responding**
-```bash
-# Check agent status
-aws bedrock-agent get-agent --agent-id 5VTIWONUMO --region us-east-1
-```
-Solution: Verify agent status is "PREPARED". If not, run `prepare-agent`.
-
-**3. Terraform State Issues**
-```bash
-# List resources
-cd infrastructure/terraform
-terraform state list
-```
-Solution: See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for state management.
+Interactive ReDoc UI with all API endpoints.
 
 ---
 
 ## 📞 Support
 
-For questions or issues:
-- **Agent IDs**: See "Current Status" section above
-- **AWS Console**: [Bedrock Agents](https://console.aws.amazon.com/bedrock/home?region=us-east-1#/agents)
-- **Verification**: Run `./verify_deployment.sh`
-- **Documentation**: Check `docs/` folder
+### Documentation Issues
+
+If you find any documentation issues:
+1. Check if a newer version exists in the root folder
+2. Check the archive for historical context
+3. Refer to the comprehensive setup guide for current procedures
+
+### Getting Help
+
+- **AWS Issues:** Refer to AWS_BEDROCK_COMPLETE_SETUP_GUIDE.md troubleshooting section
+- **Lambda Issues:** Refer to LAMBDA_DEPLOYMENT_GUIDE.md troubleshooting section
+- **Action Groups:** Refer to ACTION_GROUPS_SETUP_GUIDE.md
 
 ---
 
-## 🔄 Development Workflow
+## 🎉 Quick Wins
 
-### Making Changes to Agents
+**Want to get started quickly?**
 
-1. **Update configuration**:
-   ```bash
-   cd infrastructure/terraform
-   # Edit bedrock_agents.tf or terraform.tfvars
-   ```
+1. **See what's done:** [`CURRENT_STATUS_SUMMARY.md`](./CURRENT_STATUS_SUMMARY.md) (5 min read)
+2. **Complete action groups:** [`ACTION_GROUPS_QUICK_START.md`](./ACTION_GROUPS_QUICK_START.md) (30 min work)
+3. **Test system:** See AWS_BEDROCK_COMPLETE_SETUP_GUIDE.md Phase 6 (15 min)
 
-2. **Plan changes**:
-   ```bash
-   terraform plan
-   ```
+**Want to deploy to production?**
 
-3. **Apply changes**:
-   ```bash
-   terraform apply
-   ```
-
-4. **Prepare agents**:
-   ```bash
-   aws bedrock-agent prepare-agent --agent-id 5VTIWONUMO --region us-east-1
-   ```
-
-5. **Test**:
-   - Use AWS Console test feature
-   - Or run `./verify_deployment.sh`
+1. Complete action groups setup
+2. Follow [`WEB_CHAT_DEPLOYMENT_GUIDE.md`](./WEB_CHAT_DEPLOYMENT_GUIDE.md)
+3. Follow [`MONITORING_SETUP_GUIDE.md`](./MONITORING_SETUP_GUIDE.md)
 
 ---
 
-## 📝 License
+## 📝 Notes
 
-Internal use only - ProjectsForce 360
+- All current documentation is in the root `docs/` folder
+- Phase-specific docs are in `phase2/` and `phase3/` folders
+- Historical and outdated docs are in `archive/` (organized by category)
+- API documentation is self-contained HTML (no server needed)
+- All guides include troubleshooting sections
 
 ---
 
-## 🏆 Acknowledgments
-
-- Architecture decision based on comprehensive research (see ARCHITECTURE_RESEARCH.md)
-- AWS Bedrock Multi-Agent Collaboration (GA: March 10, 2025)
-- Claude Sonnet 4.5 by Anthropic
-- Terraform AWS Provider 6.x
+**Documentation maintained by:** Bedrock Multi-Agent Team
+**Last Major Update:** 2025-10-17 (Reorganization & Cleanup)
+**Next Review:** After action groups completion

@@ -191,6 +191,21 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+def get_session():
+    """
+    Context manager for database sessions (non-FastAPI usage).
+
+    Returns:
+        AsyncSession: Database session context manager
+
+    Usage:
+        async with get_session() as db:
+            result = await db.execute(select(Item))
+            items = result.scalars().all()
+    """
+    return AsyncSessionLocal()
+
+
 # ============================================================================
 # Database Lifecycle Management
 # ============================================================================

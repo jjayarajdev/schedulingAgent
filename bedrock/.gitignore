@@ -73,3 +73,12 @@ logs/
 # Database
 *.db
 *.sqlite
+
+# Lambda
+*.zip
+lambda/*/venv/
+lambda/*/package/
+
+# Temporary files
+response.json
+output*.json

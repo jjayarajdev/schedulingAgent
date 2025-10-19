@@ -1,191 +1,243 @@
-# Bedrock Agent Tests
+# Tests Directory
 
-This directory contains test scripts for validating the Bedrock multi-agent system.
+**Purpose:** Test scripts for Bedrock Multi-Agent System
 
-## Test Scripts
+**Last Updated:** 2025-10-19
 
-### 1. `test_api_access.py`
-**Purpose**: Comprehensive API access validation
+---
 
-Tests three scenarios:
-- ✅ Direct model invocation (bedrock-runtime API)
-- ⚠️ Individual agent invocation (bedrock-agent-runtime API)
-- ⚠️ Supervisor agent invocation with collaborators
+## 📋 Available Tests
+
+### test_agent_with_session.py ⭐
+**Purpose:** Complete test suite with proper session context
+
+**What it tests:**
+1. List Projects - Returns real mock data (12345, 12347, 12350)
+2. Get Project Details - Returns Flooring Installation details
+3. Get Appointment Status - Returns scheduled date/time
+4. Get Working Hours - Returns business hours
+5. Check Availability - Returns available dates
+
+**Key Features:**
+- ✅ Includes sessionAttributes (customer_id, customer_type)
+- ✅ Tests B2C customer scenarios
+- ✅ Verifies real mock data returned
+- ✅ Checks for NO hallucinated data
+- ✅ Color-coded pass/fail results
+- ✅ CloudWatch verification instructions
 
 **Usage:**
 ```bash
-python3 tests/test_api_access.py
+cd /Users/jjayaraj/workspaces/studios/projectsforce/schedulingAgent-bb/bedrock
+
+./tests/test_agent_with_session.py
 ```
+
+**Prerequisites:**
+1. Run `scripts/update_agent_instructions.sh` ✅
+2. Run `scripts/update_collaborator_aliases.sh` ⏳ **MUST DO**
 
 **Expected Output:**
-- PASS: Direct Model invocation
-- FAIL: Agent invocations (until on-demand access enabled)
-
-**When to use:**
-- After enabling API access in AWS Console
-- Troubleshooting 403 Access Denied errors
-- Validating agent deployment
+```
+Total Tests: 5
+Passed: ✅ 5
+Failed: ❌ 0
+Success Rate: 100.0%
+```
 
 ---
 
-### 2. `test_agents_interactive.py`
-**Purpose**: Interactive agent testing with multiple modes
+## 🎯 Testing Workflow
 
-Features:
-- Pre-flight checks (credentials, agent status, collaborators)
-- 4 predefined test scenarios
-- Interactive chat mode
-- Console testing instructions
-- Colored terminal output
-
-**Usage:**
+### Step 1: Lambda Functions (Direct Test)
 ```bash
-python3 tests/test_agents_interactive.py
+cd ../scripts
+./test_lambdas.sh
 ```
+This tests Lambda functions directly, bypassing agents.
 
-**Modes:**
-1. **Predefined tests** - Runs 4 test scenarios automatically
-2. **Interactive mode** - Chat with the agent
-3. **Console instructions** - Shows how to test in AWS Console
-4. **Exit**
-
-**Sample commands in interactive mode:**
-```
-You: Hello! How are you?
-You: I want to schedule an appointment
-You: What are your working hours?
-You: Add a note that I prefer mornings
-```
+**Expected:** 8/8 tests pass
 
 ---
 
-### 3. `test_agent.py`
-**Purpose**: Basic agent testing (legacy)
-
-Simple test script for quick validation.
-
-**Usage:**
+### Step 2: Agents with Session Context (Integration Test)
 ```bash
-python3 tests/test_agent.py
+cd ../tests
+./test_agent_with_session.py
 ```
+This tests the complete multi-agent flow with proper session context.
 
-**Note**: This is the original test script. Use `test_agents_interactive.py` for better experience.
+**Expected:** 5/5 tests pass
 
 ---
 
-## Agent Configuration
-
-All test scripts use these agent IDs:
-
-### Supervisor Agent
-- **Agent ID**: `5VTIWONUMO`
-- **Latest Alias**: `HH2U7EZXMW` (version 6 with v4 collaborators)
-- **Test Alias**: `TSTALIASID` (points to DRAFT)
-- **Model**: Claude Sonnet 4.5 (`us.anthropic.claude-sonnet-4-5-20250929-v1:0`)
-
-### Collaborator Agents
-| Agent | ID | v4 Alias | Version |
-|-------|-----|----------|---------|
-| Chitchat | `BIUW1ARHGL` | `THIPMPJCPI` | 5 |
-| Scheduling | `IX24FSMTQH` | `TYJRF3CJ7F` | 4 |
-| Information | `C9ANXRIO8Y` | `YVNFXEKPWO` | 4 |
-| Notes | `G5BVBYEPUM` | `F9QQNLZUW8` | 4 |
-
----
-
-## Troubleshooting
-
-### Error: AccessDeniedException (403)
-
-**Symptoms:**
-```
-An error occurred (accessDeniedException) when calling the InvokeAgent operation:
-Access denied when calling Bedrock
-```
-
-**Causes:**
-1. On-demand API access not enabled for Claude Sonnet 4.5
-2. IAM role missing permissions
-3. Agent not prepared
-4. Model not available in region
-
-**Solutions:**
-1. Enable on-demand access in AWS Console (see `docs/ENABLE_API_ACCESS.md`)
-2. Verify IAM permissions in agent roles
-3. Run `python3 utils/prepare_all_agents.py`
-4. Check model availability: `aws bedrock list-foundation-models --region us-east-1`
-
-### Error: ValidationException (Model not supported)
-
-**Symptoms:**
-```
-Invocation of model ID anthropic.claude-sonnet-4-20250514-v1:0 with on-demand throughput isn't supported
-```
-
-**Cause:** Agent alias pointing to old version with Claude Sonnet 4 (instead of 4.5)
-
-**Solution:** Use latest aliases that point to correct model versions (see table above)
-
----
-
-## Testing Workflow
-
-### 1. Initial Deployment Testing
+### Step 3: CloudWatch Verification
 ```bash
-# Check agent status
-python3 tests/test_agents_interactive.py
-# Select option 1 (Predefined tests)
+# In another terminal, watch for Lambda invocations
+aws logs tail /aws/lambda/scheduling-agent-scheduling-actions --follow --region us-east-1
+
+# Then run the test
+./test_agent_with_session.py
 ```
 
-### 2. API Access Validation
-```bash
-# Test API access status
-python3 tests/test_api_access.py
-```
-
-### 3. Interactive Development
-```bash
-# Chat with agents
-python3 tests/test_agents_interactive.py
-# Select option 2 (Interactive mode)
-```
-
-### 4. Console Testing (Fallback)
-```bash
-# Show console instructions
-python3 tests/test_agents_interactive.py
-# Select option 3 (Console instructions)
-```
+**Expected:** CloudWatch logs appear showing Lambda invocations!
 
 ---
 
-## Requirements
+## 🔍 What Each Test Verifies
 
-```bash
-pip install boto3
-```
+### Test 1: List Projects
+**Query:** "Show me all my projects"
+**Session:** `{customer_id: "CUST001", customer_type: "B2C"}`
 
-**AWS Credentials:**
-- Configured via `aws configure`
-- Or environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
-- Or IAM role (if running on EC2/Lambda)
+**Expected Response:**
+- Project 12345 - Flooring Installation, Tampa
+- Project 12347 - Windows Installation, Tampa
+- Project 12350 - Deck Repair, Clearwater
 
-**Permissions Required:**
-- `bedrock:InvokeModel`
-- `bedrock:InvokeModelWithResponseStream`
-- `bedrock-agent:InvokeAgent`
-- `bedrock-agent:GetAgent`
-- `bedrock-agent:ListAgentCollaborators`
+**Verifies:**
+- ✅ Lambda function `list_projects` called
+- ✅ Real mock data returned
+- ❌ NO hallucinated data (Kitchen Remodel, etc.)
 
 ---
 
-## Related Documentation
+### Test 2: Get Project Details
+**Query:** "Tell me about project 12345"
+**Session:** `{customer_id: "CUST001", customer_type: "B2C"}`
 
-- **API Access Setup**: `docs/ENABLE_API_ACCESS.md`
-- **Testing Guide**: `docs/TESTING_GUIDE.md`
-- **Deployment Guide**: `docs/DEPLOYMENT_GUIDE.md`
-- **AWS Support Ticket**: `docs/AWS_SUPPORT_TICKET.md` (if API access issues)
+**Expected Response:**
+- Project ID: 12345
+- Type: Flooring Installation
+- Location: 123 Main St, Tampa, FL
+- Order: ORD-2025-001
+- Technician: John Smith
+
+**Verifies:**
+- ✅ Lambda function `get_project_details` called
+- ✅ Complete project information returned
 
 ---
 
-**Last Updated**: October 13, 2025
+### Test 3: Get Appointment Status
+**Query:** "What's the appointment status for project 12345?"
+**Session:** `{customer_id: "CUST001", customer_type: "B2C"}`
+
+**Expected Response:**
+- Status: Scheduled
+- Date: 2025-10-15
+- Time: 8:00 AM - 12:00 PM
+- Technician: John Smith
+- Duration: 4 hours
+
+**Verifies:**
+- ✅ Lambda function `get_appointment_status` called
+- ✅ Appointment details returned
+
+---
+
+### Test 4: Get Working Hours
+**Query:** "What are your business hours?"
+**Session:** `{customer_id: "CUST001", customer_type: "B2C"}`
+
+**Expected Response:**
+- Monday - Friday: 9:00 AM - 6:00 PM
+- Saturday: 10:00 AM - 3:00 PM
+- Sunday: Closed
+
+**Verifies:**
+- ✅ Lambda function `get_working_hours` called
+- ✅ Business hours returned
+
+---
+
+### Test 5: Check Availability
+**Query:** "What dates are available for project 12347?"
+**Session:** `{customer_id: "CUST001", customer_type: "B2C"}`
+
+**Expected Response:**
+- List of available dates (next 10 weekdays)
+- 2025 dates
+
+**Verifies:**
+- ✅ Lambda function `get_available_dates` called
+- ✅ Available dates returned
+
+---
+
+## 🐛 Troubleshooting
+
+### Tests Failing?
+
+**Check:**
+
+1. **Agent instructions updated?**
+   ```bash
+   aws bedrock-agent get-agent --agent-id IX24FSMTQH --region us-east-1 \
+     --query 'agent.instruction' --output text | grep "AVAILABLE ACTIONS"
+   ```
+   Should show: AVAILABLE ACTIONS section
+
+2. **Collaborators using DRAFT aliases?**
+   ```bash
+   aws bedrock-agent list-agent-collaborators --agent-id 5VTIWONUMO \
+     --agent-version DRAFT --region us-east-1 | grep TSTALIASID
+   ```
+   Should show: Multiple TSTALIASID matches
+
+3. **Agents prepared?**
+   ```bash
+   aws bedrock-agent get-agent --agent-id IX24FSMTQH --region us-east-1 \
+     --query 'agent.agentStatus'
+   ```
+   Should return: "PREPARED"
+
+4. **CloudWatch logs showing Lambda invocations?**
+   ```bash
+   aws logs tail /aws/lambda/scheduling-agent-scheduling-actions \
+     --since 5m --region us-east-1
+   ```
+   Should show: Recent Lambda logs
+
+---
+
+### Common Issues
+
+**Issue:** Tests pass but no CloudWatch logs
+**Solution:** Lambda not being invoked, run `scripts/update_collaborator_aliases.sh`
+
+**Issue:** Tests return hallucinated data
+**Solution:** Collaborators using old agent versions, run `scripts/update_collaborator_aliases.sh`
+
+**Issue:** Tests timeout or hang
+**Solution:** Check AWS credentials and region configuration
+
+---
+
+## 📊 Test Data Reference
+
+For complete mock data reference, see:
+- `../docs/MOCK_DATA_REFERENCE.md`
+
+**Valid Project IDs:**
+- 12345 - Flooring Installation (Scheduled)
+- 12347 - Windows Installation (Pending)
+- 12350 - Deck Repair (Pending)
+
+**Valid Customer ID:**
+- CUST001 (B2C customer with 3 projects)
+
+---
+
+## 📚 Related Documentation
+
+- **Testing Guide:** `../docs/TESTING_COMPLETE_WORKFLOWS.md`
+- **Mock Data:** `../docs/MOCK_DATA_REFERENCE.md`
+- **Hallucination Fix:** `../COMPLETE_FIX_DEPLOYMENT.md`
+- **Scripts:** `../scripts/README.md`
+
+---
+
+**Last Updated:** 2025-10-19
+**Test Suite:** test_agent_with_session.py
+**Status:** ✅ Working (requires collaborator alias update)

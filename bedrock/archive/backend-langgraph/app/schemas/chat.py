@@ -12,11 +12,46 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 
 
+class ClientLocation(BaseModel):
+    """
+    B2B Client location information.
+
+    For multi-client customers (B2B), represents each location/office.
+    """
+
+    client_id: str = Field(
+        ...,
+        description="Client ID (location identifier)",
+        examples=["09PF05VD"],
+    )
+
+    client_name: str = Field(
+        ...,
+        description="Client name (location name)",
+        examples=["Tampa Office", "Miami Office"],
+    )
+
+    is_primary: bool = Field(
+        default=False,
+        description="Whether this is the user's primary location",
+    )
+
+
 class ChatRequest(BaseModel):
     """
     Chat request from client.
 
-    Fields match current system (from api/routes.py).
+    Supports both B2C (single customer) and B2B (multi-client customer) scenarios.
+
+    B2C Example:
+        customer_id: "CUST001"
+        client_id: None
+        available_clients: None
+
+    B2B Example:
+        customer_id: "CUST_BIGCORP"
+        client_id: "09PF05VD"  (default/primary location)
+        available_clients: [Tampa, Miami, Orlando locations]
     """
 
     message: str = Field(
@@ -35,16 +70,37 @@ class ChatRequest(BaseModel):
 
     customer_id: int | str = Field(
         ...,
-        description="Customer ID",
-        examples=["1645975", 1645975],
+        description="Customer ID from ProjectsForce authentication",
+        examples=["1645975", "CUST001", "CUST_BIGCORP"],
     )
 
-    client_name: str = Field(
-        ...,
+    client_id: str | None = Field(
+        default=None,
+        description="Client ID (B2B only) - Default/primary location for multi-client customers",
+        examples=["09PF05VD", None],
+    )
+
+    client_name: str | None = Field(
+        default=None,
         min_length=1,
         max_length=200,
-        description="Client name",
-        examples=["projectsforce-validation"],
+        description="Client name - for B2C, customer name; for B2B, location name",
+        examples=["projectsforce-validation", "Tampa Office"],
+    )
+
+    available_clients: list[ClientLocation] | None = Field(
+        default=None,
+        description="Available client locations (B2B only) - All locations user can access",
+        examples=[[
+            {"client_id": "09PF05VD", "client_name": "Tampa Office", "is_primary": True},
+            {"client_id": "09PF05WE", "client_name": "Miami Office", "is_primary": False}
+        ]],
+    )
+
+    customer_type: str | None = Field(
+        default=None,
+        description="Customer type: B2C or B2B (auto-detected if not provided)",
+        examples=["B2C", "B2B"],
     )
 
     @field_validator("session_id")
@@ -59,16 +115,52 @@ class ChatRequest(BaseModel):
         """Convert customer_id to string."""
         return str(v)
 
+    @field_validator("customer_type")
+    @classmethod
+    def validate_customer_type(cls, v: str | None, info) -> str:
+        """Auto-detect customer type if not provided."""
+        if v:
+            return v
+        # Auto-detect based on available_clients
+        available_clients = info.data.get("available_clients")
+        if available_clients and len(available_clients) > 0:
+            return "B2B"
+        return "B2C"
+
     class Config:
         """Pydantic config."""
 
         json_schema_extra = {
-            "example": {
-                "message": "I want to schedule an appointment for next week",
-                "session_id": "550e8400-e29b-41d4-a716-446655440000",
-                "customer_id": "1645975",
-                "client_name": "projectsforce-validation",
-            }
+            "examples": [
+                {
+                    "title": "B2C Customer Request",
+                    "value": {
+                        "message": "Show me my projects",
+                        "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                        "customer_id": "CUST001",
+                        "client_id": None,
+                        "client_name": "John Smith",
+                        "available_clients": None,
+                        "customer_type": "B2C"
+                    }
+                },
+                {
+                    "title": "B2B Customer Request (Multi-Location)",
+                    "value": {
+                        "message": "Show me Tampa projects",
+                        "session_id": "550e8400-e29b-41d4-a716-446655440001",
+                        "customer_id": "CUST_BIGCORP",
+                        "client_id": "09PF05VD",
+                        "client_name": "Tampa Office",
+                        "available_clients": [
+                            {"client_id": "09PF05VD", "client_name": "Tampa Office", "is_primary": True},
+                            {"client_id": "09PF05WE", "client_name": "Miami Office", "is_primary": False},
+                            {"client_id": "09PF05XF", "client_name": "Orlando Office", "is_primary": False}
+                        ],
+                        "customer_type": "B2B"
+                    }
+                }
+            ]
         }
 
 

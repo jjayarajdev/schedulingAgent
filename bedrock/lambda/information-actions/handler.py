@@ -44,11 +44,21 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
     """
     try:
         # Bedrock Agent passes parameters in different ways
-        if 'parameters' in event:
+        if 'parameters' in event and event['parameters']:
             params = {p['name']: p['value'] for p in event['parameters']}
         elif 'requestBody' in event:
             content = event['requestBody'].get('content', {})
-            params = json.loads(content.get('application/json', '{}'))
+            app_json = content.get('application/json', {})
+
+            # Check if properties array format (from action groups)
+            if isinstance(app_json, dict) and 'properties' in app_json:
+                params = {p['name']: p['value'] for p in app_json['properties']}
+            # Check if JSON string format
+            elif isinstance(app_json, str):
+                params = json.loads(app_json)
+            # Already a dict
+            else:
+                params = app_json
         else:
             # Fallback: try to parse body
             body = event.get('body', '{}')
@@ -251,28 +261,44 @@ def handle_get_working_hours(params: Dict, config: Dict, auth_headers: Dict) -> 
     """
     Action: get_working_hours
     Returns business hours for scheduling
+    Note: client_id is optional, will use default business hours if not provided
     """
-    client_id = params.get('client_id')
-
-    if not client_id:
-        raise ValueError("Missing required parameter: client_id")
+    client_id = params.get('client_id', 'default')
 
     if USE_MOCK_API:
         logger.info(f"[MOCK] Fetching business hours for client {client_id}")
         response = get_mock_business_hours(client_id)
     else:
         logger.info(f"[REAL] Fetching business hours for client {client_id}")
-        url = config['business_hours_url']
-        res = requests.get(url, headers=auth_headers, timeout=30)
-        res.raise_for_status()
-        response = res.json()
+        if not params.get('client_id'):
+            # Return default business hours if no client_id provided
+            response = {
+                "status": "success",
+                "data": {
+                    "workHours": [
+                        {"day": "Monday", "open": "08:00", "close": "18:00"},
+                        {"day": "Tuesday", "open": "08:00", "close": "18:00"},
+                        {"day": "Wednesday", "open": "08:00", "close": "18:00"},
+                        {"day": "Thursday", "open": "08:00", "close": "18:00"},
+                        {"day": "Friday", "open": "08:00", "close": "18:00"},
+                        {"day": "Saturday", "open": "09:00", "close": "16:00"},
+                        {"day": "Sunday", "open": "Closed", "close": "Closed"}
+                    ],
+                    "timezone": "America/New_York"
+                }
+            }
+        else:
+            url = config['business_hours_url']
+            res = requests.get(url, headers=auth_headers, timeout=30)
+            res.raise_for_status()
+            response = res.json()
 
     data = response.get("data", {})
     return {
         "action": "get_working_hours",
         "client_id": client_id,
         "business_hours": data.get("workHours", []),
-        "timezone": data.get("timezone"),
+        "timezone": data.get("timezone", "America/New_York"),
         "mock_mode": USE_MOCK_API
     }
 

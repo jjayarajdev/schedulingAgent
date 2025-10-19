@@ -1,0 +1,82 @@
+AI Scheduling Agent — Vision & High-Level Plan
+
+Problem (short)
+
+Service businesses burn cash and margin on phone jockeys and coordinators. They answer phones, confirm, reschedule, follow up, handle status requests, nonstop. It’s expensive, error-prone, and slow. That friction kills revenue, creates no-shows, and drags down customer experience.
+
+Bold Goal
+
+Build an AI Scheduling & Interaction Agent that handle ≥80% of customer and coordinator scheduling tasks,  reliably, 24/7, so customers get fast, accurate service and our teams focus on high-value work. No attitude. No excuses. Just fewer manual touches, more bookings, fewer no-shows, and measurable ROI.
+
+Vision (what success looks like)
+
+Consumers self-serve or have natural phone conversations to book, confirm, reschedule, cancel, add notes, and get status with live, accurate data.
+Coordinators use the same agent internally to route-optimize, bulk-schedule, validate orders, suggest fixes, and run admin commands (e.g., “optimize projects 123-132 for tomorrow; show arrival windows”).
+Agent works across chat (portal), SMS, and voice with identical capabilities and full auditability in ProjectsForce 360.
+Built with guardrails: function-only writes for any system-changing action, hallucination detection, PII masking, and legal/TCPA compliance.
+Core Capabilities (concrete)
+
+Customer-facing
+
+Book / reschedule / cancel appointments.
+Confirm appointment details and tech info.
+Provide real-time order status and ETA.
+Add order notes, photos, or prep instructions.
+Weather-aware scheduling suggestions for weather-sensitive categories (roofing, exterior installs): warns of risk and gently offers alternatives.
+Internal / Coordinator-facing
+
+Natural language admin commands (chat/Slack/console): “Route-optimize these 10 projects for tomorrow” → returns prioritized schedule + arrival windows.
+Bulk ops: batch assign, unassign, bulk reschedule with human override.
+Intelligent order validation: flags likely problems (missing permit, conflicting dates, missing measurements).
+Context cards: summarized job + recent communication + risk flags.
+Channel Parity
+
+Identical capabilities via chat, SMS, and inbound/outbound voice.
+Voice: STT → NLU → orchestrator → TTS; confirmations recorded + transcript stored.
+Guardrails & Safety
+
+Function-only writes for bookings/reschedules (LLM suggests, system executes only after schema-validated call).
+Golden-dataset checks and hallucination detection for factual queries.
+Confirmation step for critical writes (e.g., “I’ll schedule that for May 5 at 9 AM, confirm?”).
+Full audit log: action, timestamp, actor (AI or human), transcript.
+TCPA/legal consent capture before outbound calls; PII masked in logs.
+Example Customer Flow (happy path)
+
+Job marked RTS in PF360 → system triggers outbound SMS/phone invite.
+Customer replies “Yes” or picks a slot via link. OR Agent calls: “Hi, we can do Tue 9–11 or Wed 1–3. Which works?”
+Agent confirms, writes via function call, sends calendar invite + prep checklist, logs transcript.
+24-hour reminder: Agent calls/texts, asks readiness question, offers reschedule if needed.
+If anything, unexpected appears, agent routes to human with full context.
+Example Coordinator Flow (happy path)
+
+Coordinator pastes 10 project numbers into chat: “Optimize for tomorrow.”
+Agent returns optimized route, suggested arrival windows, and highlights conflicts.
+Coordinator asks: “Assign these to Team A and confirm.” Agent performs assign after confirmation and logs action.
+Non-Functional Requirements
+
+High accuracy for intent detection and slot filling (target: >95% on happy-path tests).
+Low latency for chat responses (<1s target) and acceptable voice round-trip (<2–3s average STT/TTS).
+Scalable to X calls/messages/hour (we’ll determine capacity after usage costing).
+Secure: encryption in transit and at rest; access controls for logs/transcripts.
+KPIs (measure from Day 1)
+
+% of scheduling tasks fully automated (target ≥80%).
+Avg time-to-book (baseline vs post-launch).
+No-show rate change.
+Support ticket deflection (%) tied to scheduling/support queries.
+% of escalations to humans and root causes.
+Customer satisfaction post-interaction (CSAT).
+Accuracy of function-call writes (errors per 1,000 writes).
+Pilot Plan (practical)
+
+Scope: Book/confirm/reschedule + status queries via SMS and chat. Voice inbound/outbound as optional second wave.
+Pilot customers: 5–10 friendly accounts; limited categories (interior installs, flooring) then expand to weather-affected categories.
+Window: 2-week pilot, monitored in real-time with override capability.
+Success gate: 70%+ fully automated bookings with <2% critical write errors.
+Risks & Mitigations — be explicit
+
+Hallucinations → enforce function-only writes; golden dataset + response validation.
+STT failures/noisy lines → SMS fallback + human override for uncertain utterances.
+API instability → develop against stubs; require API contract freeze before pilot; idempotent writes.
+TCPA/consent → legal signoff + consent capture before outbound; opt-out handling built-in.
+Customer trust → always show “You’re speaking with ProjectsForce Agent, human escalation available” and provide easy human-in-loop path.

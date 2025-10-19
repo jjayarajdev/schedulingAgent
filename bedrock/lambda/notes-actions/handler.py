@@ -47,11 +47,25 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
     """
     try:
         # Bedrock Agent passes parameters in different ways
-        if 'parameters' in event:
+        if 'parameters' in event and event['parameters']:
             params = {p['name']: p['value'] for p in event['parameters']}
         elif 'requestBody' in event:
             content = event['requestBody'].get('content', {})
-            params = json.loads(content.get('application/json', '{}'))
+            app_json = content.get('application/json', {})
+
+            # Check if properties array format (from action groups)
+            if isinstance(app_json, dict) and 'properties' in app_json:
+                properties = app_json['properties']
+                if isinstance(properties, list):
+                    params = {p['name']: p['value'] for p in properties}
+                else:
+                    params = properties
+            # Check if JSON string format
+            elif isinstance(app_json, str):
+                params = json.loads(app_json)
+            # Already a dict
+            else:
+                params = app_json
         else:
             # Fallback: try to parse body
             body = event.get('body', '{}')
@@ -64,7 +78,7 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
         return params
 
     except Exception as e:
-        logger.error(f"Error extracting parameters: {str(e)}")
+        logger.error(f"Error extracting parameters: {str(e)}", exc_info=True)
         return {}
 
 def format_success_response(event: Dict, action: str, result: Dict[str, Any]) -> Dict[str, Any]:
