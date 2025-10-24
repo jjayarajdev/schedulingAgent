@@ -1,0 +1,12 @@
+# Lambda Layer Dependencies for Bedrock Agents
+# Python 3.11+
+
+# HTTP requests with retry logic
+requests>=2.31.0
+
+# AWS SDK (DynamoDB)
+boto3>=1.28.0
+botocore>=1.31.0
+
+# Timezone handling
+pytz>=2024.1

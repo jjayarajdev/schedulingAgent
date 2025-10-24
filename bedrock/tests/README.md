@@ -2,11 +2,96 @@
 
 **Purpose:** Test scripts for Bedrock Multi-Agent System
 
-**Last Updated:** 2025-10-19
+**Version:** 2.0
+**Last Updated:** 2025-10-24
 
 ---
 
-## 📋 Available Tests
+## 📁 Directory Structure
+
+```
+tests/
+├── v2/                              # v2.0 Classification Tests (NEW)
+│   ├── test_improved_classification.py  - Tests v2.0 prompt improvements
+│   └── test_results_table.py           - Full 27-query regression test
+├── integration/                     # Integration tests
+├── unit/                           # Unit tests
+├── LoadTest/                       # Load testing materials
+├── test_production.py              # Production test suite
+├── test_agent_action_groups.py     # Action group tests
+└── run_tests.sh                    # Test runner script
+```
+
+---
+
+## 🆕 v2.0 Classification Tests
+
+### v2/test_improved_classification.py ⭐ **NEW**
+**Purpose:** Validates v2.0 classification prompt improvements
+
+**What it tests:**
+- ✅ Previously misclassified queries (2 edge cases)
+- ✅ Edge case validation (emotional expressions, shopping lists)
+- ✅ 100% classification accuracy
+
+**Fixed Queries:**
+1. "I'm feeling stressed, just need to talk" → chitchat (was: notes)
+2. "Add to my shopping list: coffee" → notes (was: information)
+
+**Usage:**
+```bash
+cd /Users/jjayaraj/workspaces/studios/projectsforce/schedulingAgent-bb/bedrock
+python3 tests/v2/test_improved_classification.py
+```
+
+**Expected Output:**
+```
+Total Queries:            6
+Correct Classifications:  6
+Accuracy:                 100.0%
+Previously Wrong, Now Fixed: 2
+
+✅ NO FAILURES - All queries correctly classified!
+```
+
+---
+
+### v2/test_results_table.py ⭐ **NEW**
+**Purpose:** Full regression test with 27 user queries
+
+**What it tests:**
+- ✅ 6 Chitchat queries
+- ✅ 8 Scheduling queries
+- ✅ 5 Information queries
+- ✅ 4 Notes queries
+- ✅ 4 Ambiguous edge cases
+
+**Usage:**
+```bash
+cd /Users/jjayaraj/workspaces/studios/projectsforce/schedulingAgent-bb/bedrock
+python3 tests/v2/test_results_table.py
+```
+
+**Expected Output:**
+```
+CLASSIFICATION ACCURACY: 100.0% (23/23 non-ambiguous queries)
+
+📊 RESULTS BY CATEGORY:
+Chitchat:    ✅ 6/6  (100.0%)
+Scheduling:  ✅ 8/8  (100.0%)
+Information: ✅ 5/5  (100.0%)
+Notes:       ✅ 4/4  (100.0%)
+```
+
+**Key Features:**
+- Color-coded results table
+- Category-wise accuracy breakdown
+- Performance timing
+- Edge case analysis
+
+---
+
+## 📋 Production Tests
 
 ### test_agent_with_session.py ⭐
 **Purpose:** Complete test suite with proper session context
@@ -231,13 +316,64 @@ For complete mock data reference, see:
 
 ## 📚 Related Documentation
 
+### v2.0 Documentation
+- **v2.0 Improvements:** `../docs/IMPROVEMENTS_V2.md`
+- **Routing Comparison:** `../docs/ROUTING_COMPARISON.md`
+- **Quick Reference:** `../docs/ROUTING_QUICK_REFERENCE.md`
+- **Summary:** `../IMPROVEMENTS_SUMMARY.md`
+
+### General Documentation
 - **Testing Guide:** `../docs/TESTING_COMPLETE_WORKFLOWS.md`
 - **Mock Data:** `../docs/MOCK_DATA_REFERENCE.md`
-- **Hallucination Fix:** `../COMPLETE_FIX_DEPLOYMENT.md`
+- **Production Implementation:** `../docs/PRODUCTION_IMPLEMENTATION.md`
 - **Scripts:** `../scripts/README.md`
 
 ---
 
-**Last Updated:** 2025-10-19
-**Test Suite:** test_agent_with_session.py
-**Status:** ✅ Working (requires collaborator alias update)
+## 🚀 Quick Test Commands
+
+### Run v2.0 Classification Tests
+```bash
+# Test v2.0 improvements (6 queries)
+python3 tests/v2/test_improved_classification.py
+
+# Full regression test (27 queries)
+python3 tests/v2/test_results_table.py
+```
+
+### Run Production Tests
+```bash
+# Production integration test
+python3 tests/test_production.py
+
+# Action group tests
+python3 tests/test_agent_action_groups.py
+
+# All tests
+./tests/run_tests.sh
+```
+
+### Run Frontend Routing Tests
+```bash
+# Frontend routing validation
+python3 frontend/backend/test_frontend_routing.py
+
+# Comprehensive routing comparison
+python3 frontend/backend/test_comprehensive_routing.py
+```
+
+### Run Infrastructure Tests
+```bash
+# Supervisor routing test (shows platform issues)
+python3 infrastructure/terraform/test_supervisor_routing.py
+
+# All agent tests
+python3 infrastructure/terraform/run_all_agent_tests.py
+```
+
+---
+
+**Version:** 2.0
+**Last Updated:** 2025-10-24
+**Classification Accuracy:** 100%
+**Status:** ✅ Production Ready

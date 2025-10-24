@@ -20,14 +20,14 @@
                 "properties": {
                   "customer_id": {
                     "type": "string",
-                    "description": "Unique identifier for the customer"
+                    "description": "Unique identifier for the customer (automatically provided from session attributes)"
                   },
                   "client_id": {
                     "type": "string",
-                    "description": "Client identifier (e.g., 'projectsforce-validation')"
+                    "description": "Client identifier (automatically provided from session attributes)"
                   }
                 },
-                "required": ["customer_id", "client_id"]
+                "required": []
               }
             }
           }
@@ -83,10 +83,10 @@
                   },
                   "customer_id": {
                     "type": "string",
-                    "description": "Unique identifier for the customer"
+                    "description": "Unique identifier for the customer (automatically provided from session attributes)"
                   }
                 },
-                "required": ["project_id", "customer_id"]
+                "required": ["project_id"]
               }
             }
           }
@@ -147,10 +147,10 @@
                   },
                   "customer_id": {
                     "type": "string",
-                    "description": "Unique identifier for the customer"
+                    "description": "Unique identifier for the customer (automatically provided from session attributes)"
                   }
                 },
-                "required": ["project_id", "date", "customer_id"]
+                "required": ["project_id", "date"]
               }
             }
           }
@@ -211,7 +211,7 @@
                   },
                   "customer_id": {
                     "type": "string",
-                    "description": "Unique identifier for the customer"
+                    "description": "Unique identifier for the customer (automatically provided from session attributes)"
                   },
                   "date": {
                     "type": "string",
@@ -237,7 +237,7 @@
                     "description": "Optional notes for the appointment"
                   }
                 },
-                "required": ["project_id", "customer_id", "date", "time_slot_id", "start_time", "end_time"]
+                "required": ["project_id", "date", "time_slot_id", "start_time", "end_time"]
               }
             }
           }
@@ -288,7 +288,7 @@
                   },
                   "customer_id": {
                     "type": "string",
-                    "description": "Unique identifier for the customer"
+                    "description": "Unique identifier for the customer (automatically provided from session attributes)"
                   },
                   "new_date": {
                     "type": "string",
@@ -310,7 +310,7 @@
                     "description": "New end time in HH:MM format"
                   }
                 },
-                "required": ["appointment_id", "customer_id", "new_date", "new_time_slot_id", "new_start_time", "new_end_time"]
+                "required": ["appointment_id", "new_date", "new_time_slot_id", "new_start_time", "new_end_time"]
               }
             }
           }
@@ -359,14 +359,14 @@
                   },
                   "customer_id": {
                     "type": "string",
-                    "description": "Unique identifier for the customer"
+                    "description": "Unique identifier for the customer (automatically provided from session attributes)"
                   },
                   "cancellation_reason": {
                     "type": "string",
                     "description": "Optional reason for cancellation"
                   }
                 },
-                "required": ["appointment_id", "customer_id"]
+                "required": ["appointment_id"]
               }
             }
           }

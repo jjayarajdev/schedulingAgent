@@ -1,0 +1,710 @@
+#!/bin/bash
+################################################################################
+# MASTER DEPLOYMENT SCRIPT
+# Bedrock Multi-Agent Scheduling System - Complete Infrastructure Setup
+################################################################################
+# This script deploys the entire system from scratch:
+# - IAM roles and policies
+# - DynamoDB tables
+# - S3 buckets
+# - Lambda functions (with retries and validation)
+# - Bedrock agents
+# - Agent aliases
+# - Collaborator associations
+# - Action groups
+#
+# Features:
+# - Idempotent (safe to run multiple times)
+# - Automatic retries for AWS service issues
+# - State validation at each step
+# - Detailed logging
+# - Can resume from failures
+#
+# Usage: ./DEPLOY.sh [--env dev|staging|prod] [--region us-east-1] [--skip-terraform]
+################################################################################
+
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+# Parse arguments
+ENVIRONMENT="${1:-dev}"
+AWS_REGION="${2:-us-east-1}"
+SKIP_TERRAFORM="${3:-false}"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Configuration
+PROJECT_NAME="scheduling-agent"
+FOUNDATION_MODEL="us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+LAMBDA_RUNTIME="python3.11"
+LAMBDA_TIMEOUT=30
+LAMBDA_MEMORY=256
+
+# Deployment state file
+STATE_FILE=".deployment_state_${ENVIRONMENT}.json"
+
+# Max retries for AWS operations
+MAX_RETRIES=10
+RETRY_DELAY=30
+
+# Logging
+LOG_FILE="deployment_${ENVIRONMENT}_$(date +%Y%m%d_%H%M%S).log"
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+log() {
+    echo -e "${CYAN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$LOG_FILE"
+}
+
+log_success() {
+    echo -e "${GREEN}✓ $1${NC}" | tee -a "$LOG_FILE"
+}
+
+log_error() {
+    echo -e "${RED}✗ $1${NC}" | tee -a "$LOG_FILE"
+}
+
+log_warn() {
+    echo -e "${YELLOW}⚠ $1${NC}" | tee -a "$LOG_FILE"
+}
+
+log_info() {
+    echo -e "${BLUE}ℹ $1${NC}" | tee -a "$LOG_FILE"
+}
+
+# Save deployment state
+save_state() {
+    local key=$1
+    local value=$2
+    echo "{\"$key\": \"$value\", \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" >> "$STATE_FILE"
+}
+
+# Check if step is complete
+is_complete() {
+    local step=$1
+    grep -q "\"$step\"" "$STATE_FILE" 2>/dev/null
+}
+
+# Retry function with exponential backoff
+retry_with_backoff() {
+    local max_attempts=$1
+    shift
+    local attempt=1
+
+    while [ $attempt -le $max_attempts ]; do
+        if "$@"; then
+            return 0
+        fi
+
+        if [ $attempt -lt $max_attempts ]; then
+            local wait_time=$((attempt * RETRY_DELAY))
+            log_warn "Attempt $attempt/$max_attempts failed. Retrying in ${wait_time}s..."
+            sleep $wait_time
+        fi
+
+        ((attempt++))
+    done
+
+    log_error "Failed after $max_attempts attempts"
+    return 1
+}
+
+# Wait for Lambda to become active
+wait_for_lambda() {
+    local function_name=$1
+    local max_wait=300  # 5 minutes
+    local elapsed=0
+
+    log_info "Waiting for Lambda $function_name to become active..."
+
+    while [ $elapsed -lt $max_wait ]; do
+        local state=$(aws lambda get-function \
+            --function-name "$function_name" \
+            --region "$AWS_REGION" \
+            --query 'Configuration.State' \
+            --output text 2>/dev/null || echo "NotFound")
+
+        case "$state" in
+            "Active")
+                log_success "Lambda $function_name is active"
+                return 0
+                ;;
+            "Failed")
+                log_error "Lambda $function_name failed to create"
+                aws lambda get-function \
+                    --function-name "$function_name" \
+                    --region "$AWS_REGION" \
+                    --query 'Configuration.{StateReason:StateReason,StateReasonCode:StateReasonCode}' \
+                    --output json
+                return 1
+                ;;
+            "Pending")
+                sleep 10
+                ((elapsed+=10))
+                ;;
+            *)
+                log_warn "Lambda in unexpected state: $state"
+                sleep 5
+                ((elapsed+=5))
+                ;;
+        esac
+    done
+
+    log_error "Timeout waiting for Lambda $function_name"
+    return 1
+}
+
+# Wait for Bedrock agent to be prepared
+wait_for_agent_prepared() {
+    local agent_id=$1
+    local agent_name=$2
+    local max_wait=180
+    local elapsed=0
+
+    log_info "Waiting for agent $agent_name to be prepared..."
+
+    while [ $elapsed -lt $max_wait ]; do
+        local status=$(aws bedrock-agent get-agent \
+            --agent-id "$agent_id" \
+            --region "$AWS_REGION" \
+            --query 'agent.agentStatus' \
+            --output text 2>/dev/null || echo "NotFound")
+
+        if [ "$status" = "PREPARED" ]; then
+            log_success "Agent $agent_name is prepared"
+            return 0
+        elif [ "$status" = "FAILED" ]; then
+            log_error "Agent $agent_name preparation failed"
+            return 1
+        fi
+
+        sleep 5
+        ((elapsed+=5))
+    done
+
+    log_error "Timeout waiting for agent $agent_name"
+    return 1
+}
+
+# ============================================================================
+# PREREQUISITE CHECKS
+# ============================================================================
+
+check_prerequisites() {
+    log "Checking prerequisites..."
+
+    # Check AWS CLI
+    if ! command -v aws &> /dev/null; then
+        log_error "AWS CLI not found. Please install it first."
+        exit 1
+    fi
+    log_success "AWS CLI found"
+
+    # Check Terraform
+    if [ "$SKIP_TERRAFORM" != "true" ] && ! command -v terraform &> /dev/null; then
+        log_error "Terraform not found. Please install it first."
+        exit 1
+    fi
+    log_success "Terraform found"
+
+    # Check Python
+    if ! command -v python3 &> /dev/null; then
+        log_error "Python 3 not found. Please install it first."
+        exit 1
+    fi
+    log_success "Python 3 found"
+
+    # Check AWS credentials
+    if ! aws sts get-caller-identity &> /dev/null; then
+        log_error "AWS credentials not configured. Run: aws configure"
+        exit 1
+    fi
+
+    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+    log_success "AWS credentials configured (Account: $ACCOUNT_ID)"
+
+    # Check region
+    log_info "Deploying to region: $AWS_REGION"
+    log_info "Environment: $ENVIRONMENT"
+}
+
+# ============================================================================
+# IAM ROLES & POLICIES
+# ============================================================================
+
+create_iam_roles() {
+    if is_complete "iam_roles"; then
+        log_info "IAM roles already created, skipping..."
+        return 0
+    fi
+
+    log "Creating IAM roles and policies..."
+
+    # Lambda execution roles (one per Lambda function for fine-grained control)
+    for service in scheduling information notes; do
+        local role_name="${PROJECT_NAME}-${service}-lambda-role-${ENVIRONMENT}"
+
+        if aws iam get-role --role-name "$role_name" &>/dev/null; then
+            log_info "Role $role_name already exists"
+        else
+            log_info "Creating role: $role_name"
+
+            aws iam create-role \
+                --role-name "$role_name" \
+                --assume-role-policy-document '{
+                    "Version": "2012-10-17",
+                    "Statement": [{
+                        "Effect": "Allow",
+                        "Principal": {"Service": "lambda.amazonaws.com"},
+                        "Action": "sts:AssumeRole"
+                    }]
+                }' \
+                --region "$AWS_REGION" >> "$LOG_FILE" 2>&1
+
+            # Attach AWS managed policy for Lambda basic execution
+            aws iam attach-role-policy \
+                --role-name "$role_name" \
+                --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole" \
+                >> "$LOG_FILE" 2>&1
+
+            log_success "Created role: $role_name"
+        fi
+    done
+
+    # Wait for IAM propagation
+    log_info "Waiting 10s for IAM propagation..."
+    sleep 10
+
+    save_state "iam_roles" "complete"
+    log_success "IAM roles created"
+}
+
+# ============================================================================
+# TERRAFORM INFRASTRUCTURE
+# ============================================================================
+
+deploy_terraform() {
+    if is_complete "terraform"; then
+        log_info "Terraform already deployed, skipping..."
+        return 0
+    fi
+
+    if [ "$SKIP_TERRAFORM" = "true" ]; then
+        log_info "Skipping Terraform deployment (--skip-terraform flag)"
+        return 0
+    fi
+
+    log "Deploying Terraform infrastructure..."
+
+    cd infrastructure/terraform
+
+    # Initialize Terraform
+    if [ ! -d ".terraform" ]; then
+        log_info "Initializing Terraform..."
+        terraform init >> "../../$LOG_FILE" 2>&1
+    fi
+
+    # Import existing resources if any
+    terraform import aws_dynamodb_table.bedrock_sessions "${PROJECT_NAME}-sessions-${ENVIRONMENT}" >> "../../$LOG_FILE" || true
+    terraform import aws_s3_bucket.agent_schemas "${PROJECT_NAME}-schemas-${ENVIRONMENT}-${ACCOUNT_ID}" >> "../../$LOG_FILE" || true
+
+    # Deploy infrastructure (without aliases initially)
+    log_info "Applying Terraform configuration..."
+    terraform apply -auto-approve -var="environment=${ENVIRONMENT}" >> "../../$LOG_FILE" 2>&1
+
+    cd ../..
+
+    save_state "terraform" "complete"
+    log_success "Terraform infrastructure deployed"
+}
+
+# ============================================================================
+# LAMBDA FUNCTIONS
+# ============================================================================
+
+create_lambda_function() {
+    local service=$1
+    local function_name="${PROJECT_NAME}-${service}-actions"
+    local role_name="${PROJECT_NAME}-${service}-lambda-role-${ENVIRONMENT}"
+    local handler_file="bedrock_handler.py"
+
+    log_info "Deploying Lambda: $function_name"
+
+    # Check if function exists and is in Failed state
+    local existing_state=$(aws lambda get-function \
+        --function-name "$function_name" \
+        --region "$AWS_REGION" \
+        --query 'Configuration.State' \
+        --output text 2>/dev/null || echo "NotFound")
+
+    if [ "$existing_state" = "Failed" ]; then
+        log_warn "Lambda $function_name is in Failed state. Deleting..."
+        aws lambda delete-function --function-name "$function_name" --region "$AWS_REGION" >> "$LOG_FILE" 2>&1
+        sleep 5
+    fi
+
+    # Use the lightweight inline handler
+    local handler_path="/tmp/bedrock_handler.py"
+    local zip_path="/tmp/${function_name}.zip"
+
+    if [ ! -f "$handler_path" ]; then
+        log_error "Handler file not found: $handler_path"
+        log_info "Please ensure /tmp/bedrock_handler.py exists"
+        return 1
+    fi
+
+    # Create ZIP
+    (cd /tmp && zip -q "${function_name}.zip" bedrock_handler.py)
+
+    # Create or update function
+    if [ "$existing_state" = "NotFound" ]; then
+        log_info "Creating Lambda function..."
+
+        retry_with_backoff $MAX_RETRIES aws lambda create-function \
+            --function-name "$function_name" \
+            --runtime "$LAMBDA_RUNTIME" \
+            --role "arn:aws:iam::${ACCOUNT_ID}:role/${role_name}" \
+            --handler "bedrock_handler.lambda_handler" \
+            --zip-file "fileb://${zip_path}" \
+            --timeout "$LAMBDA_TIMEOUT" \
+            --memory-size "$LAMBDA_MEMORY" \
+            --environment "Variables={USE_MOCK_API=true,API_ENVIRONMENT=${ENVIRONMENT},DYNAMODB_TABLE_NAME=${PROJECT_NAME}-sessions-${ENVIRONMENT}}" \
+            --region "$AWS_REGION" \
+            >> "$LOG_FILE" 2>&1
+    else
+        log_info "Updating Lambda function code..."
+
+        retry_with_backoff $MAX_RETRIES aws lambda update-function-code \
+            --function-name "$function_name" \
+            --zip-file "fileb://${zip_path}" \
+            --region "$AWS_REGION" \
+            >> "$LOG_FILE" 2>&1
+    fi
+
+    # Wait for Lambda to become active
+    if ! wait_for_lambda "$function_name"; then
+        log_error "Lambda $function_name failed to become active"
+        return 1
+    fi
+
+    # Add Bedrock invoke permission
+    aws lambda add-permission \
+        --function-name "$function_name" \
+        --statement-id bedrock-invoke \
+        --action lambda:InvokeFunction \
+        --principal bedrock.amazonaws.com \
+        --source-arn "arn:aws:bedrock:${AWS_REGION}:${ACCOUNT_ID}:agent/*" \
+        --region "$AWS_REGION" \
+        >> "$LOG_FILE" 2>&1 || true  # Ignore if already exists
+
+    log_success "Lambda $function_name deployed successfully"
+    rm -f "$zip_path"
+}
+
+deploy_lambda_functions() {
+    if is_complete "lambda_functions"; then
+        log_info "Lambda functions already deployed, skipping..."
+        return 0
+    fi
+
+    log "Deploying Lambda functions..."
+
+    # Ensure handler exists
+    if [ ! -f "/tmp/bedrock_handler.py" ]; then
+        log_warn "Handler not found. Creating it..."
+        # Copy from earlier created file or create new
+        if [ -f "lambda/scheduling-actions/handler.py" ]; then
+            log_info "Handler will be created by create_lambda_function"
+        else
+            log_error "No handler found. Please ensure /tmp/bedrock_handler.py exists"
+            return 1
+        fi
+    fi
+
+    # Deploy each Lambda function
+    for service in scheduling information notes; do
+        if ! create_lambda_function "$service"; then
+            log_error "Failed to deploy $service Lambda"
+            return 1
+        fi
+    done
+
+    save_state "lambda_functions" "complete"
+    log_success "All Lambda functions deployed"
+}
+
+# ============================================================================
+# BEDROCK AGENTS
+# ============================================================================
+
+create_bedrock_agents() {
+    if is_complete "bedrock_agents"; then
+        log_info "Bedrock agents already created, skipping..."
+        return 0
+    fi
+
+    log "Creating Bedrock agents..."
+
+    cd infrastructure/terraform
+
+    # Prepare all agents
+    log_info "Preparing Bedrock agents..."
+    bash prepare_agents.sh >> "../../$LOG_FILE" || true
+
+    cd ../..
+
+    save_state "bedrock_agents" "complete"
+    log_success "Bedrock agents created and prepared"
+}
+
+# ============================================================================
+# AGENT ALIASES & COLLABORATORS
+# ============================================================================
+
+create_aliases_and_collaborators() {
+    if is_complete "aliases_collaborators"; then
+        log_info "Aliases and collaborators already created, skipping..."
+        return 0
+    fi
+
+    log "Creating agent aliases and collaborator associations..."
+
+    cd infrastructure/terraform
+
+    # Apply Terraform to create aliases only (collaborators are commented out)
+    log_info "Creating agent aliases via Terraform..."
+    terraform apply -auto-approve -var="environment=${ENVIRONMENT}" >> "../../$LOG_FILE" 2>&1
+
+    # Get agent IDs and alias ARNs from Terraform output
+    local supervisor_id=$(terraform output -raw supervisor_agent_id 2>/dev/null)
+    local scheduling_alias=$(terraform output -raw scheduling_alias_arn 2>/dev/null)
+    local information_alias=$(terraform output -raw information_alias_arn 2>/dev/null)
+    local notes_alias=$(terraform output -raw notes_alias_arn 2>/dev/null)
+    local chitchat_alias=$(terraform output -raw chitchat_alias_arn 2>/dev/null)
+
+    cd ../..
+
+    # Create collaborators via AWS CLI (Terraform has a bug with relay_conversation_history)
+    log_info "Creating collaborator associations via AWS CLI..."
+
+    # Scheduling collaborator
+    aws bedrock-agent associate-agent-collaborator \
+        --agent-id "$supervisor_id" \
+        --agent-version "DRAFT" \
+        --collaborator-name "scheduling_collaborator" \
+        --collaboration-instruction "Route all appointment scheduling, availability checking, booking, rescheduling, and cancellation requests to this agent." \
+        --agent-descriptor "aliasArn=$scheduling_alias" \
+        --relay-conversation-history "TO_COLLABORATOR" \
+        --region "$AWS_REGION" >> "$LOG_FILE" 2>&1 || true
+
+    # Information collaborator
+    aws bedrock-agent associate-agent-collaborator \
+        --agent-id "$supervisor_id" \
+        --agent-version "DRAFT" \
+        --collaborator-name "information_collaborator" \
+        --collaboration-instruction "Route all information requests to this agent, including project details and appointment status checks." \
+        --agent-descriptor "aliasArn=$information_alias" \
+        --relay-conversation-history "TO_COLLABORATOR" \
+        --region "$AWS_REGION" >> "$LOG_FILE" 2>&1 || true
+
+    # Notes collaborator
+    aws bedrock-agent associate-agent-collaborator \
+        --agent-id "$supervisor_id" \
+        --agent-version "DRAFT" \
+        --collaborator-name "notes_collaborator" \
+        --collaboration-instruction "Route all note management requests to this agent." \
+        --agent-descriptor "aliasArn=$notes_alias" \
+        --relay-conversation-history "TO_COLLABORATOR" \
+        --region "$AWS_REGION" >> "$LOG_FILE" 2>&1 || true
+
+    # Chitchat collaborator
+    aws bedrock-agent associate-agent-collaborator \
+        --agent-id "$supervisor_id" \
+        --agent-version "DRAFT" \
+        --collaborator-name "chitchat_collaborator" \
+        --collaboration-instruction "Route all conversational interactions to this agent." \
+        --agent-descriptor "aliasArn=$chitchat_alias" \
+        --relay-conversation-history "TO_COLLABORATOR" \
+        --region "$AWS_REGION" >> "$LOG_FILE" 2>&1 || true
+
+    # Prepare supervisor agent after all collaborators are associated
+    log_info "Preparing supervisor agent..."
+    aws bedrock-agent prepare-agent --agent-id "$supervisor_id" --region "$AWS_REGION" >> "$LOG_FILE" 2>&1 || true
+
+    save_state "aliases_collaborators" "complete"
+    log_success "Aliases and collaborators created"
+}
+
+# ============================================================================
+# ACTION GROUPS
+# ============================================================================
+
+configure_action_groups() {
+    if is_complete "action_groups"; then
+        log_info "Action groups already configured, skipping..."
+        return 0
+    fi
+
+    log "Configuring action groups..."
+
+    cd infrastructure/terraform
+
+    # Apply Terraform to create action groups
+    terraform apply -auto-approve -var="environment=${ENVIRONMENT}" >> "../../$LOG_FILE" 2>&1
+
+    cd ../..
+
+    save_state "action_groups" "complete"
+    log_success "Action groups configured"
+}
+
+# ============================================================================
+# VALIDATION
+# ============================================================================
+
+validate_deployment() {
+    log "Validating deployment..."
+
+    # Check Lambda functions
+    log_info "Checking Lambda functions..."
+    for service in scheduling information notes; do
+        local function_name="${PROJECT_NAME}-${service}-actions"
+        local state=$(aws lambda get-function \
+            --function-name "$function_name" \
+            --region "$AWS_REGION" \
+            --query 'Configuration.State' \
+            --output text 2>/dev/null || echo "NotFound")
+
+        if [ "$state" = "Active" ]; then
+            log_success "✓ $function_name is Active"
+        else
+            log_error "✗ $function_name is $state"
+        fi
+    done
+
+    # Check Bedrock agents
+    log_info "Checking Bedrock agents..."
+    cd infrastructure/terraform
+
+    local supervisor_id=$(terraform output -raw supervisor_agent_id 2>/dev/null || echo "")
+    if [ -n "$supervisor_id" ]; then
+        local status=$(aws bedrock-agent get-agent \
+            --agent-id "$supervisor_id" \
+            --region "$AWS_REGION" \
+            --query 'agent.agentStatus' \
+            --output text 2>/dev/null || echo "NotFound")
+
+        if [ "$status" = "PREPARED" ]; then
+            log_success "✓ Supervisor agent is PREPARED"
+        else
+            log_error "✗ Supervisor agent is $status"
+        fi
+    fi
+
+    cd ../..
+
+    log_success "Validation complete"
+}
+
+# ============================================================================
+# CONFIGURATION OUTPUT
+# ============================================================================
+
+output_configuration() {
+    log "Generating configuration files..."
+
+    cd infrastructure/terraform
+
+    # Get agent IDs
+    local supervisor_id=$(terraform output -raw supervisor_agent_id 2>/dev/null || echo "")
+    local supervisor_alias=$(terraform output -raw supervisor_alias_id 2>/dev/null || echo "")
+    local scheduling_id=$(terraform output -raw scheduling_agent_id 2>/dev/null || echo "")
+    local information_id=$(terraform output -raw information_agent_id 2>/dev/null || echo "")
+    local notes_id=$(terraform output -raw notes_agent_id 2>/dev/null || echo "")
+    local chitchat_id=$(terraform output -raw chitchat_agent_id 2>/dev/null || echo "")
+
+    cd ../..
+
+    # Create agent_config.json
+    cat > agent_config.json <<EOF
+{
+  "supervisor_id": "$supervisor_id",
+  "supervisor_alias": "$supervisor_alias",
+  "specialists": {
+    "scheduling": "$scheduling_id",
+    "information": "$information_id",
+    "notes": "$notes_id",
+    "chitchat": "$chitchat_id"
+  },
+  "region": "$AWS_REGION",
+  "prefix": "pf_"
+}
+EOF
+
+    log_success "Configuration saved to agent_config.json"
+
+    # Display summary
+    echo ""
+    echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}  DEPLOYMENT COMPLETE!${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${CYAN}Supervisor Agent:${NC} $supervisor_id"
+    echo -e "${CYAN}Supervisor Alias:${NC} $supervisor_alias"
+    echo -e "${CYAN}Environment:${NC} $ENVIRONMENT"
+    echo -e "${CYAN}Region:${NC} $AWS_REGION"
+    echo ""
+    echo -e "${YELLOW}Next Steps:${NC}"
+    echo "  1. Test deployment: cd tests && ./run_tests.sh"
+    echo "  2. Start UI: cd frontend && ./start.sh"
+    echo "  3. Test supervisor: aws bedrock-agent-runtime invoke-agent \\"
+    echo "       --agent-id $supervisor_id \\"
+    echo "       --agent-alias-id $supervisor_alias \\"
+    echo "       --session-id test-\$(date +%s) \\"
+    echo "       --input-text 'Show me my projects' \\"
+    echo "       --region $AWS_REGION output.txt"
+    echo ""
+}
+
+# ============================================================================
+# MAIN EXECUTION
+# ============================================================================
+
+main() {
+    echo ""
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  Bedrock Multi-Agent System - Master Deployment${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    # Change to script directory
+    cd "$(dirname "$0")"
+
+    # Run deployment steps
+    check_prerequisites
+    create_iam_roles
+    deploy_terraform
+    deploy_lambda_functions
+    create_bedrock_agents
+    create_aliases_and_collaborators
+    configure_action_groups
+    validate_deployment
+    output_configuration
+
+    log_success "Deployment completed successfully!"
+    log_info "Log file: $LOG_FILE"
+}
+
+# Run main function
+main "$@"

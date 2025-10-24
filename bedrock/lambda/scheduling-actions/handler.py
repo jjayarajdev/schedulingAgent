@@ -368,7 +368,10 @@ def lambda_handler(event, context):
         if not action:
             # Fallback: check for action in parameters
             params = extract_parameters(event)
-            action = params.get('action', '').replace('_', '-')
+            action = params.get('action', '')
+
+        # Normalize action name: convert underscores to hyphens for handler matching
+        action = action.replace('_', '-')
 
         if not action:
             return format_error_response(
