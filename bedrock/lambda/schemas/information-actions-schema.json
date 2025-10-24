@@ -1,0 +1,220 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Information Actions API",
+    "description": "API for information-related actions including project details, appointment status, working hours, and weather",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/get-project-details": {
+      "post": {
+        "summary": "Get Project Details",
+        "description": "Get detailed information about a specific project",
+        "operationId": "get_project_details",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "description": "Project ID"
+                  },
+                  "customer_id": {
+                    "type": "string",
+                    "description": "Customer ID"
+                  }
+                },
+                "required": ["project_id", "customer_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Project details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "project_details": {
+                      "type": "object"
+                    },
+                    "mock_mode": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get-appointment-status": {
+      "post": {
+        "summary": "Get Appointment Status",
+        "description": "Get the current status of an appointment for a project",
+        "operationId": "get_appointment_status",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "description": "Project ID"
+                  }
+                },
+                "required": ["project_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Appointment status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "appointment_status": {
+                      "type": "object"
+                    },
+                    "mock_mode": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get-working-hours": {
+      "post": {
+        "summary": "Get Working Hours",
+        "description": "Get business working hours for scheduling. Client ID is optional - will use default business hours if not provided.",
+        "operationId": "get_working_hours",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "client_id": {
+                    "type": "string",
+                    "description": "Client ID (e.g., 09PF05VD). Optional - defaults to standard business hours."
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Business working hours",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "client_id": {
+                      "type": "string"
+                    },
+                    "business_hours": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "timezone": {
+                      "type": "string"
+                    },
+                    "mock_mode": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get-weather": {
+      "post": {
+        "summary": "Get Weather",
+        "description": "Get weather forecast for a location",
+        "operationId": "get_weather",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "location": {
+                    "type": "string",
+                    "description": "Location (city, zipcode, or address)"
+                  }
+                },
+                "required": ["location"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Weather information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "location": {
+                      "type": "string"
+                    },
+                    "weather": {
+                      "type": "object"
+                    },
+                    "mock_mode": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

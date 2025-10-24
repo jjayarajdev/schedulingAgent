@@ -1,0 +1,39 @@
+{
+  "supervisor_id": "WF1S95L7X1",
+  "supervisor_alias": "2VOPSV9O88",
+  "agents": {
+    "scheduling": {
+      "agent_id": "TIGRBGSXCS",
+      "alias_id": "PNDF9AQVHW"
+    },
+    "information": {
+      "agent_id": "JEK4SDJOOU",
+      "alias_id": "LF61ZU9X2T"
+    },
+    "notes": {
+      "agent_id": "CF0IPHCFFY",
+      "alias_id": "YOBOR0JJM7"
+    },
+    "chitchat": {
+      "agent_id": "GXVZEOBQ64",
+      "alias_id": "RSSE65OYGM"
+    }
+  },
+  "routing": {
+    "enabled": true,
+    "method": "llm_intent_classification",
+    "use_supervisor": false,
+    "classifier_model": "anthropic.claude-3-haiku-20240307-v1:0",
+    "comments": {
+      "use_supervisor_false": "Frontend classifies intent and routes directly to specialist agents",
+      "use_supervisor_true": "Routes all requests through supervisor (when AWS fixes multi-agent collaboration)",
+      "current_status": "Using frontend routing (use_supervisor=false) due to AWS platform limitations"
+    }
+  },
+  "region": "us-east-1",
+  "prefix": "pf_",
+  "customer_context": {
+    "injection_method": "prompt_augmentation_and_session_attributes",
+    "session_attributes": ["customer_id", "customer_type", "client_id"]
+  }
+}

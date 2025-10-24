@@ -1,0 +1,402 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Scheduling Actions API",
+    "description": "API for scheduling-related actions including listing projects, checking availability, and managing appointments",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/list-projects": {
+      "post": {
+        "summary": "List Projects",
+        "description": "Get all projects for a customer. For B2B customers with multiple client locations, you can optionally filter by client_id.",
+        "operationId": "list_projects",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "customer_id": {
+                    "type": "string",
+                    "description": "Customer ID. Required to list projects."
+                  },
+                  "client_id": {
+                    "type": "string",
+                    "description": "Optional. Filter projects by specific client location (for B2B multi-client scenarios only)."
+                  }
+                },
+                "required": [
+                  "customer_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of projects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "customer_id": {
+                      "type": "string"
+                    },
+                    "project_count": {
+                      "type": "integer"
+                    },
+                    "projects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "mock_mode": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get-available-dates": {
+      "post": {
+        "summary": "Get Available Dates",
+        "description": "Get available dates for scheduling a project. Only project_id is needed.",
+        "operationId": "get_available_dates",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "description": "Project ID to check availability for"
+                  }
+                },
+                "required": [
+                  "project_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Available dates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "available_dates": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "request_id": {
+                      "type": "string"
+                    },
+                    "mock_mode": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get-time-slots": {
+      "post": {
+        "summary": "Get Time Slots",
+        "description": "Get available time slots for a specific date",
+        "operationId": "get_time_slots",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "description": "Project ID"
+                  },
+                  "date": {
+                    "type": "string",
+                    "description": "Date to check time slots for (YYYY-MM-DD)"
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "description": "Request ID from get-available-dates call"
+                  }
+                },
+                "required": [
+                  "project_id",
+                  "date",
+                  "request_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Available time slots",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "date": {
+                      "type": "string"
+                    },
+                    "available_slots": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "mock_mode": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/confirm-appointment": {
+      "post": {
+        "summary": "Confirm Appointment",
+        "description": "Confirm and schedule an appointment",
+        "operationId": "confirm_appointment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "description": "Project ID"
+                  },
+                  "date": {
+                    "type": "string",
+                    "description": "Appointment date (YYYY-MM-DD)"
+                  },
+                  "time": {
+                    "type": "string",
+                    "description": "Appointment time (HH:MM format)"
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "description": "Request ID from get-available-dates call"
+                  }
+                },
+                "required": [
+                  "project_id",
+                  "date",
+                  "time",
+                  "request_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Appointment confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "scheduled_date": {
+                      "type": "string"
+                    },
+                    "scheduled_time": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "confirmation_data": {
+                      "type": "object"
+                    },
+                    "mock_mode": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reschedule-appointment": {
+      "post": {
+        "summary": "Reschedule Appointment",
+        "description": "Reschedule an existing appointment to a new date and time",
+        "operationId": "reschedule_appointment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "description": "Project ID"
+                  },
+                  "new_date": {
+                    "type": "string",
+                    "description": "New appointment date (YYYY-MM-DD)"
+                  },
+                  "new_time": {
+                    "type": "string",
+                    "description": "New appointment time (HH:MM format)"
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "description": "Request ID from get-available-dates call"
+                  }
+                },
+                "required": [
+                  "project_id",
+                  "new_date",
+                  "new_time",
+                  "request_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Appointment rescheduled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "new_date": {
+                      "type": "string"
+                    },
+                    "new_time": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "mock_mode": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cancel-appointment": {
+      "post": {
+        "summary": "Cancel Appointment",
+        "description": "Cancel an existing appointment",
+        "operationId": "cancel_appointment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "description": "Project ID"
+                  }
+                },
+                "required": [
+                  "project_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Appointment cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "cancellation_data": {
+                      "type": "object"
+                    },
+                    "mock_mode": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

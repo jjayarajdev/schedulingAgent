@@ -51,11 +51,21 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
     """
     try:
         # Bedrock Agent passes parameters in different ways
-        if 'parameters' in event:
+        if 'parameters' in event and event['parameters']:
             params = {p['name']: p['value'] for p in event['parameters']}
         elif 'requestBody' in event:
             content = event['requestBody'].get('content', {})
-            params = json.loads(content.get('application/json', '{}'))
+            app_json = content.get('application/json', {})
+
+            # Check if properties array format (from action groups)
+            if isinstance(app_json, dict) and 'properties' in app_json:
+                params = {p['name']: p['value'] for p in app_json['properties']}
+            # Check if JSON string format
+            elif isinstance(app_json, str):
+                params = json.loads(app_json)
+            # Already a dict
+            else:
+                params = app_json
         else:
             # Fallback: try to parse body
             body = event.get('body', '{}')
@@ -358,7 +368,10 @@ def lambda_handler(event, context):
         if not action:
             # Fallback: check for action in parameters
             params = extract_parameters(event)
-            action = params.get('action', '').replace('_', '-')
+            action = params.get('action', '')
+
+        # Normalize action name: convert underscores to hyphens for handler matching
+        action = action.replace('_', '-')
 
         if not action:
             return format_error_response(
