@@ -1,6 +1,6 @@
 {
   "supervisor_id": "WF1S95L7X1",
-  "supervisor_alias": "2VOPSV9O88",
+  "supervisor_alias": "TSTALIASID",
   "agents": {
     "scheduling": {
       "agent_id": "TIGRBGSXCS",
@@ -21,13 +21,15 @@
   },
   "routing": {
     "enabled": true,
-    "method": "llm_intent_classification",
-    "use_supervisor": false,
-    "classifier_model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "method": "supervisor",
+    "use_supervisor": true,
+    "classifier_model": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
     "comments": {
       "use_supervisor_false": "Frontend classifies intent and routes directly to specialist agents",
-      "use_supervisor_true": "Routes all requests through supervisor (when AWS fixes multi-agent collaboration)",
-      "current_status": "Using frontend routing (use_supervisor=false) due to AWS platform limitations"
+      "use_supervisor_true": "Routes all requests through supervisor (uses multi-agent collaboration)",
+      "current_status": "Using supervisor routing with Claude 3.5 Sonnet V2 (supports multi-agent)",
+      "alias_note": "Using TSTALIASID to access DRAFT version with latest updates including project listing feature",
+      "production_note": "For production, create Version 2 in AWS Console and update supervisor_alias to production alias ID"
     }
   },
   "region": "us-east-1",

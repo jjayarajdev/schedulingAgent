@@ -40,6 +40,7 @@ Your primary role is to analyze customer requests and route them to the appropri
 - Check availability for appointments
 
 **Route to Information Agent when the customer asks about:**
+- **Listing all their projects ("show me all my projects", "list my projects", "what projects do I have", "my projects")**
 - Details about a specific project
 - Status of an existing appointment
 - Company working hours or business hours

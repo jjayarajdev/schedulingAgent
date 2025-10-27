@@ -23,6 +23,7 @@ from config import (
     get_auth_headers
 )
 from mock_data import (
+    get_mock_projects,
     get_mock_project_details,
     get_mock_appointment_status,
     get_mock_business_hours,
@@ -114,6 +115,60 @@ def format_error_response(event: Dict, action: str, error_message: str, status_c
 # ============================================================================
 # Action Handlers
 # ============================================================================
+
+def handle_get_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
+    """
+    Action: get_projects
+    Returns all projects for a customer
+    """
+    customer_id = params.get('customer_id')
+
+    if not customer_id:
+        raise ValueError("Missing required parameter: customer_id")
+
+    if USE_MOCK_API:
+        logger.info(f"[MOCK] Fetching all projects for customer {customer_id}")
+        response = get_mock_projects(customer_id)
+    else:
+        logger.info(f"[REAL] Fetching all projects for customer {customer_id}")
+        url = f"{config['dashboard_url']}/{customer_id}"
+        res = requests.get(url, headers=auth_headers, timeout=30)
+        res.raise_for_status()
+        dashboard_response = res.json()
+
+        # Extract and format projects list
+        projects_list = []
+        for item in dashboard_response.get("data", []):
+            projects_list.append({
+                "project_id": item.get("project_project_id"),
+                "order_number": item.get("project_project_number"),
+                "project_type": item.get("project_type_project_type"),
+                "category": item.get("project_category_category"),
+                "status": item.get("status_info_status"),
+                "address": item.get("installation_address_full_address"),
+                "scheduled_date": item.get("project_date_scheduled_date"),
+                "scheduled_time": f"{item.get('convertedProjectStartScheduledDate')} - {item.get('convertedProjectEndScheduledDate')}" if item.get('convertedProjectStartScheduledDate') else None,
+                "technician": f"{item.get('user_idata_first_name')} {item.get('user_idata_last_name')}" if item.get('user_idata_first_name') else None,
+                "store": item.get("project_store_store_number")
+            })
+
+        response = {
+            "status": "success",
+            "data": {
+                "customer_id": customer_id,
+                "projects": projects_list,
+                "total_projects": len(projects_list)
+            }
+        }
+
+    data = response.get("data", {})
+    return {
+        "action": "get_projects",
+        "customer_id": customer_id,
+        "projects": data.get("projects", []),
+        "total_projects": data.get("total_projects", 0),
+        "mock_mode": USE_MOCK_API
+    }
 
 def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
     """
@@ -392,6 +447,9 @@ def lambda_handler(event, context):
                 400
             )
 
+        # Convert underscores to hyphens for consistency
+        action = action.replace('_', '-')
+
         logger.info(f"Processing action: {action}")
 
         # Extract parameters
@@ -409,6 +467,7 @@ def lambda_handler(event, context):
 
         # Route to appropriate handler
         handlers = {
+            'get-projects': handle_get_projects,
             'get-project-details': handle_get_project_details,
             'get-appointment-status': handle_get_appointment_status,
             'get-working-hours': handle_get_working_hours,

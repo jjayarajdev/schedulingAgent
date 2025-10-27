@@ -214,8 +214,8 @@ data "aws_iam_policy_document" "collaborator_agent_permissions" {
       "bedrock:InvokeModelWithResponseStream"
     ]
     resources = [
-      # Allow access to Claude Sonnet 4.5
-      "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0",
+      # Allow access to Claude 3.5 Sonnet V2 (inference profile)
+      "arn:aws:bedrock:us-east-1:${data.aws_caller_identity.current.account_id}:inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
       # Allow access to foundation models in ALL US regions (cross-region inference requirement)
       "arn:aws:bedrock:us-east-1::foundation-model/*",
       "arn:aws:bedrock:us-east-2::foundation-model/*",

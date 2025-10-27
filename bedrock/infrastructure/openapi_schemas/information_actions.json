@@ -6,6 +6,89 @@
     "description": "API for retrieving information about projects, appointments, working hours, and weather"
   },
   "paths": {
+    "/get_projects": {
+      "post": {
+        "summary": "Get all projects for a customer",
+        "description": "Retrieves a list of all projects associated with a customer, including their status, category, and basic details",
+        "operationId": "get_projects",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "customer_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the customer"
+                  }
+                },
+                "required": ["customer_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of customer projects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "customer_id": {
+                      "type": "string"
+                    },
+                    "projects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "project_id": {
+                            "type": "string"
+                          },
+                          "order_number": {
+                            "type": "string"
+                          },
+                          "project_type": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "address": {
+                            "type": "string"
+                          },
+                          "scheduled_date": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "scheduled_time": {
+                            "type": "string"
+                          },
+                          "technician": {
+                            "type": "string"
+                          },
+                          "store": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "total_projects": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/get_project_details": {
       "post": {
         "summary": "Get detailed information about a project",
