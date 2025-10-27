@@ -8,12 +8,14 @@
 
 ## 📊 Summary
 
-Updated the classification system from Claude Haiku to Claude 3.5 Sonnet V2 for improved accuracy and performance.
+Updated all components from Claude Haiku and Claude Sonnet 4.5 to Claude 3.5 Sonnet V2.
+
+**Key Reason:** Claude 3.5 Sonnet V2 supports multi-agent supervisor collaboration, while Claude Sonnet 4.5 does not.
 
 **Key Changes:**
 - Backend classification updated to Claude 3.5 Sonnet V2
+- Terraform agents updated to Claude 3.5 Sonnet V2
 - Configuration file updated
-- Terraform already using Claude Sonnet 4.5 (newer than 3.5 V2)
 
 ---
 
@@ -56,20 +58,20 @@ modelId='anthropic.claude-3-5-sonnet-20241022-v2:0'
 
 ### Terraform Configuration
 
-**Current State:** Already using Claude Sonnet 4.5 ✅
+**Updated State:** Now using Claude 3.5 Sonnet V2 for all agents ✅
 
 **File:** `infrastructure/terraform/variables.tf`
 **Line 28:**
 ```hcl
-default = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"  # Claude Sonnet 4.5
+default = "anthropic.claude-3-5-sonnet-20241022-v2:0"  # Claude 3.5 Sonnet V2 (supports supervisor)
 ```
 
-**Note:** The Bedrock agents (supervisor and collaborators) are using Claude Sonnet 4.5, which is:
-- More advanced than Claude 3.5 Sonnet V2
-- Released September 29, 2025
-- Optimized for agent workflows
+**Critical Reason:** Claude 3.5 Sonnet V2 supports multi-agent supervisor collaboration, which is essential for:
+- Supervisor agent routing to collaborators
+- Multi-agent orchestration
+- Agent-to-agent communication
 
-**Decision:** Keep Claude Sonnet 4.5 for agents, use Claude 3.5 Sonnet V2 for classification
+**Note:** While Claude Sonnet 4.5 is newer (released September 29, 2025), it does NOT support the supervisor agent collaboration feature required for this architecture.
 
 ---
 
@@ -78,21 +80,26 @@ default = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"  # Claude Sonnet 4.5
 | Component | Previous Model | New Model | Purpose |
 |-----------|---------------|-----------|---------|
 | **Classification** | Claude Haiku | Claude 3.5 Sonnet V2 | Intent classification |
-| **Bedrock Agents** | Claude Sonnet 4.5 | Claude Sonnet 4.5 (unchanged) | Agent responses |
+| **Bedrock Agents** | Claude Sonnet 4.5 | Claude 3.5 Sonnet V2 | Agent responses |
 
-### Why Different Models?
+### Why Claude 3.5 Sonnet V2 for All Components?
 
-1. **Classification (3.5 Sonnet V2):**
+**Critical Requirement:** Multi-agent supervisor collaboration support
+
+1. **Supervisor Agent:**
+   - REQUIRES supervisor collaboration feature
+   - Only supported by Claude 3.5 Sonnet V2
+   - NOT supported by Claude Sonnet 4.5 (yet)
+
+2. **Classification:**
    - More accurate than Haiku
    - Better at edge case handling
-   - Still fast enough for real-time classification
-   - Balance of speed and accuracy
+   - Consistent model across the system
 
-2. **Agents (Sonnet 4.5):**
-   - Most advanced model available
-   - Best for complex reasoning
-   - Optimized for agent workflows
-   - Already deployed and tested
+3. **Collaborator Agents:**
+   - Must use same model as supervisor
+   - Enables proper agent-to-agent communication
+   - Supports AWS Bedrock multi-agent architecture
 
 ---
 
