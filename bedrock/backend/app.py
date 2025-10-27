@@ -113,7 +113,7 @@ def log_classification_decision(message: str, intent: str, classification_time: 
             'message_length': len(message),
             'classified_intent': intent,
             'classification_time_ms': round(classification_time * 1000, 2),
-            'model': 'haiku',
+            'model': 'claude-3.5-sonnet-v2',
             'status': 'success'
         }
 
@@ -212,10 +212,10 @@ def get_routing_metrics():
 
 def classify_intent(message):
     """
-    Classify user intent using Claude Haiku for fast, cheap classification.
+    Classify user intent using Claude 3.5 Sonnet V2 for accurate classification.
     Returns: 'scheduling', 'information', 'notes', or 'chitchat'
 
-    Version: 2.0 - Improved edge case handling
+    Version: 2.1 - Updated to Claude 3.5 Sonnet V2
     """
     prompt = f"""You are an intent classifier for a property management scheduling system.
 
@@ -259,7 +259,7 @@ Respond with ONLY the category name (scheduling/information/notes/chitchat), not
 
     try:
         response = bedrock_runtime.invoke_model(
-            modelId='anthropic.claude-3-haiku-20240307-v1:0',
+            modelId='anthropic.claude-3-5-sonnet-20241022-v2:0',
             body=json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
                 "max_tokens": 10,

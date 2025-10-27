@@ -23,7 +23,7 @@
     "enabled": true,
     "method": "llm_intent_classification",
     "use_supervisor": false,
-    "classifier_model": "anthropic.claude-3-haiku-20240307-v1:0",
+    "classifier_model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
     "comments": {
       "use_supervisor_false": "Frontend classifies intent and routes directly to specialist agents",
       "use_supervisor_true": "Routes all requests through supervisor (when AWS fixes multi-agent collaboration)",
