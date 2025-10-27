@@ -474,8 +474,8 @@ def get_metrics():
 @app.route('/api/classify', methods=['POST'])
 def classify_only():
     """
-    Classification-only endpoint for testing UI
-    Returns just the intent classification without invoking the full agent
+    Classification endpoint for testing UI
+    Returns intent classification AND invokes the agent to get actual response
     """
     data = request.json
     message = data.get('message')
@@ -488,17 +488,63 @@ def classify_only():
     try:
         # Classify the intent
         intent = classify_intent(message)
+        classification_time = time.time() - start_time
 
         # Get agent info
         agent_config = AGENTS.get(intent, AGENTS['chitchat'])
+        agent_id = agent_config['agent_id']
+        alias_id = agent_config['alias_id']
 
-        classification_time = time.time() - start_time
+        # Invoke the agent to get actual response
+        customer_id = SAMPLE_USER['customer_id']
+        customer_type = SAMPLE_USER['customer_type']
+        session_id = f"test-session-{customer_id}-{int(time.time())}"
+
+        # Create augmented prompt with context
+        augmented_prompt = f"""Session Context:
+- Customer ID: {customer_id}
+- Customer Type: {customer_type}
+
+User Request: {message}
+
+Please help the customer with their request using their customer ID for any actions."""
+
+        # Invoke agent
+        invocation_start = time.time()
+        response = bedrock_agent_runtime.invoke_agent(
+            agentId=agent_id,
+            agentAliasId=alias_id,
+            sessionId=session_id,
+            inputText=augmented_prompt,
+            sessionState={
+                'sessionAttributes': {
+                    'customer_id': customer_id,
+                    'customer_type': customer_type
+                }
+            }
+        )
+
+        # Collect full response
+        full_response = ""
+        for event in response['completion']:
+            if 'chunk' in event:
+                chunk = event['chunk']
+                if 'bytes' in chunk:
+                    full_response += chunk['bytes'].decode('utf-8')
+
+        invocation_time = time.time() - invocation_start
+        total_time = time.time() - start_time
 
         return jsonify({
             'intent': intent,
-            'agent_id': agent_config['agent_id'],
-            'agent_alias_id': agent_config['alias_id'],
+            'agent_id': agent_id,
+            'agent_alias_id': alias_id,
             'classification_time_ms': round(classification_time * 1000, 2),
+            'invocation_time_ms': round(invocation_time * 1000, 2),
+            'total_time_ms': round(total_time * 1000, 2),
+            'response': full_response,
+            'customer_id': customer_id,
+            'session_id': session_id,
             'timestamp': datetime.now().isoformat()
         })
 
