@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Bedrock configuration (load from agent_config.json)
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'agent_config.json')
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'agent_config.json')
 
 try:
     with open(CONFIG_PATH, 'r') as f:
@@ -469,6 +469,46 @@ def get_metrics():
         'metrics': metrics,
         'timestamp': datetime.now().isoformat()
     })
+
+
+@app.route('/api/classify', methods=['POST'])
+def classify_only():
+    """
+    Classification-only endpoint for testing UI
+    Returns just the intent classification without invoking the full agent
+    """
+    data = request.json
+    message = data.get('message')
+
+    if not message:
+        return jsonify({'error': 'Message is required'}), 400
+
+    start_time = time.time()
+
+    try:
+        # Classify the intent
+        intent = classify_intent(message)
+
+        # Get agent info
+        agent_config = AGENTS.get(intent, AGENTS['chitchat'])
+
+        classification_time = time.time() - start_time
+
+        return jsonify({
+            'intent': intent,
+            'agent_id': agent_config['agent_id'],
+            'agent_alias_id': agent_config['alias_id'],
+            'classification_time_ms': round(classification_time * 1000, 2),
+            'timestamp': datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        logger.error(f"Classification endpoint error: {e}")
+        return jsonify({
+            'error': str(e),
+            'intent': 'chitchat',  # Fallback
+            'classification_time_ms': round((time.time() - start_time) * 1000, 2)
+        }), 500
 
 
 if __name__ == '__main__':

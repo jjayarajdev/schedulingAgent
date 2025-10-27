@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intent Classification Testing UI - v2.0</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .header h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .header .subtitle {
+            color: #666;
+            font-size: 1.1em;
+            margin-bottom: 15px;
+        }
+
+        .header .stats {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .stat-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+
+        .stat-box .label {
+            font-size: 0.85em;
+            opacity: 0.9;
+        }
+
+        .stat-box .value {
+            font-size: 1.8em;
+            margin-top: 5px;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 1200px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .panel h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .category-section {
+            margin-bottom: 20px;
+        }
+
+        .category-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .category-badge {
+            background: rgba(255,255,255,0.3);
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.9em;
+        }
+
+        .query-button {
+            width: 100%;
+            text-align: left;
+            padding: 12px 15px;
+            margin-bottom: 8px;
+            border: 2px solid #e0e0e0;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 0.95em;
+        }
+
+        .query-button:hover {
+            background: #f8f9ff;
+            border-color: #667eea;
+            transform: translateX(5px);
+        }
+
+        .query-button.selected {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: #667eea;
+        }
+
+        .query-button.correct {
+            background: #d4edda;
+            border-color: #28a745;
+        }
+
+        .query-button.incorrect {
+            background: #f8d7da;
+            border-color: #dc3545;
+        }
+
+        .custom-input-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 2px solid #e0e0e0;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .custom-input {
+            flex: 1;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+
+        .custom-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 1em;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .results-panel {
+            min-height: 300px;
+        }
+
+        .result-card {
+            background: #f8f9ff;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .result-query {
+            font-size: 1.1em;
+            color: #333;
+            font-weight: 600;
+            margin-bottom: 15px;
+            padding: 12px;
+            background: white;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .result-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .result-row:last-child {
+            border-bottom: none;
+        }
+
+        .result-label {
+            font-weight: 600;
+            color: #666;
+        }
+
+        .result-value {
+            color: #333;
+            font-weight: 500;
+        }
+
+        .intent-badge {
+            display: inline-block;
+            padding: 6px 15px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+
+        .intent-scheduling {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .intent-information {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .intent-notes {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .intent-chitchat {
+            background: #e7d4f5;
+            color: #5a2d82;
+        }
+
+        .match-indicator {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+
+        .match-yes {
+            color: #28a745;
+        }
+
+        .match-no {
+            color: #dc3545;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #667eea;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .agent-info {
+            background: white;
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 10px;
+            border-left: 4px solid #764ba2;
+        }
+
+        .agent-info .agent-name {
+            font-weight: 600;
+            color: #764ba2;
+            margin-bottom: 5px;
+        }
+
+        .agent-info .agent-id {
+            font-family: monospace;
+            font-size: 0.85em;
+            color: #666;
+        }
+
+        .test-all-btn {
+            margin-top: 20px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+        }
+
+        .accuracy-display {
+            font-size: 3em;
+            font-weight: bold;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .accuracy-100 {
+            color: #28a745;
+        }
+
+        .accuracy-good {
+            color: #ffc107;
+        }
+
+        .accuracy-poor {
+            color: #dc3545;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .no-results-icon {
+            font-size: 4em;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🧪 Intent Classification Testing UI</h1>
+            <div class="subtitle">v2.0 - Frontend Routing with Claude Haiku Classification</div>
+            <div class="stats">
+                <div class="stat-box">
+                    <div class="label">Total Queries</div>
+                    <div class="value" id="total-queries">27</div>
+                </div>
+                <div class="stat-box">
+                    <div class="label">Tested</div>
+                    <div class="value" id="tested-count">0</div>
+                </div>
+                <div class="stat-box">
+                    <div class="label">Correct</div>
+                    <div class="value" id="correct-count">0</div>
+                </div>
+                <div class="stat-box">
+                    <div class="label">Accuracy</div>
+                    <div class="value" id="accuracy-value">0%</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Panel: Test Queries -->
+            <div class="panel">
+                <h2>📝 Test Queries</h2>
+
+                <!-- Chitchat -->
+                <div class="category-section">
+                    <div class="category-header">
+                        <span>💬 Chitchat</span>
+                        <span class="category-badge">5 queries</span>
+                    </div>
+                    <div id="chitchat-queries"></div>
+                </div>
+
+                <!-- Scheduling -->
+                <div class="category-section">
+                    <div class="category-header">
+                        <span>📅 Scheduling</span>
+                        <span class="category-badge">6 queries</span>
+                    </div>
+                    <div id="scheduling-queries"></div>
+                </div>
+
+                <!-- Information -->
+                <div class="category-section">
+                    <div class="category-header">
+                        <span>📊 Information</span>
+                        <span class="category-badge">6 queries</span>
+                    </div>
+                    <div id="information-queries"></div>
+                </div>
+
+                <!-- Notes -->
+                <div class="category-section">
+                    <div class="category-header">
+                        <span>📝 Notes</span>
+                        <span class="category-badge">6 queries</span>
+                    </div>
+                    <div id="notes-queries"></div>
+                </div>
+
+                <!-- Ambiguous -->
+                <div class="category-section">
+                    <div class="category-header">
+                        <span>❓ Ambiguous / Edge Cases</span>
+                        <span class="category-badge">4 queries</span>
+                    </div>
+                    <div id="ambiguous-queries"></div>
+                </div>
+
+                <!-- Custom Input -->
+                <div class="custom-input-section">
+                    <h3 style="margin-bottom: 15px; color: #667eea;">✍️ Custom Query</h3>
+                    <div class="input-group">
+                        <input type="text" class="custom-input" id="custom-query" placeholder="Enter your own query to test...">
+                        <button class="btn btn-primary" onclick="testCustomQuery()">Test</button>
+                    </div>
+                    <button class="btn btn-secondary test-all-btn" onclick="testAllQueries()" style="width: 100%;">
+                        🚀 Test All Queries (Batch)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right Panel: Results -->
+            <div class="panel results-panel">
+                <h2>📊 Results</h2>
+                <div id="results-container">
+                    <div class="no-results">
+                        <div class="no-results-icon">🎯</div>
+                        <div>Select a query from the left to test classification</div>
+                        <div style="margin-top: 10px; color: #ccc;">or use "Test All Queries" to run batch testing</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Test queries data
+        const TEST_QUERIES = {
+            "Chitchat": [
+                "Hey, how's it going?",
+                "What do you think about the weather today?",
+                "I'm feeling a bit stressed, just need to talk",
+                "Tell me a joke!",
+                "Good morning! Ready for the weekend?"
+            ],
+            "Scheduling": [
+                "Can you schedule a meeting with Sarah for next Tuesday at 2pm?",
+                "What's on my calendar for tomorrow?",
+                "I need to reschedule my 3pm appointment to Thursday",
+                "Block out 2 hours next week for project planning",
+                "Find a time slot for a team sync this week",
+                "Cancel my meeting on Friday afternoon"
+            ],
+            "Information": [
+                "What's the current weather in Seattle?",
+                "Who won the NBA championship last year?",
+                "Look up the population of Tokyo",
+                "What are the symptoms of vitamin D deficiency?",
+                "Find me information about renewable energy trends",
+                "What's the exchange rate for USD to EUR?"
+            ],
+            "Notes": [
+                "Save a note: Remember to buy groceries - milk, eggs, bread",
+                "Create a note about ideas for the quarterly presentation",
+                "Show me all my notes from last week",
+                "Find my note about the client meeting",
+                "Delete the note about vacation planning",
+                "Add to my shopping list: coffee and bananas"
+            ],
+            "Ambiguous": [
+                "Remind me about the meeting",
+                "What time is it in London?",
+                "I need help with something",
+                "Thanks for your help earlier!"
+            ]
+        };
+
+        // Agent configuration
+        const AGENTS = {
+            'scheduling': { agent_id: 'TIGRBGSXCS', alias_id: 'TSTALIASID', name: 'Scheduling Agent' },
+            'information': { agent_id: 'JEK4SDJOOU', alias_id: 'TSTALIASID', name: 'Information Agent' },
+            'notes': { agent_id: 'CF0IPHCFFY', alias_id: 'TSTALIASID', name: 'Notes Agent' },
+            'chitchat': { agent_id: 'GXVZEOBQ64', alias_id: 'TSTALIASID', name: 'Chitchat Agent' }
+        };
+
+        // Backend URL
+        const BACKEND_URL = 'http://localhost:5001';
+
+        // Test results tracking
+        let testResults = [];
+        let currentTest = null;
+
+        // Initialize UI
+        function initializeUI() {
+            // Render all query buttons
+            Object.keys(TEST_QUERIES).forEach(category => {
+                const containerId = category.toLowerCase() + '-queries';
+                const container = document.getElementById(containerId);
+
+                TEST_QUERIES[category].forEach((query, index) => {
+                    const button = document.createElement('button');
+                    button.className = 'query-button';
+                    button.textContent = query;
+                    button.onclick = () => testQuery(query, category, button);
+                    button.dataset.category = category;
+                    button.dataset.query = query;
+                    container.appendChild(button);
+                });
+            });
+
+            // Allow Enter key in custom input
+            document.getElementById('custom-query').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') testCustomQuery();
+            });
+        }
+
+        // Test a single query
+        async function testQuery(query, expectedCategory, buttonElement) {
+            // Clear previous selection
+            document.querySelectorAll('.query-button').forEach(btn => {
+                btn.classList.remove('selected');
+            });
+
+            if (buttonElement) {
+                buttonElement.classList.add('selected');
+            }
+
+            // Show loading
+            showLoading();
+
+            const startTime = Date.now();
+
+            try {
+                // Call classification endpoint
+                const response = await fetch(`${BACKEND_URL}/api/classify`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: query })
+                });
+
+                const result = await response.json();
+                const classificationTime = Date.now() - startTime;
+
+                // Determine expected intent
+                const categoryToIntent = {
+                    'Chitchat': 'chitchat',
+                    'Scheduling': 'scheduling',
+                    'Information': 'information',
+                    'Notes': 'notes',
+                    'Ambiguous': null  // No fixed expectation
+                };
+
+                const expectedIntent = categoryToIntent[expectedCategory];
+                const isCorrect = expectedCategory === 'Ambiguous' ? null : (result.intent === expectedIntent);
+
+                // Update button styling
+                if (buttonElement && isCorrect !== null) {
+                    buttonElement.classList.remove('correct', 'incorrect');
+                    buttonElement.classList.add(isCorrect ? 'correct' : 'incorrect');
+                }
+
+                // Track result
+                const testResult = {
+                    query,
+                    expectedCategory,
+                    expectedIntent,
+                    classifiedIntent: result.intent,
+                    isCorrect,
+                    classificationTime,
+                    agent: AGENTS[result.intent]
+                };
+
+                testResults.push(testResult);
+                updateStats();
+                displayResult(testResult);
+
+            } catch (error) {
+                console.error('Classification error:', error);
+                showError('Failed to classify query. Make sure the backend server is running on port 5001.');
+            }
+        }
+
+        // Test custom query
+        function testCustomQuery() {
+            const input = document.getElementById('custom-query');
+            const query = input.value.trim();
+
+            if (!query) {
+                alert('Please enter a query to test');
+                return;
+            }
+
+            testQuery(query, 'Custom', null);
+            input.value = '';
+        }
+
+        // Test all queries in batch
+        async function testAllQueries() {
+            if (!confirm('This will test all 27 queries. Continue?')) return;
+
+            // Reset results
+            testResults = [];
+            document.querySelectorAll('.query-button').forEach(btn => {
+                btn.classList.remove('correct', 'incorrect');
+            });
+
+            showBatchProgress(0, 27);
+
+            let tested = 0;
+            const total = 27;
+
+            for (const [category, queries] of Object.entries(TEST_QUERIES)) {
+                for (const query of queries) {
+                    const buttonElement = document.querySelector(`button[data-query="${query}"]`);
+                    await testQuery(query, category, buttonElement);
+                    tested++;
+                    showBatchProgress(tested, total);
+
+                    // Small delay to avoid rate limiting
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                }
+            }
+
+            // Show final summary
+            showBatchSummary();
+        }
+
+        // Display classification result
+        function displayResult(result) {
+            const container = document.getElementById('results-container');
+
+            const matchIndicator = result.isCorrect === null ? '➖' : (result.isCorrect ? '✅' : '❌');
+            const matchClass = result.isCorrect === null ? '' : (result.isCorrect ? 'match-yes' : 'match-no');
+
+            container.innerHTML = `
+                <div class="result-card">
+                    <div class="result-header">
+                        <span style="font-weight: 600; color: #667eea;">Classification Result</span>
+                        <span class="match-indicator ${matchClass}">${matchIndicator}</span>
+                    </div>
+
+                    <div class="result-query">${result.query}</div>
+
+                    <div class="result-row">
+                        <span class="result-label">Expected Category:</span>
+                        <span class="result-value">${result.expectedCategory}</span>
+                    </div>
+
+                    <div class="result-row">
+                        <span class="result-label">Expected Intent:</span>
+                        <span class="result-value">${result.expectedIntent || 'N/A (ambiguous)'}</span>
+                    </div>
+
+                    <div class="result-row">
+                        <span class="result-label">Classified As:</span>
+                        <span class="intent-badge intent-${result.classifiedIntent}">${result.classifiedIntent}</span>
+                    </div>
+
+                    <div class="result-row">
+                        <span class="result-label">Classification Time:</span>
+                        <span class="result-value">${result.classificationTime} ms</span>
+                    </div>
+
+                    <div class="result-row">
+                        <span class="result-label">Match:</span>
+                        <span class="result-value ${matchClass}">
+                            ${result.isCorrect === null ? 'N/A (Edge Case)' : (result.isCorrect ? 'Yes ✅' : 'No ❌')}
+                        </span>
+                    </div>
+
+                    ${result.agent ? `
+                        <div class="agent-info">
+                            <div class="agent-name">🤖 ${result.agent.name}</div>
+                            <div class="agent-id">Agent ID: ${result.agent.agent_id}</div>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        // Show loading state
+        function showLoading() {
+            document.getElementById('results-container').innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <div>Classifying query...</div>
+                </div>
+            `;
+        }
+
+        // Show error
+        function showError(message) {
+            document.getElementById('results-container').innerHTML = `
+                <div class="result-card" style="background: #f8d7da; border-left: 4px solid #dc3545;">
+                    <div style="color: #721c24; font-weight: 600; margin-bottom: 10px;">❌ Error</div>
+                    <div style="color: #721c24;">${message}</div>
+                </div>
+            `;
+        }
+
+        // Show batch progress
+        function showBatchProgress(tested, total) {
+            const percentage = Math.round((tested / total) * 100);
+            document.getElementById('results-container').innerHTML = `
+                <div class="loading">
+                    <div style="font-size: 1.5em; margin-bottom: 20px;">🚀 Batch Testing in Progress</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${percentage}%">${percentage}%</div>
+                    </div>
+                    <div style="margin-top: 10px;">Testing query ${tested} of ${total}...</div>
+                </div>
+            `;
+        }
+
+        // Show batch summary
+        function showBatchSummary() {
+            const total = testResults.filter(r => r.isCorrect !== null).length;
+            const correct = testResults.filter(r => r.isCorrect === true).length;
+            const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
+
+            const accuracyClass = accuracy === 100 ? 'accuracy-100' : (accuracy >= 90 ? 'accuracy-good' : 'accuracy-poor');
+
+            document.getElementById('results-container').innerHTML = `
+                <div class="result-card">
+                    <div style="text-align: center;">
+                        <div style="font-size: 1.5em; font-weight: 600; color: #667eea; margin-bottom: 20px;">
+                            🎉 Batch Testing Complete!
+                        </div>
+
+                        <div class="accuracy-display ${accuracyClass}">
+                            ${accuracy}%
+                        </div>
+
+                        <div style="margin: 20px 0;">
+                            <div class="result-row">
+                                <span class="result-label">Total Tested:</span>
+                                <span class="result-value">${total} queries</span>
+                            </div>
+                            <div class="result-row">
+                                <span class="result-label">Correct:</span>
+                                <span class="result-value" style="color: #28a745;">${correct}</span>
+                            </div>
+                            <div class="result-row">
+                                <span class="result-label">Incorrect:</span>
+                                <span class="result-value" style="color: #dc3545;">${total - correct}</span>
+                            </div>
+                            <div class="result-row">
+                                <span class="result-label">Avg Classification Time:</span>
+                                <span class="result-value">${Math.round(testResults.reduce((sum, r) => sum + r.classificationTime, 0) / testResults.length)} ms</span>
+                            </div>
+                        </div>
+
+                        ${accuracy === 100 ? `
+                            <div style="background: #d4edda; padding: 20px; border-radius: 10px; margin-top: 20px;">
+                                <div style="font-size: 1.3em; color: #155724; font-weight: 600;">
+                                    🎯 Perfect Score!
+                                </div>
+                                <div style="color: #155724; margin-top: 10px;">
+                                    All queries were classified correctly. The v2.0 classification system is working flawlessly!
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Update stats
+        function updateStats() {
+            const tested = testResults.filter(r => r.isCorrect !== null).length;
+            const correct = testResults.filter(r => r.isCorrect === true).length;
+            const accuracy = tested > 0 ? Math.round((correct / tested) * 100) : 0;
+
+            document.getElementById('tested-count').textContent = tested;
+            document.getElementById('correct-count').textContent = correct;
+            document.getElementById('accuracy-value').textContent = accuracy + '%';
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', initializeUI);
+    </script>
+</body>
+</html>
