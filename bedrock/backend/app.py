@@ -45,27 +45,28 @@ except FileNotFoundError:
     ROUTING_CONFIG = {'enabled': True, 'use_supervisor': False}
     REGION = 'us-east-1'
 
-# Sample user data (from mock data)
+# Sample user data (matches mock_data.py)
 SAMPLE_USER = {
     'customer_id': 'CUST001',
+    'client_id': 'CLIENT001',
     'customer_type': 'B2C',
     'name': 'John Doe',
     'email': 'john.doe@example.com',
     'projects': [
         {
-            'id': '12345',
+            'id': 'PRJ-78945',
             'number': 'ORD-2025-001',
             'type': 'Installation',
             'category': 'Flooring',
             'status': 'Scheduled',
             'address': '123 Main St, Tampa, FL 33601',
-            'scheduled_date': '2025-10-15',
+            'scheduled_date': '2025-11-15',
             'scheduled_time': '08:00 AM - 12:00 PM',
             'technician': 'John Smith',
             'store': 'ST-101'
         },
         {
-            'id': '12347',
+            'id': 'PRJ-78946',
             'number': 'ORD-2025-002',
             'type': 'Installation',
             'category': 'Windows',
@@ -75,7 +76,7 @@ SAMPLE_USER = {
             'store': 'ST-102'
         },
         {
-            'id': '12350',
+            'id': 'PRJ-78947',
             'number': 'ORD-2025-003',
             'type': 'Repair',
             'category': 'Deck Repair',
@@ -83,6 +84,28 @@ SAMPLE_USER = {
             'address': '789 Pine Dr, Clearwater, FL 33755',
             'technician': 'Mike Johnson',
             'store': 'ST-103'
+        },
+        {
+            'id': 'PRJ-78948',
+            'number': 'ORD-2025-004',
+            'type': 'Installation',
+            'category': 'Kitchen Cabinets',
+            'status': 'In Progress',
+            'address': '321 Maple Ln, St Petersburg, FL 33710',
+            'scheduled_date': '2025-10-25',
+            'scheduled_time': '01:00 PM - 06:00 PM',
+            'technician': 'Sarah Williams',
+            'store': 'ST-101'
+        },
+        {
+            'id': 'PRJ-78949',
+            'number': 'ORD-2025-005',
+            'type': 'Measurement',
+            'category': 'Bathroom Remodel',
+            'status': 'Pending',
+            'address': '555 Beach Blvd, Clearwater Beach, FL 33767',
+            'technician': 'Robert Chen',
+            'store': 'ST-104'
         }
     ]
 }
@@ -259,7 +282,7 @@ Respond with ONLY the category name (scheduling/information/notes/chitchat), not
 
     try:
         response = bedrock_runtime.invoke_model(
-            modelId='anthropic.claude-3-5-sonnet-20241022-v2:0',
+            modelId='us.anthropic.claude-3-5-sonnet-20241022-v2:0',  # Inference profile
             body=json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
                 "max_tokens": 10,
@@ -310,11 +333,13 @@ def invoke_agent_with_context(message, customer_id, customer_type='B2C'):
     # CRITICAL: Inject customer context into prompt
     augmented_prompt = f"""Session Context:
 - Customer ID: {customer_id}
+- Client ID: {SAMPLE_USER.get('client_id', 'CLIENT001')}
+- Client Name: {SAMPLE_USER.get('name', 'John Doe')}
 - Customer Type: {customer_type}
 
 User Request: {message}
 
-Please help the customer with their request using their customer ID for any actions."""
+Please help the customer with their request using their customer ID and client ID for any actions."""
 
     session_id = f"session-{customer_id}-{int(time.time())}"
     invocation_start_time = time.time()
@@ -346,6 +371,8 @@ Please help the customer with their request using their customer ID for any acti
             sessionState={
                 'sessionAttributes': {
                     'customer_id': customer_id,
+                    'client_id': SAMPLE_USER.get('client_id', 'CLIENT001'),
+                    'client_name': SAMPLE_USER.get('name', 'John Doe'),
                     'customer_type': customer_type
                 }
             }
@@ -503,11 +530,13 @@ def classify_only():
         # Create augmented prompt with context
         augmented_prompt = f"""Session Context:
 - Customer ID: {customer_id}
+- Client ID: {SAMPLE_USER.get('client_id', 'CLIENT001')}
+- Client Name: {SAMPLE_USER.get('name', 'John Doe')}
 - Customer Type: {customer_type}
 
 User Request: {message}
 
-Please help the customer with their request using their customer ID for any actions."""
+Please help the customer with their request using their customer ID and client ID for any actions."""
 
         # Invoke agent
         invocation_start = time.time()
@@ -519,6 +548,8 @@ Please help the customer with their request using their customer ID for any acti
             sessionState={
                 'sessionAttributes': {
                     'customer_id': customer_id,
+                    'client_id': SAMPLE_USER.get('client_id', 'CLIENT001'),
+                    'client_name': SAMPLE_USER.get('name', 'John Doe'),
                     'customer_type': customer_type
                 }
             }
