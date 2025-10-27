@@ -649,7 +649,8 @@
                     response: result.response,
                     agent: AGENTS[result.intent],
                     agentId: result.agent_id,
-                    sessionId: result.session_id
+                    sessionId: result.session_id,
+                    requestParameters: result.request_parameters
                 };
 
                 testResults.push(testResult);
@@ -768,6 +769,37 @@
                         <div class="agent-info">
                             <div class="agent-name">🤖 ${result.agent.name}</div>
                             <div class="agent-id">Agent ID: ${result.agentId || result.agent.agent_id}</div>
+                        </div>
+                    ` : ''}
+
+                    ${result.requestParameters ? `
+                        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
+                            <div style="font-weight: 600; color: #667eea; margin-bottom: 10px;">
+                                📤 Request Parameters to AWS Bedrock:
+                            </div>
+                            <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; border-left: 4px solid #4a5568; font-family: monospace; font-size: 0.85em;">
+                                <div style="margin-bottom: 10px;">
+                                    <strong>Agent ID:</strong> ${result.requestParameters.agentId}
+                                </div>
+                                <div style="margin-bottom: 10px;">
+                                    <strong>Agent Alias ID:</strong> ${result.requestParameters.agentAliasId}
+                                </div>
+                                <div style="margin-bottom: 10px;">
+                                    <strong>Session ID:</strong> ${result.requestParameters.sessionId}
+                                </div>
+                                <div style="margin-bottom: 10px;">
+                                    <strong>Session Attributes:</strong>
+                                    <pre style="background: white; padding: 10px; border-radius: 4px; margin-top: 5px; overflow-x: auto;">${JSON.stringify(result.requestParameters.sessionState.sessionAttributes, null, 2)}</pre>
+                                </div>
+                                <div style="margin-bottom: 10px;">
+                                    <strong>Original Message:</strong>
+                                    <div style="background: white; padding: 10px; border-radius: 4px; margin-top: 5px;">${result.requestParameters.original_message}</div>
+                                </div>
+                                <div>
+                                    <strong>Input Text (Augmented Prompt):</strong>
+                                    <pre style="background: white; padding: 10px; border-radius: 4px; margin-top: 5px; white-space: pre-wrap; overflow-x: auto;">${result.requestParameters.inputText}</pre>
+                                </div>
+                            </div>
                         </div>
                     ` : ''}
 

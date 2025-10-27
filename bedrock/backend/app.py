@@ -545,7 +545,20 @@ Please help the customer with their request using their customer ID for any acti
             'response': full_response,
             'customer_id': customer_id,
             'session_id': session_id,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'request_parameters': {
+                'agentId': agent_id,
+                'agentAliasId': alias_id,
+                'sessionId': session_id,
+                'inputText': augmented_prompt,
+                'sessionState': {
+                    'sessionAttributes': {
+                        'customer_id': customer_id,
+                        'customer_type': customer_type
+                    }
+                },
+                'original_message': message
+            }
         })
 
     except Exception as e:
