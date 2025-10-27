@@ -25,6 +25,7 @@ STATE_MACHINES = {
     'schedule_urgent': os.environ.get('STATE_MACHINE_SCHEDULE_URGENT', ''),
     'weather_scheduling': os.environ.get('STATE_MACHINE_WEATHER', ''),
     'batch_scheduling': os.environ.get('STATE_MACHINE_BATCH', ''),
+    'schedule_preferences': os.environ.get('STATE_MACHINE_PREFERENCES', ''),
     'general_orchestration': os.environ.get('STATE_MACHINE_GENERAL', '')
 }
 
@@ -101,19 +102,36 @@ def determine_state_machine(query):
             r'urgent.*schedule',
             r'schedule.*urgent',
             r'most urgent',
-            r'highest priority'
+            r'highest priority',
+            r'schedule.*earliest',
+            r'soonest.*available'
         ],
         'weather_scheduling': [
             r'weather.*schedule',
             r'schedule.*weather',
             r'if.*weather',
-            r'when.*weather.*good'
+            r'when.*weather.*good',
+            r'weather.*dependent',
+            r'outdoor.*project.*weather',
+            r'weather.*suitable',
+            r'check.*weather.*schedule'
         ],
         'batch_scheduling': [
             r'all.*pending.*schedule',
             r'schedule.*all',
             r'batch.*schedule',
-            r'multiple.*project.*schedule'
+            r'multiple.*project.*schedule',
+            r'schedule.*installation.*projects',
+            r'book.*all.*appointments',
+            r'schedule.*everything'
+        ],
+        'schedule_preferences': [
+            r'monday.*or.*tuesday',
+            r'first choice.*second choice',
+            r'preferred.*time',
+            r'if.*not.*available.*try',
+            r'fallback.*option',
+            r'alternative.*time'
         ]
     }
 

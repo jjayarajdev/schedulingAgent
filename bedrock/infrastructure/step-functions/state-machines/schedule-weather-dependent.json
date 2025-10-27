@@ -1,0 +1,312 @@
+{
+  "Comment": "Weather-Dependent Scheduling Workflow - Schedules outdoor projects based on weather conditions",
+  "StartAt": "GetOutdoorProjects",
+  "States": {
+    "GetOutdoorProjects": {
+      "Type": "Task",
+      "Comment": "Get all outdoor/weather-sensitive projects",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "pf-information-actions",
+        "Payload": {
+          "apiPath": "/get_projects",
+          "httpMethod": "POST",
+          "parameters": [
+            {
+              "name": "customer_id",
+              "value.$": "$.customer_id"
+            }
+          ]
+        }
+      },
+      "ResultPath": "$.projectsResponse",
+      "Next": "ParseProjectsResponse",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "HandleGetProjectsError",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "ParseProjectsResponse": {
+      "Type": "Pass",
+      "Comment": "Extract projects list from Lambda response",
+      "Parameters": {
+        "projects.$": "$.projectsResponse.Payload.response.responseBody.application/json.body",
+        "customer_id.$": "$.customer_id",
+        "client_id.$": "$.client_id",
+        "sessionId.$": "$.sessionId",
+        "query.$": "$.query",
+        "location.$": "$.location"
+      },
+      "Next": "ParseProjectsJSON"
+    },
+
+    "ParseProjectsJSON": {
+      "Type": "Pass",
+      "Comment": "Parse the JSON string to extract projects array",
+      "Parameters": {
+        "projectsData.$": "States.StringToJson($.projects)",
+        "customer_id.$": "$.customer_id",
+        "client_id.$": "$.client_id",
+        "sessionId.$": "$.sessionId",
+        "query.$": "$.query",
+        "location.$": "$.location"
+      },
+      "Next": "FilterOutdoorProjects"
+    },
+
+    "FilterOutdoorProjects": {
+      "Type": "Task",
+      "Comment": "Filter to find outdoor/weather-sensitive projects",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "pf-filter-projects",
+        "Payload": {
+          "projects.$": "$.projectsData.projects",
+          "filterCriteria": "type",
+          "filterValue": "outdoor"
+        }
+      },
+      "ResultPath": "$.filterResult",
+      "Next": "ParseFilterResult"
+    },
+
+    "ParseFilterResult": {
+      "Type": "Pass",
+      "Comment": "Parse filter result from JSON string",
+      "Parameters": {
+        "filterData.$": "States.StringToJson($.filterResult.Payload.body)",
+        "customer_id.$": "$.customer_id",
+        "client_id.$": "$.client_id",
+        "sessionId.$": "$.sessionId",
+        "query.$": "$.query",
+        "location.$": "$.location"
+      },
+      "Next": "CheckIfProjectsFound"
+    },
+
+    "CheckIfProjectsFound": {
+      "Type": "Choice",
+      "Comment": "Check if we found outdoor projects",
+      "Choices": [
+        {
+          "Variable": "$.filterData.count",
+          "NumericGreaterThan": 0,
+          "Next": "SelectFirstProject"
+        }
+      ],
+      "Default": "NoOutdoorProjects"
+    },
+
+    "SelectFirstProject": {
+      "Type": "Pass",
+      "Comment": "Select first outdoor project for weather evaluation",
+      "Parameters": {
+        "project.$": "$.filterData.filteredProjects[0]",
+        "allProjects.$": "$.filterData.filteredProjects",
+        "customer_id.$": "$.customer_id",
+        "client_id.$": "$.client_id",
+        "sessionId.$": "$.sessionId",
+        "location.$": "$.location"
+      },
+      "Next": "GetWeather"
+    },
+
+    "GetWeather": {
+      "Type": "Task",
+      "Comment": "Get weather forecast for project location",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "pf-information-actions",
+        "Payload": {
+          "apiPath": "/get_weather",
+          "httpMethod": "POST",
+          "parameters": [
+            {
+              "name": "location",
+              "value.$": "$.location"
+            }
+          ]
+        }
+      },
+      "ResultPath": "$.weatherResponse",
+      "Next": "ParseWeatherResponse",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "HandleWeatherError",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "ParseWeatherResponse": {
+      "Type": "Pass",
+      "Comment": "Extract weather data from Lambda response",
+      "Parameters": {
+        "weatherBody.$": "$.weatherResponse.Payload.response.responseBody.application/json.body",
+        "project.$": "$.project",
+        "customer_id.$": "$.customer_id",
+        "client_id.$": "$.client_id",
+        "sessionId.$": "$.sessionId"
+      },
+      "Next": "ParseWeatherJSON"
+    },
+
+    "ParseWeatherJSON": {
+      "Type": "Pass",
+      "Comment": "Parse weather JSON string",
+      "Parameters": {
+        "weatherData.$": "States.StringToJson($.weatherBody)",
+        "project.$": "$.project",
+        "customer_id.$": "$.customer_id",
+        "client_id.$": "$.client_id",
+        "sessionId.$": "$.sessionId"
+      },
+      "Next": "EvaluateWeather"
+    },
+
+    "EvaluateWeather": {
+      "Type": "Task",
+      "Comment": "Evaluate if weather is suitable for outdoor project",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "pf-weather-evaluator",
+        "Payload": {
+          "weather.$": "$.weatherData.weather",
+          "project": {
+            "category.$": "$.project.category",
+            "type": "outdoor"
+          },
+          "evaluation_type": "current"
+        }
+      },
+      "ResultPath": "$.evaluationResult",
+      "Next": "ParseEvaluationResult"
+    },
+
+    "ParseEvaluationResult": {
+      "Type": "Pass",
+      "Comment": "Parse evaluation result",
+      "Parameters": {
+        "evaluation.$": "States.StringToJson($.evaluationResult.Payload.body)",
+        "project.$": "$.project",
+        "weatherData.$": "$.weatherData",
+        "customer_id.$": "$.customer_id",
+        "client_id.$": "$.client_id",
+        "sessionId.$": "$.sessionId"
+      },
+      "Next": "CheckWeatherSuitability"
+    },
+
+    "CheckWeatherSuitability": {
+      "Type": "Choice",
+      "Comment": "Determine if weather is suitable",
+      "Choices": [
+        {
+          "Variable": "$.evaluation.suitable",
+          "BooleanEquals": true,
+          "Next": "WeatherSuitable"
+        }
+      ],
+      "Default": "WeatherNotSuitable"
+    },
+
+    "WeatherSuitable": {
+      "Type": "Pass",
+      "Comment": "Weather is suitable - ready to schedule",
+      "Parameters": {
+        "success": true,
+        "weather_suitable": true,
+        "project": {
+          "id.$": "$.project.project_id",
+          "category.$": "$.project.category",
+          "status.$": "$.project.status",
+          "address.$": "$.project.address"
+        },
+        "weather_summary.$": "$.evaluation.weather_summary",
+        "confidence_score.$": "$.evaluation.confidence_score",
+        "recommendation.$": "$.evaluation.recommendation",
+        "message.$": "States.Format('Weather is suitable for {}! {} Ready to schedule.', $.project.project_id, $.evaluation.recommendation)",
+        "nextStep": "Please confirm to proceed with scheduling, or I can check alternative dates."
+      },
+      "End": true
+    },
+
+    "WeatherNotSuitable": {
+      "Type": "Pass",
+      "Comment": "Weather is not suitable - suggest alternatives",
+      "Parameters": {
+        "success": false,
+        "weather_suitable": false,
+        "project": {
+          "id.$": "$.project.project_id",
+          "category.$": "$.project.category",
+          "status.$": "$.project.status",
+          "address.$": "$.project.address"
+        },
+        "weather_summary.$": "$.evaluation.weather_summary",
+        "issues.$": "$.evaluation.issues",
+        "recommendation.$": "$.evaluation.recommendation",
+        "message.$": "States.Format('Current weather not suitable for {}: {} Would you like me to check the forecast for better days?', $.project.project_id, $.evaluation.recommendation)",
+        "nextStep": "I can check the 7-day forecast and suggest the best dates for your outdoor project."
+      },
+      "End": true
+    },
+
+    "NoOutdoorProjects": {
+      "Type": "Pass",
+      "Comment": "No outdoor projects found",
+      "Parameters": {
+        "success": false,
+        "message": "No outdoor or weather-sensitive projects found. All your projects are suitable for any weather conditions.",
+        "suggestion": "Would you like to see all your projects instead?"
+      },
+      "End": true
+    },
+
+    "HandleGetProjectsError": {
+      "Type": "Pass",
+      "Comment": "Handle error in getting projects",
+      "Parameters": {
+        "success": false,
+        "error": "Failed to retrieve projects",
+        "message": "I'm having trouble accessing your projects right now. Please try again in a moment.",
+        "details.$": "$.error"
+      },
+      "End": true
+    },
+
+    "HandleWeatherError": {
+      "Type": "Pass",
+      "Comment": "Handle error in getting weather",
+      "Parameters": {
+        "success": false,
+        "error": "Failed to retrieve weather data",
+        "message": "I'm having trouble getting weather information right now. Would you like to schedule anyway?",
+        "project.$": "$.project",
+        "details.$": "$.error"
+      },
+      "End": true
+    }
+  }
+}
