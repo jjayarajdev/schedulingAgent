@@ -8,7 +8,21 @@ from typing import Dict
 # Environment variables
 USE_MOCK_API = os.getenv("USE_MOCK_API", "true").lower() == "true"
 ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
-CUSTOMER_SCHEDULER_BASE_API_URL = os.getenv("CUSTOMER_SCHEDULER_API_URL", "https://api.projectsforce.com")
+
+# Real ProjectForce API endpoints
+API_BASE_URLS = {
+    "dev": "https://api-cx-portal.dev.projectsforce.com",
+    "staging": "https://api-cx-portal.staging.projectsforce.com",
+    "prod": "https://api-cx-portal.projectsforce.com"
+}
+CUSTOMER_SCHEDULER_BASE_API_URL = os.getenv(
+    "CUSTOMER_SCHEDULER_API_URL",
+    API_BASE_URLS.get(ENVIRONMENT, API_BASE_URLS["dev"])
+)
+
+# Authentication
+BEARER_TOKEN = os.getenv("BEARER_TOKEN", "")
+DEFAULT_CLIENT_ID = os.getenv("DEFAULT_CLIENT_ID", "09PF05VD")
 
 # Logging configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -20,38 +34,50 @@ DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", "scheduling-agent-sessions-dev")
 ENABLE_REAL_CONFIRM = os.getenv("ENABLE_REAL_CONFIRM", "false").lower() == "true"
 ENABLE_REAL_CANCEL = os.getenv("ENABLE_REAL_CANCEL", "false").lower() == "true"
 
-def get_api_config(client_id: str, env: str = None) -> Dict[str, str]:
+def get_api_config(client_id: str = None, env: str = None) -> Dict[str, str]:
     """
     Generate API configuration based on environment and client
     """
     if env is None:
         env = ENVIRONMENT
+    if client_id is None:
+        client_id = DEFAULT_CLIENT_ID
 
-    # Map environment to URL subdomain
-    env_map = {
-        "dev": "dev",
-        "qa": "qa",
-        "staging": "staging",
-        "prod": "apps"
-    }
-    env_url = env_map.get(env, "dev")
+    base_url = API_BASE_URLS.get(env, API_BASE_URLS["dev"])
 
     return {
-        "dashboard_url": f"{CUSTOMER_SCHEDULER_BASE_API_URL}/dashboard/get/{client_id}",
-        "scheduler_base_url": f"{CUSTOMER_SCHEDULER_BASE_API_URL}/scheduler/client/{client_id}",
-        "notes_url": f"{CUSTOMER_SCHEDULER_BASE_API_URL}/project-notes/add/{client_id}",
+        "base_url": base_url,
+        "dashboard_url": f"{base_url}/dashboard/get/{client_id}",
+        "scheduler_base_url": f"{base_url}/scheduler/client/{client_id}",
+        "notes_url": f"{base_url}/project-notes/add/{client_id}",
+        "weather_url": "https://wttr.in",
+        "business_hours_url": f"{base_url}/business-hours/{client_id}",
         "use_mock": USE_MOCK_API
     }
 
-def get_auth_headers(authorization: str, client_id: str) -> Dict[str, str]:
+def get_auth_headers(authorization: str = None, client_id: str = None) -> Dict[str, str]:
     """
-    Generate authentication headers for PF360 API
+    Generate authentication headers for ProjectForce API
+    Real API requires:
+    - Authorization: Bearer TOKEN
+    - Client_Id: 09PF05VD (note: capital C and I)
     """
+    if client_id is None:
+        client_id = DEFAULT_CLIENT_ID
+
+    # Use provided authorization or fall back to environment variable
+    if not authorization:
+        authorization = f"Bearer {BEARER_TOKEN}" if BEARER_TOKEN else ""
+    elif not authorization.startswith("Bearer "):
+        authorization = f"Bearer {authorization}"
+
     return {
-        "authorization": authorization,
-        "client_id": client_id,
+        "Authorization": authorization,  # Capital A
+        "Client_Id": client_id,  # Capital C and I (as per real API)
         "Content-Type": "application/json",
-        "charset": "utf-8"
+        "Accept": "application/json, text/plain, */*",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache"
     }
 
 # Mock mode notification
