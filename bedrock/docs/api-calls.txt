@@ -1,0 +1,78 @@
+Cancel / Reschedule API 
+Request: 
+curl --location 'https://api-cx-portal.dev.projectsforce.com/scheduler/client/09PF05VD/project/7750176/cancel-resche…' \ 
+                 https://api-cx-portal.dev.projectsforce.com/scheduler/client/09PF05VD/project/7750176/date/2025-10-28/selected/2025-10-28/get-rescheduler-slots' \  
+--header 'Accept: application/json, text/plain, */*' \ 
+--header 'Accept-Language: en-US,en;q=0.9' \ 
+--header 'Authorization: Bearer TaDWx6r5O0WE2tb5/...' \ 
+--header 'Cache-Control: no-cache' \ 
+--header 'Client_Id: 09PF05VD' \ 
+--header 'Origin: https://projectsforce-validation.cx-portal.dev.projectsforce.com' \ 
+--header 'Pragma: no-cache' \ 
+--header 'Referer: https://projectsforce-validation.cx-portal.dev.projectsforce.com/' \ 
+--header 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' 
+ 
+Response: 
+{ 
+  "message": "Project status should be Customer to Schedule" 
+} 
+ 
+ 
+Get Rescheduler Slots API 
+Request: 
+curl --location 'https://api-cx-portal.dev.projectsforce.com/scheduler/client/09PF05VD/project/7750176/date/2025-10-…' \ 
+--header 'Accept: application/json, text/plain, */*' \ 
+--header 'Accept-Language: en-US,en;q=0.9' \ 
+--header 'Authorization: Bearer TaDWx6r5O0WE2tb5/...' \ 
+--header 'Cache-Control: no-cache' \ 
+--header 'Client_Id: 09PF05VD' \ 
+--header 'Origin: https://projectsforce-validation.cx-portal.dev.projectsforce.com' \ 
+--header 'Pragma: no-cache' \ 
+--header 'Referer: https://projectsforce-validation.cx-portal.dev.projectsforce.com/' \ 
+--header 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' 
+ 
+Response: 
+{ 
+  "data": { 
+    "slots": [], 
+    "dates": [ 
+      "2025-10-29", 
+      "2025-10-30", 
+      "2025-10-31" 
+    ], 
+    "request_id": 1619 
+  }, 
+  "message": "Slots fetched successfully" 
+} 
+ 
+
+Dashboard Get API 
+Request: 
+curl --location 'https://api-cx-portal.dev.projectsforce.com/dashboard/get/09PF05VD/1645869' \ 
+--header 'Accept: application/json, text/plain, */*' \ 
+--header 'Accept-Language: en-US,en;q=0.9' \ 
+--header 'Authorization: Bearer TaDWx6r5O0WE2tb5/...' \ 
+--header 'Cache-Control: no-cache' \ 
+--header 'Client_Id: 09PF05VD' \ 
+--header 'Origin: https://projectsforce-validation.cx-portal.dev.projectsforce.com' \ 
+--header 'Pragma: no-cache' \ 
+--header 'Referer: https://projectsforce-validation.cx-portal.dev.projectsforce.com/' \ 
+--header 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' 
+ 
+Response: 
+{ 
+  "message": "Dashboard data", 
+  "data": [ 
+    { 
+      "project_project_id": 2109511, 
+      "project_client_id": "09PF05VD", 
+      "project_project_number": "658514656", 
+      "project_store_id": 16882, 
+      "project_po_number": null, 
+      "project_customer_id": 1645869, 
+      "project_source_system_id": 1, 
+      "project_region": null, 
+      "project_market": null 
+    } 
+  ] 
+} 
