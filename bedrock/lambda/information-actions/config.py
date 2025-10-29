@@ -92,6 +92,10 @@ def get_auth_headers(authorization: str = None, client_id: str = None) -> Dict[s
         "Client_Id": client_id,  # Capital C and I (as per real API)
         "Content-Type": "application/json",
         "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
         "Cache-Control": "no-cache",
-        "Pragma": "no-cache"
+        "Pragma": "no-cache",
+        "Origin": "https://projectsforce-validation.cx-portal.dev.projectsforce.com",
+        "Referer": "https://projectsforce-validation.cx-portal.dev.projectsforce.com/",
+        "User-Agent": "Mozilla/5.0 (compatible; ProjectForce-Agent/1.0)"
     }
