@@ -1,0 +1,89 @@
+# ProjectForce API - Complete CURL Commands with Bearer Token
+# Generated: 2025-10-29
+# Environment: dev
+
+# ==============================================================================
+# 1. DASHBOARD API - Get Customer Projects
+# ==============================================================================
+
+curl --location 'https://api-cx-portal.dev.projectsforce.com/dashboard/get/09PF05VD/1645869' \
+  --header 'Authorization: Bearer TaDWx6r5O0WE2tb5/Lb77XuI29UR7j2NlMHbUdXd+YrYPR7ZdTrczgYigcaRHxvF4JIl7HafKfQQ/5IXVFFOZGD24PcJ3isGqpYzN+uMG9LwX3zevOY4i7jfXVJeKhA83l8EAnSQoGAfs4Il2H1/nGJ0m6byLeLipcwspY3iEY/t73Ld7gz84ZCRnqeZMU7hl4PdkUTB1M4t0sdclTKLKOFzIhs4xI5CWyGn04695Fmnpw3+q1DgAPmM7/2/8FfnkGeXriWm2KcZrlhFxh5sT5ubAThM6CARNLZViQql3n+YXgWikkjEAPNVs39Ni1HnwvMfZGmFgN2N9P882uvs6z0NGR00bezih8ExTwvedFBAvgkzWuYnvunOUHDRz2EBfGT6WhhBmqDBSfMW4d87Z6SabKWjcSBrXVWQacRvDhtoyZ4mYK/7vwGAJmPVH0evFRyE5iPdMSkpUmEfzfRgP+9GcUqiJgGB1t4+79PRW7wd+cXBlMQr2HnEb4fbdaD2hY0nzZHCeHNnLLjTeV4hZowqcP601vtJt69Ymil4L2Vs5/57HMbP50hxpcxaffSeWbvo05239KLJdtt08GIKOv2OCryGP0PIaZY3i9uQzQlGMGsEhiRUQuW/z+7uVpNUyfuw93QPh+s9+0xA9hDX03nQ70RrH8hcIDtICwy9iY91y02GNqOUyqDpJILt2d4QKWixk5JECJgu22cW4ImJm275/KwWXo66oIfZS5XJQ03+Aw4arafjOuTGiY0UGc1u' \
+  --header 'Client_Id: 09PF05VD' \
+  --header 'Accept: application/json, text/plain, */*' \
+  --header 'Accept-Language: en-US,en;q=0.9' \
+  --header 'Cache-Control: no-cache' \
+  --header 'Pragma: no-cache' \
+  --header 'Origin: https://projectsforce-validation.cx-portal.dev.projectsforce.com' \
+  --header 'Referer: https://projectsforce-validation.cx-portal.dev.projectsforce.com/' \
+  --header 'User-Agent: Mozilla/5.0 (compatible; ProjectForce-Agent/1.0)'
+
+
+# ==============================================================================
+# 2. SCHEDULER API - Get Available Dates/Slots
+# ==============================================================================
+
+curl --location 'https://api-cx-portal.dev.projectsforce.com/scheduler/client/09PF05VD/project/7750176/date/2025-10-28/selected/2025-10-28/get-rescheduler-slots' \
+  --header 'Authorization: Bearer TaDWx6r5O0WE2tb5/Lb77XuI29UR7j2NlMHbUdXd+YrYPR7ZdTrczgYigcaRHxvF4JIl7HafKfQQ/5IXVFFOZGD24PcJ3isGqpYzN+uMG9LwX3zevOY4i7jfXVJeKhA83l8EAnSQoGAfs4Il2H1/nGJ0m6byLeLipcwspY3iEY/t73Ld7gz84ZCRnqeZMU7hl4PdkUTB1M4t0sdclTKLKOFzIhs4xI5CWyGn04695Fmnpw3+q1DgAPmM7/2/8FfnkGeXriWm2KcZrlhFxh5sT5ubAThM6CARNLZViQql3n+YXgWikkjEAPNVs39Ni1HnwvMfZGmFgN2N9P882uvs6z0NGR00bezih8ExTwvedFBAvgkzWuYnvunOUHDRz2EBfGT6WhhBmqDBSfMW4d87Z6SabKWjcSBrXVWQacRvDhtoyZ4mYK/7vwGAJmPVH0evFRyE5iPdMSkpUmEfzfRgP+9GcUqiJgGB1t4+79PRW7wd+cXBlMQr2HnEb4fbdaD2hY0nzZHCeHNnLLjTeV4hZowqcP601vtJt69Ymil4L2Vs5/57HMbP50hxpcxaffSeWbvo05239KLJdtt08GIKOv2OCryGP0PIaZY3i9uQzQlGMGsEhiRUQuW/z+7uVpNUyfuw93QPh+s9+0xA9hDX03nQ70RrH8hcIDtICwy9iY91y02GNqOUyqDpJILt2d4QKWixk5JECJgu22cW4ImJm275/KwWXo66oIfZS5XJQ03+Aw4arafjOuTGiY0UGc1u' \
+  --header 'Client_Id: 09PF05VD' \
+  --header 'Accept: application/json, text/plain, */*' \
+  --header 'Accept-Language: en-US,en;q=0.9' \
+  --header 'Cache-Control: no-cache' \
+  --header 'Pragma: no-cache' \
+  --header 'Origin: https://projectsforce-validation.cx-portal.dev.projectsforce.com' \
+  --header 'Referer: https://projectsforce-validation.cx-portal.dev.projectsforce.com/' \
+  --header 'User-Agent: Mozilla/5.0 (compatible; ProjectForce-Agent/1.0)'
+
+
+# ==============================================================================
+# 3. SCHEDULER API - Cancel/Reschedule
+# ==============================================================================
+
+curl --location 'https://api-cx-portal.dev.projectsforce.com/scheduler/client/09PF05VD/project/7750176/cancel-reschedule' \
+  --header 'Authorization: Bearer TaDWx6r5O0WE2tb5/Lb77XuI29UR7j2NlMHbUdXd+YrYPR7ZdTrczgYigcaRHxvF4JIl7HafKfQQ/5IXVFFOZGD24PcJ3isGqpYzN+uMG9LwX3zevOY4i7jfXVJeKhA83l8EAnSQoGAfs4Il2H1/nGJ0m6byLeLipcwspY3iEY/t73Ld7gz84ZCRnqeZMU7hl4PdkUTB1M4t0sdclTKLKOFzIhs4xI5CWyGn04695Fmnpw3+q1DgAPmM7/2/8FfnkGeXriWm2KcZrlhFxh5sT5ubAThM6CARNLZViQql3n+YXgWikkjEAPNVs39Ni1HnwvMfZGmFgN2N9P882uvs6z0NGR00bezih8ExTwvedFBAvgkzWuYnvunOUHDRz2EBfGT6WhhBmqDBSfMW4d87Z6SabKWjcSBrXVWQacRvDhtoyZ4mYK/7vwGAJmPVH0evFRyE5iPdMSkpUmEfzfRgP+9GcUqiJgGB1t4+79PRW7wd+cXBlMQr2HnEb4fbdaD2hY0nzZHCeHNnLLjTeV4hZowqcP601vtJt69Ymil4L2Vs5/57HMbP50hxpcxaffSeWbvo05239KLJdtt08GIKOv2OCryGP0PIaZY3i9uQzQlGMGsEhiRUQuW/z+7uVpNUyfuw93QPh+s9+0xA9hDX03nQ70RrH8hcIDtICwy9iY91y02GNqOUyqDpJILt2d4QKWixk5JECJgu22cW4ImJm275/KwWXo66oIfZS5XJQ03+Aw4arafjOuTGiY0UGc1u' \
+  --header 'Client_Id: 09PF05VD' \
+  --header 'Accept: application/json, text/plain, */*' \
+  --header 'Accept-Language: en-US,en;q=0.9' \
+  --header 'Cache-Control: no-cache' \
+  --header 'Pragma: no-cache' \
+  --header 'Origin: https://projectsforce-validation.cx-portal.dev.projectsforce.com' \
+  --header 'Referer: https://projectsforce-validation.cx-portal.dev.projectsforce.com/' \
+  --header 'User-Agent: Mozilla/5.0 (compatible; ProjectForce-Agent/1.0)'
+
+
+# ==============================================================================
+# 4. SCHEDULER API - Confirm/Schedule Appointment (POST)
+# ==============================================================================
+
+curl --location 'https://api-cx-portal.dev.projectsforce.com/scheduler/client/09PF05VD/project/7750176/schedule' \
+  --header 'Authorization: Bearer TaDWx6r5O0WE2tb5/Lb77XuI29UR7j2NlMHbUdXd+YrYPR7ZdTrczgYigcaRHxvF4JIl7HafKfQQ/5IXVFFOZGD24PcJ3isGqpYzN+uMG9LwX3zevOY4i7jfXVJeKhA83l8EAnSQoGAfs4Il2H1/nGJ0m6byLeLipcwspY3iEY/t73Ld7gz84ZCRnqeZMU7hl4PdkUTB1M4t0sdclTKLKOFzIhs4xI5CWyGn04695Fmnpw3+q1DgAPmM7/2/8FfnkGeXriWm2KcZrlhFxh5sT5ubAThM6CARNLZViQql3n+YXgWikkjEAPNVs39Ni1HnwvMfZGmFgN2N9P882uvs6z0NGR00bezih8ExTwvedFBAvgkzWuYnvunOUHDRz2EBfGT6WhhBmqDBSfMW4d87Z6SabKWjcSBrXVWQacRvDhtoyZ4mYK/7vwGAJmPVH0evFRyE5iPdMSkpUmEfzfRgP+9GcUqiJgGB1t4+79PRW7wd+cXBlMQr2HnEb4fbdaD2hY0nzZHCeHNnLLjTeV4hZowqcP601vtJt69Ymil4L2Vs5/57HMbP50hxpcxaffSeWbvo05239KLJdtt08GIKOv2OCryGP0PIaZY3i9uQzQlGMGsEhiRUQuW/z+7uVpNUyfuw93QPh+s9+0xA9hDX03nQ70RrH8hcIDtICwy9iY91y02GNqOUyqDpJILt2d4QKWixk5JECJgu22cW4ImJm275/KwWXo66oIfZS5XJQ03+Aw4arafjOuTGiY0UGc1u' \
+  --header 'Client_Id: 09PF05VD' \
+  --header 'Content-Type: application/json' \
+  --header 'Accept: application/json, text/plain, */*' \
+  --header 'Accept-Language: en-US,en;q=0.9' \
+  --header 'Cache-Control: no-cache' \
+  --header 'Pragma: no-cache' \
+  --header 'Origin: https://projectsforce-validation.cx-portal.dev.projectsforce.com' \
+  --header 'Referer: https://projectsforce-validation.cx-portal.dev.projectsforce.com/' \
+  --header 'User-Agent: Mozilla/5.0 (compatible; ProjectForce-Agent/1.0)' \
+  --data '{
+    "created_at": "10-29-2025 18:30:00",
+    "date": "2025-11-01",
+    "time": "09:00",
+    "request_id": 1619,
+    "is_chatbot": "true"
+  }'
+
+
+# ==============================================================================
+# USAGE NOTES
+# ==============================================================================
+#
+# 1. Copy any curl command above and paste directly into your terminal
+# 2. The Bearer token included is from your environment variable
+# 3. If you get 403 Forbidden, the token may have expired - get a fresh one from:
+#    https://projectsforce-validation.cx-portal.dev.projectsforce.com
+# 4. Test IDs used:
+#    - Customer ID: 1645869
+#    - Project ID: 7750176
+#    - Client ID: 09PF05VD
+# 5. Expected responses are documented in docs/api-calls.txt
