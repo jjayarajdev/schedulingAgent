@@ -1,340 +1,372 @@
-# AWS Bedrock Multi-Agent Scheduling System
+# ProjectForce AI Scheduling Agent
 
-**Version**: 2.0
-**Status**: ✅ Production Ready
-**Classification Accuracy**: 100%
+**Version**: 3.0 (Phase 1-3 Complete)
+**Status**: 🚧 Phase 1 API Integration In Progress
+**Framework**: AWS Bedrock Agents (Primary) + SuperAgent (Backup Option)
 
-Production-ready multi-agent system using AWS Bedrock for appointment scheduling and project management.
+---
 
 ## 🎯 Overview
 
-This system uses **4 specialist agents** with AWS Bedrock:
+Multi-channel AI scheduling system for ProjectForce using AWS Bedrock multi-agent architecture with supervisor pattern.
 
-- **Scheduling Agent** - Appointments, availability, bookings (100% accuracy)
-- **Information Agent** - Project details, status, hours, weather (100% accuracy)
-- **Notes Agent** - Add and view project notes (100% accuracy)
-- **Chitchat Agent** - Greetings, farewells, casual conversation (100% accuracy)
+### Supported Channels
+- ✅ **Web Chat** - React frontend with Flask backend
+- ✅ **Voice/Phone** - AWS Connect + Lex V2 (Phase 3)
+- 🔜 **SMS** - AWS End User Messaging (Phase 2, code complete)
 
-**Routing**: Uses **frontend intent classification** (Claude Haiku) to route directly to specialist agents.
+### AI Architecture
+- **Primary**: AWS Bedrock Agents with Supervisor pattern
+- **Backup**: SuperAgent Framework (under evaluation)
 
-Each specialist has **action groups** connected to AWS Lambda functions that return real data (no hallucinations).
+---
 
-## ⚡ What's New in v2.0
+## 🏗️ Architecture
 
-- ✅ **100% classification accuracy** (improved from 91.3%)
-- ✅ **Comprehensive monitoring** with structured logging
-- ✅ **Production-ready frontend routing** with Claude Haiku
-- ✅ **Metrics API** for real-time monitoring
-- ✅ **Fixed edge case misclassifications**
+### Multi-Agent System (AWS Bedrock)
+
+```
+Customer Input (Chat/Voice/SMS)
+    ↓
+Supervisor Agent (Orchestrator)
+    ↓
+├── Information Agent → get_projects, get_weather
+├── Scheduling Agent → schedule_project, reschedule, cancel
+├── Notification Agent → send_sms, send_email
+└── Escalation Agent → create_ticket, escalate
+
+    ↓
+Lambda Action Functions
+    ↓
+ProjectForce Backend APIs
+```
+
+**5 Agents Total:**
+1. **Supervisor Agent** - Routes requests, orchestrates collaborators
+2. **Information Agent** - Project data, weather, general info
+3. **Scheduling Agent** - Appointments, bookings, availability
+4. **Notification Agent** - SMS, email, alerts
+5. **Escalation Agent** - Support tickets, escalations
+
+### Voice Integration (Phase 3)
+
+```
+Customer Phone Call
+    ↓
+AWS Connect (Contact Center)
+    ↓
+Amazon Lex V2 (Speech-to-Text + Intent Recognition)
+    ↓
+Lambda: lex-fulfillment (simple) | voice-bedrock-bridge (complex)
+    ↓
+Bedrock Supervisor Agent
+    ↓
+Response (Text-to-Speech)
+```
+
+---
 
 ## 🚀 Quick Start
 
-### 1. Setup (One-Time)
+### Prerequisites
+- AWS CLI configured
+- Terraform 1.0+
+- Python 3.11
+- Node.js 18+ (for frontend)
+- AWS Bedrock access (Claude 3.5 Sonnet v2)
+
+### Option 1: Automated Deployment (Recommended)
 
 ```bash
-cd scripts
-python3 complete_setup.py
+cd bedrock
+./DEPLOY.sh
 ```
 
-This creates all agents, configures action groups, and sets up collaborators.
+This deploys:
+- ✅ 5 Bedrock agents
+- ✅ 5+ Lambda functions
+- ✅ DynamoDB session table
+- ✅ Step Functions (3 state machines)
+- ✅ S3 buckets for storage
 
-**Takes ~3 minutes**. Outputs agent IDs saved to `agent_config.json`.
+**Duration**: ~30-45 minutes
 
-### 2. Test
+### Option 2: Manual Step-by-Step
+
+See [`QUICK_START.md`](./QUICK_START.md) for detailed instructions.
+
+---
+
+## 📦 What's Deployed
+
+### Phase 1: Core Multi-Agent System ✅
+**Status**: Deployed, API integration in progress
+
+- 5 Bedrock agents (Supervisor + 4 collaborators)
+- Lambda action functions (information, scheduling, notification, escalation)
+- DynamoDB for session management
+- Web chat interface (React + Flask)
+- Testing UI for agent testing
+
+**Current Work**: Updating Lambda functions to call real ProjectForce APIs
+
+### Phase 2: SMS Integration ✅
+**Status**: Code complete, not deployed
+
+- AWS End User Messaging SMS
+- Two-way SMS conversations
+- TCPA 2025 compliance
+- Consent tracking
+
+**Location**: `infrastructure/terraform/sms/`
+
+### Phase 3: Voice Integration ✅
+**Status**: Infrastructure code complete, ready to deploy
+
+- AWS Connect instance (us-east-1 for USA customers)
+- Amazon Lex V2 bot (5 intents)
+- 2 Lambda functions (lex-fulfillment, voice-bedrock-bridge)
+- Contact flow for call routing
+- Call recordings to S3
+
+**Location**: `infrastructure/terraform/voice/`
+
+**Deployment**: `./scripts/deploy_voice_integration.sh`
+
+---
+
+## 📚 Documentation
+
+### Getting Started
+- **[Quick Start Guide](./QUICK_START.md)** - Fast deployment
+- **[Architecture Overview](./ARCHITECTURE.md)** - System design
+- **[Deployment Guide](./docs/NEW_ENVIRONMENT_DEPLOYMENT.md)** - Complete setup
+
+### Phase-Specific Guides
+- **[Phase 1: Core Agents](./docs/README.md)** - Bedrock agents setup
+- **[Phase 2: SMS](./docs/archive/phase2/)** - SMS integration (not deployed)
+- **[Phase 3: Voice](./docs/phase3/README.md)** - Voice integration guide
+
+### Development
+- **[API Documentation](./docs/api-calls.txt)** - Real backend API examples
+- **[Testing Guide](./tests/README.md)** - How to test agents
+- **[Complex Queries](./docs/COMPLEX_QUERY_SCENARIOS.md)** - Step Functions workflows
+
+### Operations
+- **[Monitoring Setup](./docs/MONITORING_SETUP_GUIDE.md)** - CloudWatch dashboards
+- **[Terraform README](./infrastructure/terraform/README.md)** - Infrastructure details
+
+---
+
+## 🧪 Testing
+
+### Test Web Chat Interface
+
+```bash
+cd testing/ui
+./launch_test_ui.sh
+```
+
+Open browser: http://localhost:3000
+
+Try queries:
+- "Show me my projects"
+- "Schedule my most urgent project"
+- "What's the weather like?"
+
+### Test Voice Integration
 
 ```bash
 cd tests
-python3 test_production.py
+python3 test_voice_integration.py
 ```
 
-Runs 5 test scenarios simulating a logged-in user.
+### Test Bedrock Agents Directly
 
-### 3. Integrate
-
-See `PRODUCTION_IMPLEMENTATION.md` for Flask, FastAPI, React, and AWS Lambda examples.
-
-## 📋 Architecture
-
-```
-User (logged in with customer_id)
-    ↓
-Your Application (Flask/FastAPI/Lambda)
-    ↓ [Inject customer context into prompt]
-Supervisor Agent
-    ↓ [Routes based on intent]
-Specialist Agent (scheduling/information/notes/chitchat)
-    ↓ [Calls action group]
-Lambda Function
-    ↓ [Returns real data]
-User receives response
+```bash
+cd infrastructure/terraform
+python3 test_supervisor_routing.py
 ```
 
-## 🔑 Key Pattern
+---
 
-**The working pattern** for using session attributes:
+## 🔑 Key Features
 
-```python
-def invoke_agent(user_message, customer_id, customer_type='B2C'):
-    """Production invocation with customer context from session"""
+### Intelligent Routing
+- **Simple queries** → Direct Lambda calls (<3s)
+- **Complex queries** → Step Functions workflows (<8s)
+- **Conversational** → Bedrock Supervisor orchestration
 
-    # CRITICAL: Inject customer context into prompt
-    augmented_prompt = f"""Session Context:
-- Customer ID: {customer_id}
-- Customer Type: {customer_type}
+### Multi-Turn Conversations
+- Session management in DynamoDB
+- Context maintained across turns
+- Cross-channel continuity (chat → voice → SMS)
 
-User Request: {user_message}
+### Production Ready
+- Error handling and retries
+- Comprehensive logging
+- Monitoring dashboards
+- Call/chat recordings
+- TCPA compliance for SMS
 
-Please help the customer with their request using their customer ID for any actions."""
+---
 
-    client = boto3.client('bedrock-agent-runtime', region_name='us-east-1')
+## 💰 Cost Estimate
 
-    response = client.invoke_agent(
-        agentId='V3BW0KFBMX',  # Supervisor agent
-        agentAliasId='K6BWBY1RNY',  # Production alias
-        sessionId=f"session-{customer_id}-{timestamp}",
-        inputText=augmented_prompt,  # Augmented with context
-        sessionState={
-            'sessionAttributes': {
-                'customer_id': customer_id,
-                'customer_type': customer_type
-            }
-        }
-    )
+**Monthly costs for 1,000 interactions across all channels:**
 
-    return response
-```
+| Service | Cost |
+|---------|------|
+| Bedrock Agents (5 agents) | $50 |
+| Lambda Functions | $5 |
+| DynamoDB | $5 |
+| Step Functions | $2 |
+| AWS Connect (1,000 calls, 5min avg) | $90 |
+| Phone Number (toll-free) | $3 |
+| Lex V2 | $2 |
+| S3 Storage | $10 |
+| CloudWatch Logs | $5 |
+| **Total** | **~$172/month** |
 
-**Why this works:**
-- User logs in → Your app has `customer_id` in session
-- User asks question → You inject `customer_id` into the prompt
-- Supervisor extracts `customer_id` and passes to specialist
-- Specialist calls Lambda with `customer_id` parameter
-- Lambda returns real data for that customer
+**Per-interaction cost**: ~$0.17
+
+---
+
+## 🔄 Current Status
+
+### Completed ✅
+- [x] Phase 1: Bedrock agents deployed
+- [x] Web chat interface working
+- [x] Step Functions for complex queries
+- [x] Testing UI deployed
+- [x] Phase 3: Voice infrastructure code ready
+- [x] Phase 2: SMS code complete
+
+### In Progress 🚧
+- [ ] Phase 1: Integrate real ProjectForce APIs
+  - Update Lambda functions
+  - Add authentication (Bearer token)
+  - Update data models
+  - Add missing actions (reschedule-slots, cancel-reschedule)
+
+### Planned 📋
+- [ ] Deploy Phase 3 (Voice) after Phase 1 API integration
+- [ ] Deploy Phase 2 (SMS) after Phase 1 API integration
+- [ ] Multi-client (B2B) support
+- [ ] Advanced analytics dashboard
+
+---
+
+## 🛠️ Technology Stack
+
+**AI/ML:**
+- AWS Bedrock (Claude 3.5 Sonnet v2)
+- Amazon Lex V2 (Speech-to-Text)
+- Amazon Polly (Text-to-Speech)
+
+**Infrastructure:**
+- AWS Lambda (Python 3.11)
+- AWS Step Functions
+- DynamoDB
+- S3
+- AWS Connect
+- Terraform (IaC)
+
+**Frontend:**
+- React 18
+- Flask (Python)
+- WebSocket for real-time chat
+
+**Monitoring:**
+- CloudWatch Logs
+- CloudWatch Metrics
+- X-Ray tracing
+
+---
 
 ## 📁 Project Structure
 
 ```
 bedrock/
-├── scripts/
-│   ├── complete_setup.py          # ONE script to set up everything
-│   ├── configure_pf_agents.py     # Configure existing agents
-│   ├── deploy_lambda_functions.sh # Deploy Lambda functions
-│   └── test_lambdas.sh            # Test Lambda functions directly
-├── tests/
-│   └── test_production.py         # Production test suite
+├── infrastructure/
+│   ├── terraform/          # Main infrastructure
+│   │   ├── bedrock_agents.tf
+│   │   ├── dynamodb.tf
+│   │   └── voice/          # Phase 3 voice infrastructure
+│   └── voice/
+│       └── contact-flows/  # AWS Connect flows
 ├── lambda/
-│   ├── scheduling_actions/        # Scheduling Lambda function
-│   ├── information_actions/       # Information Lambda function
-│   ├── notes_actions/             # Notes Lambda function
-│   └── schemas/                   # OpenAPI 3.0 schemas
-├── archive/                       # Old/superseded files
-├── agent_config.json              # Generated agent IDs
-├── PRODUCTION_IMPLEMENTATION.md   # Integration guide
-└── README.md                      # This file
+│   ├── information-actions/
+│   ├── scheduling-actions/
+│   ├── lex-fulfillment/    # Phase 3
+│   └── voice-bedrock-bridge/ # Phase 3
+├── frontend/
+│   ├── backend/            # Flask API
+│   └── src/                # React app
+├── testing/ui/             # Test UI
+├── tests/                  # Test suites
+├── scripts/                # Deployment scripts
+└── docs/                   # Documentation
 ```
-
-## 🛠️ Setup Details
-
-### Prerequisites
-
-- AWS Account with Bedrock access
-- Claude Sonnet 4.5 model enabled
-- Python 3.11+
-- AWS CLI configured
-- boto3 installed
-
-### Agent Configuration
-
-**Current Agent IDs** (in `agent_config.json`):
-
-```json
-{
-  "supervisor_id": "V3BW0KFBMX",
-  "supervisor_alias": "K6BWBY1RNY",
-  "specialists": {
-    "scheduling": "8BGUCA98U7",
-    "information": "UVF5I7KLZ0",
-    "notes": "H0UWLOOQWN",
-    "chitchat": "OBSED5E3TZ"
-  },
-  "region": "us-east-1",
-  "prefix": "pf_"
-}
-```
-
-### Lambda Functions
-
-Three Lambda functions handle 12 actions:
-
-| Lambda Function | Actions | Description |
-|----------------|---------|-------------|
-| `scheduling-agent-scheduling-actions` | 6 actions | list_projects, get_available_dates, get_time_slots, confirm_appointment, reschedule_appointment, cancel_appointment |
-| `scheduling-agent-information-actions` | 4 actions | get_project_details, get_appointment_status, get_working_hours, get_weather |
-| `scheduling-agent-notes-actions` | 2 actions | add_note, list_notes |
-
-**Deploy Lambda functions:**
-
-```bash
-cd scripts
-./deploy_lambda_functions.sh
-```
-
-## 🧪 Testing
-
-### Production Test Suite
-
-```bash
-cd tests
-python3 test_production.py
-```
-
-**Tests:**
-- ✅ List Projects (B2C Customer)
-- ✅ Get Project Details
-- ✅ Check Availability
-- ✅ Business Hours
-- ✅ Appointment Status
-
-### Verify Lambda Invocations
-
-```bash
-# Watch scheduling actions
-aws logs tail /aws/lambda/scheduling-agent-scheduling-actions \
-  --follow --region us-east-1
-
-# Watch information actions
-aws logs tail /aws/lambda/scheduling-agent-information-actions \
-  --follow --region us-east-1
-
-# Watch notes actions
-aws logs tail /aws/lambda/scheduling-agent-notes-actions \
-  --follow --region us-east-1
-```
-
-You should see Lambda invocations with customer_id in the logs.
-
-## 📖 Documentation
-
-| File | Description |
-|------|-------------|
-| `PRODUCTION_IMPLEMENTATION.md` | Complete integration guide with Flask, FastAPI, React, Lambda examples |
-| `SETUP_COMPLETE_SUMMARY.md` | What was accomplished, limitations discovered, architectural decisions |
-| `scripts/README.md` | Script usage guide |
-| `tests/README.md` | Test documentation |
-
-## 🔧 Troubleshooting
-
-### Tests Failing
-
-1. **Check agent IDs** - Verify `agent_config.json` has correct IDs
-2. **Check Lambda functions** - Run `./scripts/test_lambdas.sh`
-3. **Check CloudWatch logs** - Verify Lambda functions are being called
-4. **Re-run setup** - `python3 scripts/complete_setup.py`
-
-### Agent Not Calling Lambda
-
-- **Symptom:** Agent generates fake data or says it can't help
-- **Cause:** Agent instructions not updated or action groups not configured
-- **Fix:** Re-run `python3 scripts/complete_setup.py`
-
-### Session Attributes Not Working
-
-- **Symptom:** Agent asks for customer_id even when provided
-- **Cause:** Not using the working pattern (prompt injection)
-- **Fix:** Follow the pattern in this README or `PRODUCTION_IMPLEMENTATION.md`
-
-## 📊 Monitoring
-
-### Key Metrics
-
-1. **Lambda Invocations** - Agents should call Lambda functions
-2. **Response Times** - First call ~60s (cold start), subsequent ~5-10s
-3. **Error Rates** - Check CloudWatch for errors
-4. **Hallucination Rate** - Should be 0% (agents use real data)
-
-### CloudWatch Dashboards
-
-Create dashboards to monitor:
-- Agent invocations
-- Lambda invocations by action
-- Error rates
-- Response times
-
-## 🚀 Production Deployment
-
-### Checklist
-
-- [ ] Lambda functions deployed
-- [ ] Agents created and configured
-- [ ] Test suite passing (5/5 tests)
-- [ ] CloudWatch logs verified
-- [ ] Integration code written (Flask/FastAPI/Lambda)
-- [ ] Session management implemented
-- [ ] Error handling added
-- [ ] Monitoring dashboards created
-- [ ] Load testing completed
-
-### Environment Variables
-
-```bash
-export BEDROCK_SUPERVISOR_ID="V3BW0KFBMX"
-export BEDROCK_SUPERVISOR_ALIAS="K6BWBY1RNY"
-export BEDROCK_REGION="us-east-1"
-export USE_MOCK_API="true"  # Set to false for real data
-```
-
-### Security
-
-- Never expose agent IDs or aliases to frontend
-- Always validate customer_id matches logged-in user
-- Use IAM roles with least privilege
-- Enable CloudTrail for audit logging
-- Rotate credentials regularly
-
-## 💡 Key Learnings
-
-### What Works ✅
-
-1. **Multi-agent collaboration** - Supervisor routes to specialists
-2. **Action groups** - Lambda functions return real data
-3. **Session context injection** - Customer context via prompt augmentation
-4. **Mock data** - Test with mock data, swap to real data in production
-
-### AWS Bedrock Limitations ⚠️
-
-1. **Session attributes don't auto-propagate** through collaboration chain
-   - **Solution:** Inject into prompt as shown above
-2. **DRAFT aliases can't be used for collaboration**
-   - **Solution:** Create version-specific aliases (v1, v2, etc.)
-3. **First invocation slow** (60+ seconds cold start)
-   - **Solution:** Show loading indicator, implement caching
-
-### Best Practices
-
-1. **Always inject customer context** into the prompt
-2. **Use unique session IDs** per conversation (not per request)
-3. **Monitor CloudWatch logs** to verify Lambda invocations
-4. **Test with mock data** before switching to real APIs
-5. **Handle timeouts** gracefully (agents can take 30+ seconds)
-
-## 📞 Support
-
-- **Issues:** Check `SETUP_COMPLETE_SUMMARY.md` for common issues
-- **Integration:** See `PRODUCTION_IMPLEMENTATION.md` for code examples
-- **API Reference:** See Lambda schemas in `lambda/schemas/`
-
-## 🎉 Success Criteria
-
-Your system is working correctly when:
-
-1. ✅ Tests pass (5/5 in `test_production.py`)
-2. ✅ CloudWatch shows Lambda invocations
-3. ✅ Agents return real project IDs (12345, 12347, 12350)
-4. ✅ No hallucinated data (Kitchen, Bathroom, Garage)
-5. ✅ Response includes project details (Flooring, Windows, Deck Repair)
 
 ---
 
-**Status:** ✅ Production Ready
-**Last Updated:** 2025-10-19
-**Model:** Claude Sonnet 4.5 (us.anthropic.claude-sonnet-4-5-20250929-v1:0)
+## 🆘 Support
+
+### Troubleshooting
+- **Agents not responding**: Check CloudWatch logs `/aws/lambda/pf-*`
+- **Voice calls fail**: Verify phone number associated with contact flow
+- **API errors**: Check `docs/api-calls.txt` for correct format
+
+### Getting Help
+1. Check relevant Phase documentation
+2. Review CloudWatch Logs
+3. Test components individually
+4. Consult Terraform plan output
+
+---
+
+## 🗺️ Roadmap
+
+### Phase 1.1: API Integration (Current)
+- Real ProjectForce API calls
+- Authentication setup
+- Customer lookup by phone
+- Additional actions (slots, cancel)
+
+### Phase 3.1: Voice Production
+- Deploy to production
+- Optimize Lex intents
+- Add DTMF fallback
+- Call analytics dashboard
+
+### Phase 2.1: SMS Production
+- Deploy SMS infrastructure
+- Customer opt-in flow
+- SMS analytics
+
+### Phase 4: Advanced Features
+- Outbound calling
+- Proactive notifications
+- Multi-language support
+- Advanced analytics
+
+---
+
+## 📄 License
+
+Internal project for ProjectForce
+
+---
+
+## 🤝 Contributors
+
+- ProjectForce Team
+- AWS Bedrock Agents
+- Claude Code Assistant
+
+---
+
+**Last Updated**: 2025-10-28
+**Current Phase**: 1.1 (API Integration)
+**Next Milestone**: Real API integration complete
