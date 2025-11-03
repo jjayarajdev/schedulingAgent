@@ -182,6 +182,37 @@ sleep 30
 # ✅ Prepared escalation agent
 ```
 
+#### Step 1.5: Configure Environment-Aware Agent IDs
+
+```bash
+# Automatically fetch and populate agent IDs into environment-specific config
+cd ../backend
+../scripts/fetch_agent_ids.sh $ENVIRONMENT
+
+# This script will:
+# - Query AWS Bedrock for all deployed agents
+# - Match agents by name pattern (Supervisor, Scheduling, Information, Notes, Chitchat)
+# - Fetch appropriate alias IDs for the environment (TSTALIASID for dev)
+# - Update backend/agent_config.$ENVIRONMENT.json with actual IDs
+# - Preserve all other configuration settings
+
+# Verify the configuration was updated correctly
+echo "✅ Agent configuration for $ENVIRONMENT:"
+cat agent_config.$ENVIRONMENT.json | jq -r '
+  "Environment: \(.environment)",
+  "Supervisor: \(.supervisor_id)",
+  "Agents:",
+  "  - Scheduling: \(.agents.scheduling.agent_id)",
+  "  - Information: \(.agents.information.agent_id)",
+  "  - Notes: \(.agents.notes.agent_id)",
+  "  - Chitchat: \(.agents.chitchat.agent_id)"
+'
+
+cd ../infrastructure/terraform
+```
+
+**Note**: The backend application will automatically use the environment-specific configuration file (`agent_config.$ENVIRONMENT.json`) based on the `ENVIRONMENT` environment variable. No manual agent ID configuration is needed.
+
 ---
 
 ### Phase 2: Step Functions Infrastructure
@@ -299,15 +330,31 @@ pip install -r requirements.txt
 #### Step 4.2: Configure Backend
 
 ```bash
-# Update backend configuration with deployed agent IDs
+# Automatically fetch and populate agent IDs from AWS
+cd backend
+../scripts/fetch_agent_ids.sh $ENVIRONMENT
+
+# This will:
+# - Fetch all Bedrock agent IDs from AWS
+# - Match agents by name pattern
+# - Update backend/agent_config.$ENVIRONMENT.json with actual IDs
+# - Set appropriate alias IDs for the environment
+
+# Verify the configuration was updated
+echo "Agent configuration for $ENVIRONMENT:"
+cat agent_config.$ENVIRONMENT.json | jq '{supervisor_id, agents}'
+
+# Set environment variable for backend to use correct config
+export ENVIRONMENT=$ENVIRONMENT
+
+# Optional: Create .env file for additional configuration
 cat > .env <<EOF
 # AWS Configuration
 AWS_REGION=$AWS_REGION
 AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID
 
-# Bedrock Agent Configuration
-SUPERVISOR_AGENT_ID=$(aws bedrock-agent list-agents --region $AWS_REGION | jq -r '.agentSummaries[] | select(.agentName == "pf-supervisor-agent-dev") | .agentId')
-SUPERVISOR_AGENT_ALIAS_ID=TSTALIASID
+# Environment (determines which agent_config file to use)
+ENVIRONMENT=$ENVIRONMENT
 
 # Query Router Configuration
 QUERY_ROUTER_LAMBDA=pf-query-router
@@ -655,6 +702,7 @@ Use this checklist to track deployment progress:
 - [ ] Core infrastructure deployed (Terraform)
 - [ ] All 5 Bedrock agents created
 - [ ] Agents prepared with action groups
+- [ ] Environment-specific agent config populated (fetch_agent_ids.sh)
 - [ ] Lambda functions deployed (information, scheduling)
 - [ ] DynamoDB table created
 - [ ] IAM roles and policies configured
