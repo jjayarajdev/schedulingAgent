@@ -1,0 +1,35 @@
+{
+  "environment": "staging",
+  "supervisor_id": "REPLACE_WITH_STAGING_SUPERVISOR_ID",
+  "supervisor_alias": "REPLACE_WITH_STAGING_ALIAS",
+  "agents": {
+    "scheduling": {
+      "agent_id": "REPLACE_WITH_STAGING_SCHEDULING_AGENT_ID",
+      "alias_id": "REPLACE_WITH_STAGING_ALIAS"
+    },
+    "information": {
+      "agent_id": "REPLACE_WITH_STAGING_INFORMATION_AGENT_ID",
+      "alias_id": "REPLACE_WITH_STAGING_ALIAS"
+    },
+    "notes": {
+      "agent_id": "REPLACE_WITH_STAGING_NOTES_AGENT_ID",
+      "alias_id": "REPLACE_WITH_STAGING_ALIAS"
+    },
+    "chitchat": {
+      "agent_id": "REPLACE_WITH_STAGING_CHITCHAT_AGENT_ID",
+      "alias_id": "REPLACE_WITH_STAGING_ALIAS"
+    }
+  },
+  "routing": {
+    "enabled": true,
+    "method": "supervisor",
+    "use_supervisor": true,
+    "classifier_model": "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+  },
+  "region": "us-east-1",
+  "prefix": "pf_",
+  "customer_context": {
+    "injection_method": "prompt_augmentation_and_session_attributes",
+    "session_attributes": ["customer_id", "customer_type", "client_id"]
+  }
+}

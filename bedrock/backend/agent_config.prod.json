@@ -1,0 +1,35 @@
+{
+  "environment": "prod",
+  "supervisor_id": "REPLACE_WITH_PROD_SUPERVISOR_ID",
+  "supervisor_alias": "REPLACE_WITH_PROD_ALIAS",
+  "agents": {
+    "scheduling": {
+      "agent_id": "REPLACE_WITH_PROD_SCHEDULING_AGENT_ID",
+      "alias_id": "REPLACE_WITH_PROD_ALIAS"
+    },
+    "information": {
+      "agent_id": "REPLACE_WITH_PROD_INFORMATION_AGENT_ID",
+      "alias_id": "REPLACE_WITH_PROD_ALIAS"
+    },
+    "notes": {
+      "agent_id": "REPLACE_WITH_PROD_NOTES_AGENT_ID",
+      "alias_id": "REPLACE_WITH_PROD_ALIAS"
+    },
+    "chitchat": {
+      "agent_id": "REPLACE_WITH_PROD_CHITCHAT_AGENT_ID",
+      "alias_id": "REPLACE_WITH_PROD_ALIAS"
+    }
+  },
+  "routing": {
+    "enabled": true,
+    "method": "supervisor",
+    "use_supervisor": true,
+    "classifier_model": "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+  },
+  "region": "us-east-1",
+  "prefix": "pf_",
+  "customer_context": {
+    "injection_method": "prompt_augmentation_and_session_attributes",
+    "session_attributes": ["customer_id", "customer_type", "client_id"]
+  }
+}

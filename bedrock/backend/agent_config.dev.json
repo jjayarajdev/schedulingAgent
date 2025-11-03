@@ -1,0 +1,39 @@
+{
+  "environment": "dev",
+  "supervisor_id": "WF1S95L7X1",
+  "supervisor_alias": "TSTALIASID",
+  "agents": {
+    "scheduling": {
+      "agent_id": "TIGRBGSXCS",
+      "alias_id": "TSTALIASID"
+    },
+    "information": {
+      "agent_id": "JEK4SDJOOU",
+      "alias_id": "TSTALIASID"
+    },
+    "notes": {
+      "agent_id": "CF0IPHCFFY",
+      "alias_id": "TSTALIASID"
+    },
+    "chitchat": {
+      "agent_id": "GXVZEOBQ64",
+      "alias_id": "TSTALIASID"
+    }
+  },
+  "routing": {
+    "enabled": true,
+    "method": "supervisor",
+    "use_supervisor": true,
+    "classifier_model": "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+  },
+  "region": "us-east-1",
+  "prefix": "pf_",
+  "customer_context": {
+    "injection_method": "prompt_augmentation_and_session_attributes",
+    "session_attributes": [
+      "customer_id",
+      "customer_type",
+      "client_id"
+    ]
+  }
+}

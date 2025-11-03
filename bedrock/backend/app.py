@@ -20,8 +20,15 @@ CORS(app)  # Enable CORS for frontend
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Bedrock configuration (load from agent_config.json)
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'agent_config.json')
+# Bedrock configuration (load from environment-specific agent_config file)
+# Priority: agent_config.{ENVIRONMENT}.json > agent_config.json
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
+CONFIG_DIR = os.path.dirname(__file__)
+ENV_CONFIG_PATH = os.path.join(CONFIG_DIR, f'agent_config.{ENVIRONMENT}.json')
+DEFAULT_CONFIG_PATH = os.path.join(CONFIG_DIR, 'agent_config.json')
+
+# Try environment-specific config first, fall back to default
+CONFIG_PATH = ENV_CONFIG_PATH if os.path.exists(ENV_CONFIG_PATH) else DEFAULT_CONFIG_PATH
 
 try:
     with open(CONFIG_PATH, 'r') as f:
@@ -31,6 +38,7 @@ try:
         AGENTS = config.get('agents', {})
         ROUTING_CONFIG = config.get('routing', {'enabled': True, 'use_supervisor': False})
         REGION = config.get('region', 'us-east-1')
+        logger.info(f"✅ Loaded config from: {CONFIG_PATH} (environment: {ENVIRONMENT})")
 except FileNotFoundError:
     logger.error(f"Config file not found at {CONFIG_PATH}")
     # Fallback to hardcoded values
