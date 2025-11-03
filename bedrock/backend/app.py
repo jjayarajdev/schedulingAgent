@@ -245,7 +245,8 @@ def classify_intent(message):
 Given a user message, classify it into ONE of these categories:
 
 1. **scheduling**:
-   - Listing/showing projects ("show me my projects", "what projects do I have", "list projects")
+   - **ALWAYS classify requests to list, show, or view projects as scheduling**
+   - Examples: "show me my projects", "list my projects", "what projects do I have", "show projects", "my projects", "list all projects"
    - Booking appointments ("schedule an appointment", "book a time")
    - Checking availability ("what dates are available", "when can I schedule")
    - Getting dates/times ("available times", "open slots")
@@ -510,6 +511,15 @@ def classify_only():
     if not message:
         return jsonify({'error': 'Message is required'}), 400
 
+    # Get ProjectForce credentials from request
+    pf_token = data.get('pf_token')
+    pf_client_id = data.get('pf_client_id', '09PF05VD')
+    pf_user_id = data.get('pf_user_id', '6f72bffa-c323-4058-a01c-9d495d696364')
+
+    logger.info(f"Received request with PF token: {'Yes' if pf_token else 'No'}, Client ID: {pf_client_id}")
+    if pf_token:
+        logger.info(f"Token preview (first 20 chars): {pf_token[:20]}...")
+
     start_time = time.time()
 
     try:
@@ -522,46 +532,86 @@ def classify_only():
         agent_id = agent_config['agent_id']
         alias_id = agent_config['alias_id']
 
-        # Invoke the agent to get actual response
-        customer_id = SAMPLE_USER['customer_id']
-        customer_type = SAMPLE_USER['customer_type']
+        # Use real ProjectForce data if token is available
+        if pf_token:
+            customer_id = pf_user_id
+            customer_type = 'B2C'
+            client_id = pf_client_id
+            client_name = 'ProjectForce User'
+        else:
+            # Fallback to sample data
+            customer_id = SAMPLE_USER['customer_id']
+            customer_type = SAMPLE_USER['customer_type']
+            client_id = SAMPLE_USER.get('client_id', 'CLIENT001')
+            client_name = SAMPLE_USER.get('name', 'John Doe')
+
         session_id = f"test-session-{customer_id}-{int(time.time())}"
 
         # Create augmented prompt with context
         augmented_prompt = f"""Session Context:
 - Customer ID: {customer_id}
-- Client ID: {SAMPLE_USER.get('client_id', 'CLIENT001')}
-- Client Name: {SAMPLE_USER.get('name', 'John Doe')}
+- Client ID: {client_id}
+- Client Name: {client_name}
 - Customer Type: {customer_type}
 
 User Request: {message}
 
 Please help the customer with their request using their customer ID and client ID for any actions."""
 
-        # Invoke agent
+        # Invoke agent with ProjectForce token in session attributes
         invocation_start = time.time()
+
+        session_attributes = {
+            'customer_id': customer_id,
+            'client_id': client_id,
+            'client_name': client_name,
+            'customer_type': customer_type
+        }
+
+        # Add ProjectForce token if available
+        if pf_token:
+            session_attributes['pf_bearer_token'] = pf_token
+            session_attributes['pf_api_base'] = 'https://api-cx-portal.dev.projectsforce.com'
+            logger.info(f"Session attributes being sent to Bedrock: {list(session_attributes.keys())}")
+
         response = bedrock_agent_runtime.invoke_agent(
             agentId=agent_id,
             agentAliasId=alias_id,
             sessionId=session_id,
             inputText=augmented_prompt,
+            enableTrace=True,
             sessionState={
-                'sessionAttributes': {
-                    'customer_id': customer_id,
-                    'client_id': SAMPLE_USER.get('client_id', 'CLIENT001'),
-                    'client_name': SAMPLE_USER.get('name', 'John Doe'),
-                    'customer_type': customer_type
-                }
+                'sessionAttributes': session_attributes
             }
         )
 
-        # Collect full response
+        # Collect full response and trace
         full_response = ""
+        chunk_count = 0
+        trace_count = 0
         for event in response['completion']:
             if 'chunk' in event:
                 chunk = event['chunk']
                 if 'bytes' in chunk:
-                    full_response += chunk['bytes'].decode('utf-8')
+                    decoded = chunk['bytes'].decode('utf-8')
+                    full_response += decoded
+                    chunk_count += 1
+            elif 'trace' in event:
+                trace = event['trace']
+                trace_count += 1
+                # Log full trace for debugging
+                logger.info(f"Full trace event: {json.dumps(trace, indent=2, default=str)}")
+                if 'failureTrace' in trace:
+                    logger.error(f"Failure trace: {trace['failureTrace']}")
+                if 'orchestrationTrace' in trace:
+                    orch = trace['orchestrationTrace']
+                    if 'invocationInput' in orch:
+                        logger.info(f"Action invocation: {orch['invocationInput']}")
+                    if 'observation' in orch:
+                        logger.info(f"Action observation: {orch['observation']}")
+
+        logger.info(f"Received {chunk_count} chunks, {trace_count} trace events, total length: {len(full_response)} chars")
+        logger.info(f"Response preview: {full_response[:200]}...")
 
         invocation_time = time.time() - invocation_start
         total_time = time.time() - start_time

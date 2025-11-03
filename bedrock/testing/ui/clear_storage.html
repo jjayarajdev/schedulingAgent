@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear Storage Helper</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #667eea;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #5568d3;
+        }
+        .success {
+            color: green;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-family: monospace;
+        }
+        .current-values {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 LocalStorage Helper</h1>
+
+        <div class="current-values" id="currentValues">
+            <h3>Current Values:</h3>
+            <div id="valuesDisplay"></div>
+        </div>
+
+        <div class="info">
+            <h3>Instructions:</h3>
+            <ol>
+                <li>Click "Clear All Storage" to remove old values</li>
+                <li>Get a fresh token from your browser's developer console (Network tab → find a successful API call → copy Authorization header)</li>
+                <li>Paste the token below and click "Set Values"</li>
+                <li>Go back to test_ui.html and try "Show me all my projects"</li>
+            </ol>
+        </div>
+
+        <button onclick="clearStorage()">Clear All Storage</button>
+        <button onclick="displayCurrentValues()">Refresh Display</button>
+
+        <div style="margin-top: 30px;">
+            <h3>Set New Values:</h3>
+            <label>Access Token:</label>
+            <input type="text" id="tokenInput" placeholder="Paste your fresh token here">
+
+            <label>Customer ID (default: 1645869):</label>
+            <input type="text" id="customerIdInput" value="1645869">
+
+            <label>Client ID (default: 09PF05VD):</label>
+            <input type="text" id="clientIdInput" value="09PF05VD">
+
+            <button onclick="setValues()">Set Values</button>
+        </div>
+
+        <div id="message"></div>
+
+        <div style="margin-top: 30px;">
+            <button onclick="openTestUI()">Open Test UI</button>
+        </div>
+    </div>
+
+    <script>
+        function displayCurrentValues() {
+            const token = localStorage.getItem('pf_access_token');
+            const customerId = localStorage.getItem('pf_user_id');
+            const clientId = localStorage.getItem('pf_client_id');
+
+            const display = document.getElementById('valuesDisplay');
+            display.innerHTML = `
+                <p><strong>Token:</strong> ${token ? token.substring(0, 50) + '...' : 'Not set'}</p>
+                <p><strong>Customer ID:</strong> ${customerId || 'Not set'}</p>
+                <p><strong>Client ID:</strong> ${clientId || 'Not set'}</p>
+            `;
+        }
+
+        function clearStorage() {
+            localStorage.clear();
+            document.getElementById('message').innerHTML = '<p class="success">✅ All storage cleared!</p>';
+            displayCurrentValues();
+        }
+
+        function setValues() {
+            const token = document.getElementById('tokenInput').value.trim();
+            const customerId = document.getElementById('customerIdInput').value.trim();
+            const clientId = document.getElementById('clientIdInput').value.trim();
+
+            if (!token) {
+                document.getElementById('message').innerHTML = '<p style="color: red;">❌ Please enter a token!</p>';
+                return;
+            }
+
+            localStorage.setItem('pf_access_token', token);
+            localStorage.setItem('pf_user_id', customerId);
+            localStorage.setItem('pf_client_id', clientId);
+
+            document.getElementById('message').innerHTML = '<p class="success">✅ Values saved to localStorage!</p>';
+            displayCurrentValues();
+        }
+
+        function openTestUI() {
+            window.open('test_ui.html', '_blank');
+        }
+
+        // Display current values on load
+        displayCurrentValues();
+    </script>
+</body>
+</html>

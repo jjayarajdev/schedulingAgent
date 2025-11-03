@@ -128,6 +128,7 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
     Returns list of projects for the customer
     """
     customer_id = params.get('customer_id')
+    client_id = params.get('client_id', 'default')
 
     if not customer_id:
         raise ValueError("Missing required parameter: customer_id")
@@ -136,8 +137,10 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
         logger.info(f"[MOCK] Fetching projects for customer {customer_id}")
         response = get_mock_projects(customer_id)
     else:
-        logger.info(f"[REAL] Fetching projects for customer {customer_id}")
-        url = f"{config['dashboard_url']}/{customer_id}"
+        logger.info(f"[REAL] Fetching projects for customer {customer_id} and client {client_id}")
+        # OLD Portal API format: /dashboard/get/{client_id}/{customer_id}
+        url = f"{config['dashboard_url']}/{client_id}/{customer_id}"
+        logger.info(f"Making API request to: {url}")
         res = requests.get(url, headers=auth_headers, timeout=30)
         res.raise_for_status()
         response = res.json()
@@ -386,15 +389,43 @@ def lambda_handler(event, context):
         # Extract parameters
         params = extract_parameters(event)
 
+        # Extract session attributes (passed from Bedrock Agent)
+        session_attributes = event.get('sessionAttributes', {})
+        logger.info(f"Session attributes: {session_attributes}")
+
+        # Get ProjectForce token from session attributes
+        pf_bearer_token = session_attributes.get('pf_bearer_token', '')
+        pf_api_base = session_attributes.get('pf_api_base', '')
+        customer_id = session_attributes.get('customer_id', params.get('customer_id', ''))
+        client_id = session_attributes.get('client_id', params.get('client_id', 'default'))
+
+        # Add customer_id and client_id to params if not already present
+        if customer_id and 'customer_id' not in params:
+            params['customer_id'] = customer_id
+        if client_id and 'client_id' not in params:
+            params['client_id'] = client_id
+
         # Get configuration
-        client_id = params.get('client_id', 'default')
         config = get_api_config(client_id)
+
+        # Override base URL if provided in session attributes
+        if pf_api_base:
+            config['base_url'] = pf_api_base
+            config['dashboard_url'] = f"{pf_api_base}/dashboard/get"  # OLD Portal API format
+            config['scheduler_url'] = f"{pf_api_base}/system/client-details"
+            logger.info(f"Using ProjectForce API base: {pf_api_base}")
 
         # Get auth headers (if not using mock)
         auth_headers = {}
         if not USE_MOCK_API:
-            authorization = params.get('authorization', event.get('authorization', ''))
+            # Use token from session attributes if available, otherwise fallback to env var
+            authorization = pf_bearer_token if pf_bearer_token else params.get('authorization', event.get('authorization', ''))
             auth_headers = get_auth_headers(authorization, client_id)
+
+            if pf_bearer_token:
+                logger.info("Using ProjectForce Bearer token from session attributes")
+            else:
+                logger.warning("No ProjectForce Bearer token in session attributes, using environment variable")
 
         # Route to appropriate handler
         handlers = {

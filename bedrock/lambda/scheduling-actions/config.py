@@ -9,7 +9,7 @@ from typing import Dict
 USE_MOCK_API = os.getenv("USE_MOCK_API", "true").lower() == "true"
 ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
 
-# Real ProjectForce API endpoints
+# Real ProjectForce API endpoints (OLD Portal API)
 API_BASE_URLS = {
     "dev": "https://api-cx-portal.dev.projectsforce.com",
     "staging": "https://api-cx-portal.staging.projectsforce.com",
@@ -47,11 +47,10 @@ def get_api_config(client_id: str = None, env: str = None) -> Dict[str, str]:
 
     return {
         "base_url": base_url,
-        "dashboard_url": f"{base_url}/dashboard/get/{client_id}",
-        "scheduler_base_url": f"{base_url}/scheduler/client/{client_id}",
+        "dashboard_url": f"{base_url}/dashboard/get",  # OLD Portal API format: /dashboard/get/{client_id}/{customer_id}
+        "scheduler_url": f"{base_url}/system/client-details",
         "notes_url": f"{base_url}/project-notes/add/{client_id}",
         "weather_url": "https://wttr.in",
-        "business_hours_url": f"{base_url}/business-hours/{client_id}",
         "use_mock": USE_MOCK_API
     }
 
@@ -72,16 +71,10 @@ def get_auth_headers(authorization: str = None, client_id: str = None) -> Dict[s
         authorization = f"Bearer {authorization}"
 
     return {
-        "Authorization": authorization,  # Capital A
-        "Client_Id": client_id,  # Capital C and I (as per real API)
-        "Content-Type": "application/json",
+        "Authorization": authorization,
         "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-        "Origin": "https://projectsforce-validation.cx-portal.dev.projectsforce.com",
-        "Referer": "https://projectsforce-validation.cx-portal.dev.projectsforce.com/",
-        "User-Agent": "Mozilla/5.0 (compatible; ProjectForce-Agent/1.0)"
+        "Content-Type": "application/json",
+        "Client_Id": client_id
     }
 
 # Mock mode notification

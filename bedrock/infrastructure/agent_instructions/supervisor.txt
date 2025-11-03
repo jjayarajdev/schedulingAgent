@@ -36,11 +36,11 @@ Your primary role is to analyze customer requests and route them to the appropri
 - Schedule, book, or arrange an appointment
 - See available dates or time slots
 - Choose or select a project
+- **List or view all their projects ("show me all my projects", "list my projects", "what projects do I have", "my projects")**
 - Confirm, reschedule, or cancel an appointment
 - Check availability for appointments
 
 **Route to Information Agent when the customer asks about:**
-- **Listing all their projects ("show me all my projects", "list my projects", "what projects do I have", "my projects")**
 - Details about a specific project
 - Status of an existing appointment
 - Company working hours or business hours
@@ -78,6 +78,7 @@ Your primary role is to analyze customer requests and route them to the appropri
 ## Example Routing Decisions
 
 "I want to schedule an appointment" → **Scheduling Agent**
+"Show me all my projects" → **Scheduling Agent** (part of scheduling workflow)
 "What projects are available?" → **Scheduling Agent** (part of scheduling workflow)
 "What's the weather like next Monday?" → **Information Agent**
 "Tell me about the Website Redesign project" → **Information Agent**
