@@ -13,7 +13,7 @@ from typing import Dict
 USE_MOCK_API = os.getenv("USE_MOCK_API", "true").lower() == "true"
 ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
 
-# Real ProjectForce API endpoints
+# Real ProjectForce API endpoints (CX Portal API)
 API_BASE_URLS = {
     "dev": "https://api-cx-portal.dev.projectsforce.com",
     "staging": "https://api-cx-portal.staging.projectsforce.com",
@@ -57,8 +57,8 @@ def get_api_config(client_id: str = None, env: str = None) -> Dict[str, str]:
 
     return {
         "base_url": base_url,
-        "dashboard_url": f"{base_url}/dashboard/get/{client_id}",
-        "business_hours_url": f"{base_url}/business-hours/{client_id}",
+        "dashboard_url": f"{base_url}/cx-scheduled/projects",
+        "business_hours_url": f"{base_url}/system/client-details",
         "weather_url": WEATHER_API_URL,
         "environment": env,
         "use_mock": USE_MOCK_API
@@ -69,14 +69,13 @@ def get_auth_headers(authorization: str = None, client_id: str = None) -> Dict[s
     Generate authentication headers for ProjectForce API calls
     Real API requires:
     - Authorization: Bearer TOKEN
-    - Client_Id: 09PF05VD (note: capital C and I)
 
     Args:
         authorization: Bearer token or full authorization header
-        client_id: Client identifier
+        client_id: Client identifier (not used in headers currently)
 
     Returns:
-        Dict with Authorization and Client_Id headers
+        Dict with Authorization header
     """
     if client_id is None:
         client_id = DEFAULT_CLIENT_ID
@@ -88,14 +87,7 @@ def get_auth_headers(authorization: str = None, client_id: str = None) -> Dict[s
         authorization = f"Bearer {authorization}"
 
     return {
-        "Authorization": authorization,  # Capital A
-        "Client_Id": client_id,  # Capital C and I (as per real API)
+        "Authorization": authorization,
         "Content-Type": "application/json",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-        "Origin": "https://projectsforce-validation.cx-portal.dev.projectsforce.com",
-        "Referer": "https://projectsforce-validation.cx-portal.dev.projectsforce.com/",
-        "User-Agent": "Mozilla/5.0 (compatible; ProjectForce-Agent/1.0)"
+        "Client_Id": client_id
     }

@@ -12,9 +12,16 @@ from typing import Dict
 # Core Configuration
 USE_MOCK_API = os.getenv("USE_MOCK_API", "true").lower() == "true"
 ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
+
+# Real ProjectForce API endpoints (CX Portal API)
+API_BASE_URLS = {
+    "dev": "https://api-cx-portal.dev.projectsforce.com",
+    "staging": "https://api-cx-portal.staging.projectsforce.com",
+    "prod": "https://api-cx-portal.projectsforce.com"
+}
 CUSTOMER_SCHEDULER_BASE_API_URL = os.getenv(
     "CUSTOMER_SCHEDULER_API_URL",
-    "https://api.projectsforce.com"
+    API_BASE_URLS.get(ENVIRONMENT, API_BASE_URLS["dev"])
 )
 
 # DynamoDB Configuration (for storing notes if no API available)

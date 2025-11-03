@@ -21,7 +21,7 @@ Handles 6 scheduling-related actions for the Bedrock Scheduling Agent.
 # Core Configuration
 USE_MOCK_API=true                    # true = mock responses, false = real API calls
 ENVIRONMENT=dev                       # dev, qa, staging, prod
-CUSTOMER_SCHEDULER_API_URL=https://api.projectsforce.com
+CUSTOMER_SCHEDULER_API_URL=https://api-cx-portal.projectsforce.com
 
 # Feature Flags (gradual rollout)
 ENABLE_REAL_CONFIRM=false            # Enable real API for confirm (even if USE_MOCK_API=false)
@@ -192,7 +192,7 @@ When you're ready to use real PF360 APIs:
 ```bash
 # Test real API access with curl
 curl -X GET \
-  "https://api.projectsforce.com/dashboard/get/09PF05VD/1645975" \
+  "https://api-cx-portal.projectsforce.com/dashboard/get/09PF05VD/1645975" \
   -H "authorization: Bearer YOUR_TOKEN" \
   -H "client_id: 09PF05VD"
 ```
@@ -203,7 +203,7 @@ curl -X GET \
 # Update Lambda to use real APIs
 aws lambda update-function-configuration \
   --function-name scheduling-agent-scheduling-actions \
-  --environment Variables="{USE_MOCK_API=false,ENVIRONMENT=prod,CUSTOMER_SCHEDULER_API_URL=https://api.projectsforce.com}" \
+  --environment Variables="{USE_MOCK_API=false,ENVIRONMENT=prod,CUSTOMER_SCHEDULER_API_URL=https://api-cx-portal.projectsforce.com}" \
   --region us-east-1
 ```
 

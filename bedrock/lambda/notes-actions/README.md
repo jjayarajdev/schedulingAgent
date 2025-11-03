@@ -17,7 +17,7 @@ Handles 2 notes-related actions for the Bedrock Scheduling Agent.
 # Core Configuration
 USE_MOCK_API=true                    # true = mock responses, false = real API calls
 ENVIRONMENT=dev                       # dev, qa, staging, prod
-CUSTOMER_SCHEDULER_API_URL=https://api.projectsforce.com
+CUSTOMER_SCHEDULER_API_URL=https://api-cx-portal.projectsforce.com
 
 # DynamoDB Configuration (fallback storage)
 DYNAMODB_TABLE=scheduling-agent-notes-dev
@@ -250,7 +250,7 @@ When you're ready to use real PF360 APIs:
 ```bash
 # Test add note API
 curl -X POST \
-  "https://api.projectsforce.com/project-notes/add/09PF05VD" \
+  "https://api-cx-portal.projectsforce.com/project-notes/add/09PF05VD" \
   -H "authorization: Bearer YOUR_TOKEN" \
   -H "client_id: 09PF05VD" \
   -H "Content-Type: application/json" \
@@ -258,7 +258,7 @@ curl -X POST \
 
 # Test list notes API (may not exist)
 curl -X GET \
-  "https://api.projectsforce.com/project-notes/list/09PF05VD?project_id=12345" \
+  "https://api-cx-portal.projectsforce.com/project-notes/list/09PF05VD?project_id=12345" \
   -H "authorization: Bearer YOUR_TOKEN" \
   -H "client_id: 09PF05VD"
 ```
@@ -269,7 +269,7 @@ curl -X GET \
 # Update Lambda to use real APIs (with DynamoDB fallback)
 aws lambda update-function-configuration \
   --function-name scheduling-agent-notes-actions \
-  --environment Variables="{USE_MOCK_API=false,ENVIRONMENT=prod,CUSTOMER_SCHEDULER_API_URL=https://api.projectsforce.com,DYNAMODB_TABLE=scheduling-agent-notes-prod}" \
+  --environment Variables="{USE_MOCK_API=false,ENVIRONMENT=prod,CUSTOMER_SCHEDULER_API_URL=https://api-cx-portal.projectsforce.com,DYNAMODB_TABLE=scheduling-agent-notes-prod}" \
   --region us-east-1
 ```
 
