@@ -1,26 +1,26 @@
 {
   "environment": "dev",
-  "supervisor_id": "HXOKSZFJV5",
-  "supervisor_alias": "DHKWVRZKFH",
+  "supervisor_id": "SGI6MRCQ1Q",
+  "supervisor_alias": "TSTALIASID",
   "agents": {
     "scheduling": {
-      "agent_id": "HRLJYJFRRD",
-      "alias_id": "EJUYANKE6K"
+      "agent_id": "M9E3PUQB2Z",
+      "alias_id": "TSTALIASID"
     },
     "information": {
-      "agent_id": "IXILRCF5SL",
-      "alias_id": "BY5VY0VOEI"
+      "agent_id": "RYOSDIY0WW",
+      "alias_id": "TSTALIASID"
     },
     "chitchat": {
-      "agent_id": "P9RY2D9C73",
-      "alias_id": "IIVNREECRP"
+      "agent_id": "0HWWAV16DW",
+      "alias_id": "TSTALIASID"
     }
   },
   "routing": {
     "enabled": true,
     "method": "supervisor",
     "use_supervisor": true,
-    "classifier_model": "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+    "classifier_model": "anthropic.claude-3-haiku-20240307-v1:0"
   },
   "region": "us-east-1",
   "prefix": "pf_",

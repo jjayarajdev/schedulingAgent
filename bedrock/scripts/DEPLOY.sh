@@ -29,7 +29,12 @@ BEDROCK_DIR="$(dirname "$SCRIPT_DIR")"
 REGION="us-east-1"
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ENV="dev"
-CLIENT_ID="09PF05VD"
+
+# Colors for prompts
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
 echo "=========================================="
 echo "ProjectForce 4-Agent Deployment"
@@ -38,6 +43,91 @@ echo ""
 echo "Region: $REGION"
 echo "Account: $ACCOUNT_ID"
 echo "Environment: $ENV"
+echo ""
+
+##############################################################################
+# Prompt for ProjectForce API Credentials
+##############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo -e "${BLUE}ProjectForce API Credentials${NC}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "The Lambda functions need API credentials to connect to ProjectForce."
+echo ""
+
+echo "Please provide your ProjectForce API credentials:"
+echo ""
+echo "You can get these from the browser (DevTools → Application → Local Storage):"
+echo "  • Client ID: client_id"
+echo "  • User ID: id"
+echo "  • Bearer Token: accesstoken"
+echo "  • Refresh Token: refreshToken"
+echo ""
+
+# Prompt for Client ID
+if [[ -n "$PF_CLIENT_ID" ]]; then
+    read -p "Client ID [current: $PF_CLIENT_ID]: " INPUT_CLIENT_ID
+    PF_CLIENT_ID="${INPUT_CLIENT_ID:-$PF_CLIENT_ID}"
+else
+    read -p "Client ID (e.g., 09PF05VD): " PF_CLIENT_ID
+    while [[ -z "$PF_CLIENT_ID" ]]; do
+        echo -e "${YELLOW}Client ID is required${NC}"
+        read -p "Client ID: " PF_CLIENT_ID
+    done
+fi
+
+# Prompt for User ID
+if [[ -n "$PF_USER_ID" ]]; then
+    read -p "User ID [current: $PF_USER_ID]: " INPUT_USER_ID
+    PF_USER_ID="${INPUT_USER_ID:-$PF_USER_ID}"
+else
+    read -p "User ID (e.g., 1646085): " PF_USER_ID
+    while [[ -z "$PF_USER_ID" ]]; do
+        echo -e "${YELLOW}User ID is required${NC}"
+        read -p "User ID: " PF_USER_ID
+    done
+fi
+
+# Prompt for Bearer Token
+echo ""
+if [[ -n "$PF_BEARER_TOKEN" ]]; then
+    echo "Bearer Token [current: ${PF_BEARER_TOKEN:0:30}...]"
+    echo "Press Enter to keep current, or paste new token:"
+    read -p "> " INPUT_TOKEN
+    PF_BEARER_TOKEN="${INPUT_TOKEN:-$PF_BEARER_TOKEN}"
+else
+    echo "Bearer Token (paste from Local Storage 'accesstoken'):"
+    read -p "> " PF_BEARER_TOKEN
+    while [[ -z "$PF_BEARER_TOKEN" ]]; do
+        echo -e "${YELLOW}Bearer Token is required${NC}"
+        read -p "Bearer Token: " PF_BEARER_TOKEN
+    done
+fi
+
+# Optional: Refresh token
+echo ""
+if [[ -n "$PF_REFRESH_TOKEN" ]]; then
+    echo "Refresh Token [current: ${PF_REFRESH_TOKEN:0:30}...]"
+    echo "Press Enter to keep current, or paste new token:"
+    read -p "> " INPUT_REFRESH
+    PF_REFRESH_TOKEN="${INPUT_REFRESH:-$PF_REFRESH_TOKEN}"
+else
+    echo "Optional: Refresh Token (press Enter to skip):"
+    read -p "> " PF_REFRESH_TOKEN
+fi
+
+echo ""
+echo -e "${GREEN}✓ Credentials captured${NC}"
+echo ""
+
+# Store values
+CLIENT_ID="$PF_CLIENT_ID"
+USER_ID="$PF_USER_ID"
+BEARER_TOKEN="$PF_BEARER_TOKEN"
+REFRESH_TOKEN="${PF_REFRESH_TOKEN:-}"
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
 ##############################################################################
@@ -90,22 +180,10 @@ get_fresh_token() {
 echo ""
 echo "Checking secret: $SECRET_NAME"
 
-# Accept both PF_BEARER_TOKEN and PF_API_TOKEN (use whichever is set)
-if [[ -n "$PF_BEARER_TOKEN" ]]; then
-    PF_API_TOKEN="$PF_BEARER_TOKEN"
-fi
+# Use the captured Bearer Token from user input
+PF_API_TOKEN="$BEARER_TOKEN"
 
-# Try to get fresh token if not provided via environment
-if [[ -z "$PF_API_TOKEN" ]]; then
-    echo "  ℹ️  PF_API_TOKEN not in environment, attempting auto-fetch..."
-    if get_fresh_token; then
-        echo "  ℹ️  Using auto-fetched token"
-    else
-        echo "  ⚠️  Auto-fetch failed, will use PLACEHOLDER"
-    fi
-else
-    echo "  ✅ Using provided Bearer token from environment"
-fi
+echo "  ✅ Using provided Bearer token"
 
 if aws secretsmanager describe-secret \
     --secret-id "$SECRET_NAME" \
@@ -113,57 +191,40 @@ if aws secretsmanager describe-secret \
     &>/dev/null; then
     echo "  ℹ️  Secret already exists"
 
-    # Update secret if we have a real token
-    if [[ -n "$PF_API_TOKEN" ]] && [[ "$PF_API_TOKEN" != "PLACEHOLDER"* ]]; then
-        echo "  → Updating secret with fresh token..."
+    # Update secret with provided credentials
+    echo "  → Updating secret with provided credentials..."
 
-        SECRET_VALUE=$(cat <<EOF
+    SECRET_VALUE=$(cat <<EOF
 {
   "bearer_token": "$PF_API_TOKEN",
   "client_id": "$CLIENT_ID",
-  "user_id": "${PF_USER_ID:-}",
-  "refresh_token": "${PF_REFRESH_TOKEN:-PLACEHOLDER_REFRESH_TOKEN}",
+  "user_id": "$USER_ID",
+  "refresh_token": "${REFRESH_TOKEN:-}",
   "api_base_url": "https://api-cx-portal.dev.projectsforce.com"
 }
 EOF
 )
 
-        aws secretsmanager update-secret \
-            --secret-id "$SECRET_NAME" \
-            --secret-string "$SECRET_VALUE" \
-            --region "$REGION" \
-            &>/dev/null && echo "  ✅ Secret updated with fresh token"
-    else
-        echo "  ℹ️  Keeping existing secret (no fresh token available)"
-    fi
+    aws secretsmanager update-secret \
+        --secret-id "$SECRET_NAME" \
+        --secret-string "$SECRET_VALUE" \
+        --region "$REGION" \
+        &>/dev/null && echo "  ✅ Secret updated with provided credentials"
 else
     echo "  → Creating secret: $SECRET_NAME"
 
-    if [[ -n "$PF_API_TOKEN" ]] && [[ "$PF_API_TOKEN" != "PLACEHOLDER"* ]]; then
-        SECRET_VALUE=$(cat <<EOF
+    SECRET_VALUE=$(cat <<EOF
 {
   "bearer_token": "$PF_API_TOKEN",
   "client_id": "$CLIENT_ID",
-  "user_id": "${PF_USER_ID:-}",
-  "refresh_token": "${PF_REFRESH_TOKEN:-}",
+  "user_id": "$USER_ID",
+  "refresh_token": "${REFRESH_TOKEN:-}",
   "api_base_url": "https://api-cx-portal.dev.projectsforce.com"
 }
 EOF
 )
-        echo "  ℹ️  Creating with fresh token"
-    else
-        SECRET_VALUE=$(cat <<EOF
-{
-  "bearer_token": "PLACEHOLDER_TOKEN_UPDATE_MANUALLY",
-  "client_id": "$CLIENT_ID",
-  "user_id": "",
-  "refresh_token": "PLACEHOLDER_REFRESH_TOKEN",
-  "api_base_url": "https://api-cx-portal.dev.projectsforce.com"
-}
-EOF
-)
-        echo "  ⚠️  Creating with PLACEHOLDER token - update later"
-    fi
+
+    echo "  ℹ️  Creating with provided credentials"
 
     aws secretsmanager create-secret \
         --name "$SECRET_NAME" \
@@ -457,7 +518,67 @@ EOF
             &>/dev/null
 
         # Attach comprehensive Bedrock permissions (models, inference profiles, and runtime)
-        cat > /tmp/bedrock-policy.json <<EOF
+        # Special handling for Supervisor agent - needs agent invocation permissions
+        if [[ "$AGENT_NAME" == "Supervisor" ]]; then
+            cat > /tmp/bedrock-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockModelAccess",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:${REGION}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "arn:aws:bedrock:*::foundation-model/*",
+        "arn:aws:bedrock:${REGION}::inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "arn:aws:bedrock:*::inference-profile/*"
+      ]
+    },
+    {
+      "Sid": "BedrockAgentRuntime",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:ListFoundationModels",
+        "bedrock:GetFoundationModel",
+        "bedrock:GetInferenceProfile",
+        "bedrock:ListInferenceProfiles"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BedrockAgentInvoke",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeAgent",
+        "bedrock:GetAgentAlias"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:${REGION}:${ACCOUNT_ID}:agent/*",
+        "arn:aws:bedrock:${REGION}:${ACCOUNT_ID}:agent-alias/*/*"
+      ]
+    },
+    {
+      "Sid": "LambdaInvokePermission",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:InvokeFunction"
+      ],
+      "Resource": [
+        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-scheduling-actions",
+        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-information-actions",
+        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-chitchat-actions"
+      ]
+    }
+  ]
+}
+EOF
+        else
+            # Regular collaborator agents
+            cat > /tmp/bedrock-policy.json <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -501,6 +622,7 @@ EOF
   ]
 }
 EOF
+        fi
 
         aws iam put-role-policy \
             --role-name "$ROLE_NAME" \
@@ -542,15 +664,30 @@ EOF
     else
         # Create the Bedrock agent
         echo "  → Creating Bedrock agent..." >&2
-        AGENT_ID=$(aws bedrock-agent create-agent \
-            --agent-name "$AGENT_NAME" \
-            --description "$DESCRIPTION" \
-            --agent-resource-role-arn "$AGENT_ROLE_ARN" \
-            --foundation-model "$MODEL_ID" \
-            --instruction "$INSTRUCTION" \
-            --region "$REGION" \
-            --query 'agent.agentId' \
-            --output text 2>&1)
+
+        # Enable collaboration for Supervisor agent
+        if [[ "$AGENT_NAME" == "Supervisor" ]]; then
+            AGENT_ID=$(aws bedrock-agent create-agent \
+                --agent-name "$AGENT_NAME" \
+                --description "$DESCRIPTION" \
+                --agent-resource-role-arn "$AGENT_ROLE_ARN" \
+                --foundation-model "$MODEL_ID" \
+                --instruction "$INSTRUCTION" \
+                --agent-collaboration "SUPERVISOR" \
+                --region "$REGION" \
+                --query 'agent.agentId' \
+                --output text 2>&1)
+        else
+            AGENT_ID=$(aws bedrock-agent create-agent \
+                --agent-name "$AGENT_NAME" \
+                --description "$DESCRIPTION" \
+                --agent-resource-role-arn "$AGENT_ROLE_ARN" \
+                --foundation-model "$MODEL_ID" \
+                --instruction "$INSTRUCTION" \
+                --region "$REGION" \
+                --query 'agent.agentId' \
+                --output text 2>&1)
+        fi
 
         if [[ $? -eq 0 ]] && [[ -n "$AGENT_ID" ]] && [[ ! "$AGENT_ID" =~ "error" ]]; then
             echo "  ✅ Agent created: $AGENT_NAME (ID: $AGENT_ID)" >&2
@@ -822,6 +959,7 @@ aws bedrock-agent prepare-agent \
     --region "$REGION" \
     &>/dev/null && echo "  ✅ Supervisor prepared"
 
+
 ##############################################################################
 # Step 6: Save Agent IDs
 ##############################################################################
@@ -889,6 +1027,7 @@ echo "  ✅ 1 DynamoDB table"
 echo "  ✅ 4 Bedrock agents (all PREPARED)"
 echo "  ✅ 2 Action groups (SchedulingAgent, pf-information)"
 echo "  ℹ️  2 conversational agents (pf-chitchat, Supervisor - no Lambda needed)"
+echo "  ✅ Agent collaboration (Supervisor with 3 specialist agents)"
 echo "  ✅ IAM roles (with Secrets Manager permissions)"
 echo ""
 echo "Agent IDs:"
@@ -925,16 +1064,55 @@ echo "  ./DEPLOY.sh"
 echo ""
 fi
 
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "✅ Deployment Complete!"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
 echo "Next Steps:"
 echo "=========================================="
-echo "  1. Test agents via AWS Console or CLI:"
+echo ""
+echo "  STEP 1: Enable Supervisor Collaboration (ONE-TIME)"
+echo "  ────────────────────────────────────────────────────"
+echo "  To enable automatic routing from Supervisor to specialist agents:"
+echo ""
+echo "  a. Create v1 aliases for the 3 collaborator agents via AWS Console"
+echo "     (This is a one-time manual step - takes ~15 minutes)"
+echo "     "
+echo "     Console URL: https://console.aws.amazon.com/bedrock/"
+echo "     Region: us-east-1"
+echo "     "
+echo "     For each agent (SchedulingAgent, pf-information, pf-chitchat):"
+echo "       • Create Version 1 from Working Draft"
+echo "       • Create Alias named 'v1' pointing to Version 1"
+echo ""
+echo "  b. Run the collaboration setup script:"
+echo "     ./scripts/SETUP_COLLABORATION.sh"
+echo ""
+echo "  ────────────────────────────────────────────────────"
+echo ""
+echo "  STEP 2: Test the Agents"
+echo "  ────────────────────────────────────────────────────"
+echo "  After collaboration is set up:"
+echo ""
+echo "  Test Supervisor (with automatic routing):"
+echo "     aws bedrock-agent-runtime invoke-agent \\"
+echo "       --agent-id $SUPERVISOR_AGENT_ID \\"
+echo "       --agent-alias-id TSTALIASID \\"
+echo "       --session-id test-\$(date +%s) \\"
+echo "       --input-text 'List my projects' /tmp/output.txt"
+echo ""
+echo "  Or test individual specialist agents:"
 echo "     aws bedrock-agent-runtime invoke-agent \\"
 echo "       --agent-id $SCHEDULING_AGENT_ID \\"
 echo "       --agent-alias-id TSTALIASID \\"
 echo "       --session-id test-\$(date +%s) \\"
-echo "       --input-text 'Show me my projects' output.txt"
+echo "       --input-text 'Show my projects' /tmp/output.txt"
 echo ""
-echo "  2. View agent IDs:"
+echo "  ────────────────────────────────────────────────────"
+echo ""
+echo "  View agent IDs:"
 echo "     cat config/agent_ids.json"
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "=========================================="

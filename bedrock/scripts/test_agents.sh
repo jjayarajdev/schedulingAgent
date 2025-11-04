@@ -28,42 +28,81 @@ echo "Session ID: $SESSION_ID"
 echo "Region: $REGION"
 echo ""
 
-# Check environment variables
+# Load credentials from Secrets Manager if not in environment
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Environment Variables Check"
+echo "Loading Credentials"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# Check PF_BEARER_TOKEN or PF_API_TOKEN
-if [[ -n "$PF_BEARER_TOKEN" ]] || [[ -n "$PF_API_TOKEN" ]]; then
-    TOKEN="${PF_BEARER_TOKEN:-$PF_API_TOKEN}"
-    echo -e "${GREEN}✓ PF_BEARER_TOKEN:${NC} SET (${#TOKEN} characters)"
+# Try to load from Secrets Manager
+SECRET_DATA=$(aws secretsmanager get-secret-value \
+    --secret-id projectforce/api/credentials \
+    --region "$REGION" \
+    --query SecretString \
+    --output text 2>/dev/null || echo "{}")
+
+# Parse secret and set as defaults if not in environment
+if [[ -z "$PF_BEARER_TOKEN" ]]; then
+    PF_BEARER_TOKEN=$(echo "$SECRET_DATA" | jq -r '.bearer_token // ""' 2>/dev/null)
+fi
+
+if [[ -z "$PF_CLIENT_ID" ]]; then
+    PF_CLIENT_ID=$(echo "$SECRET_DATA" | jq -r '.client_id // ""' 2>/dev/null)
+fi
+
+if [[ -z "$PF_USER_ID" ]]; then
+    PF_USER_ID=$(echo "$SECRET_DATA" | jq -r '.user_id // ""' 2>/dev/null)
+fi
+
+echo -e "${BLUE}Source: ${NC}"
+if [[ "$SECRET_DATA" != "{}" ]]; then
+    echo "  • Loaded from AWS Secrets Manager: projectforce/api/credentials"
 else
-    echo -e "${YELLOW}⚠ PF_BEARER_TOKEN:${NC} NOT SET (Lambda uses configured token)"
+    echo "  • Using environment variables"
+fi
+echo ""
+
+# Display what we have
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Credentials Check"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Check PF_BEARER_TOKEN
+if [[ -n "$PF_BEARER_TOKEN" ]]; then
+    echo -e "${GREEN}✓ Bearer Token:${NC} SET (${#PF_BEARER_TOKEN} characters)"
+else
+    echo -e "${RED}✗ Bearer Token:${NC} NOT SET"
 fi
 
 # Check PF_CLIENT_ID
 if [[ -n "$PF_CLIENT_ID" ]]; then
-    echo -e "${GREEN}✓ PF_CLIENT_ID:${NC} $PF_CLIENT_ID"
+    echo -e "${GREEN}✓ Client ID:${NC} $PF_CLIENT_ID"
 else
-    echo -e "${YELLOW}⚠ PF_CLIENT_ID:${NC} NOT SET (using session attribute: 09PF05VD)"
+    echo -e "${RED}✗ Client ID:${NC} NOT SET"
 fi
 
 # Check PF_USER_ID
 if [[ -n "$PF_USER_ID" ]]; then
-    echo -e "${GREEN}✓ PF_USER_ID:${NC} $PF_USER_ID"
+    echo -e "${GREEN}✓ User ID:${NC} $PF_USER_ID"
 else
-    echo -e "${YELLOW}⚠ PF_USER_ID:${NC} NOT SET (using session attribute: 1645869)"
+    echo -e "${RED}✗ User ID:${NC} NOT SET"
 fi
 
 # Check USE_MOCK_API
 if [[ -n "$USE_MOCK_API" ]]; then
     echo -e "${GREEN}✓ USE_MOCK_API:${NC} $USE_MOCK_API"
 else
-    echo -e "${YELLOW}⚠ USE_MOCK_API:${NC} NOT SET (Lambda uses configured value)"
+    echo -e "${YELLOW}⚠ USE_MOCK_API:${NC} NOT SET (using false)"
+    USE_MOCK_API="false"
 fi
 
 echo ""
+
+# Export credentials for Python subprocess
+export PF_BEARER_TOKEN
+export PF_CLIENT_ID
+export PF_USER_ID
 
 # Get agent IDs
 SCHEDULING_AGENT_ID=$(aws bedrock-agent list-agents \
@@ -108,19 +147,24 @@ invoke_agent() {
 import boto3
 import json
 import sys
+import os
 
 try:
     client = boto3.client('bedrock-agent-runtime', region_name='$REGION')
+
+    # Get user_id and client_id from environment (passed from parent script)
+    user_id = os.environ.get('PF_USER_ID', '1646085')
+    client_id = os.environ.get('PF_CLIENT_ID', '09PF05VD')
 
     response = client.invoke_agent(
         agentId='$agent_id',
         agentAliasId='TSTALIASID',
         sessionId='$SESSION_ID',
-        inputText='$query',
+        inputText='''$query''',
         sessionState={
             'sessionAttributes': {
-                'customer_id': '1645869',
-                'client_id': '09PF05VD'
+                'customer_id': user_id,
+                'client_id': client_id
             }
         }
     )
