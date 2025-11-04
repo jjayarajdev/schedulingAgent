@@ -4,11 +4,11 @@
 # CLEANUP.sh - Delete all ProjectForce Bedrock agents and Lambda functions
 #
 # Purpose: Clean slate for rebuilding 4-agent architecture
-# Date: 2025-11-03
+# Date: 2025-11-04
 #
 # WARNING: This will delete:
-#   - All 5 Bedrock agents
-#   - All 6 Lambda functions
+#   - All 4 Bedrock agents
+#   - 2 Lambda functions (scheduling, information)
 #   - Associated IAM roles (optional)
 #   - Action groups and aliases
 #
@@ -99,10 +99,6 @@ echo "=========================================="
 LAMBDA_FUNCTIONS=(
     "pf-scheduling-actions"
     "pf-information-actions"
-    "pf-notes-actions"
-    "pf-query-router"
-    "pf-weather-evaluator"
-    "pf-filter-projects"
 )
 
 for FUNCTION_NAME in "${LAMBDA_FUNCTIONS[@]}"; do
@@ -136,25 +132,14 @@ if [[ "$DELETE_ROLES" == true ]]; then
     echo "=========================================="
 
     IAM_ROLES=(
-        # Lambda roles
-        "pf-scheduling-lambda-role-dev"
-        "pf-information-lambda-role-dev"
-        "pf-notes-lambda-role-dev"
-        "pf-query-router-lambda-role-dev"
-        # Bedrock agent execution roles
-        "AmazonBedrockExecutionRoleForAgents_SchedulingAgent"
-        "AmazonBedrockExecutionRoleForAgents_pf-information"
-        "AmazonBedrockExecutionRoleForAgents_pf-notes"
-        "AmazonBedrockExecutionRoleForAgents_pf-chitchat"
-        "AmazonBedrockExecutionRoleForAgents_Supervisor"
-        # Bedrock agent roles (dev environment)
-        "pf-scheduling-agent-role-dev"
-        "pf-information-agent-role-dev"
-        "pf-notes-agent-role-dev"
-        "pf-chitchat-agent-role-dev"
-        "pf-supervisor-agent-role-dev"
-        # Other roles
-        "pf-step-functions-role"
+        # Bedrock agent roles (current 4-agent architecture)
+        "pf_scheduling_agent_role"
+        "pf_chitchat_agent_role"
+        "pf_information_agent_role"
+        "pf_supervisor_agent_role"
+        # Lambda roles (only 2 - chitchat has no Lambda)
+        "pf-scheduling-lambda-role"
+        "pf-information-lambda-role"
     )
 
     for ROLE_NAME in "${IAM_ROLES[@]}"; do
@@ -288,10 +273,10 @@ echo "Cleanup Complete!"
 echo "=========================================="
 echo ""
 echo "Deleted:"
-echo "  ✅ 5 Bedrock agents"
-echo "  ✅ 6 Lambda functions"
+echo "  ✅ 4 Bedrock agents"
+echo "  ✅ 2 Lambda functions (scheduling, information)"
 if [[ "$DELETE_ROLES" == true ]]; then
-    echo "  ✅ IAM roles (15 roles)"
+    echo "  ✅ IAM roles (6 roles: 4 agent + 2 Lambda)"
 else
     echo "  ℹ️  IAM roles (kept - use --delete-roles to delete)"
 fi

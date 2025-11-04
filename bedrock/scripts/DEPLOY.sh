@@ -49,7 +49,7 @@ echo "=========================================="
 echo "Step 0: Creating Secrets Manager Secret"
 echo "=========================================="
 
-SECRET_NAME="projectforce/api/dev/credentials"
+SECRET_NAME="projectforce/api/credentials"
 
 # Function to get fresh token using refresh token
 get_fresh_token() {
@@ -119,8 +119,9 @@ if aws secretsmanager describe-secret \
 
         SECRET_VALUE=$(cat <<EOF
 {
-  "api_token": "$PF_API_TOKEN",
+  "bearer_token": "$PF_API_TOKEN",
   "client_id": "$CLIENT_ID",
+  "user_id": "${PF_USER_ID:-}",
   "refresh_token": "${PF_REFRESH_TOKEN:-PLACEHOLDER_REFRESH_TOKEN}",
   "api_base_url": "https://api-cx-portal.dev.projectsforce.com"
 }
@@ -141,8 +142,9 @@ else
     if [[ -n "$PF_API_TOKEN" ]] && [[ "$PF_API_TOKEN" != "PLACEHOLDER"* ]]; then
         SECRET_VALUE=$(cat <<EOF
 {
-  "api_token": "$PF_API_TOKEN",
+  "bearer_token": "$PF_API_TOKEN",
   "client_id": "$CLIENT_ID",
+  "user_id": "${PF_USER_ID:-}",
   "refresh_token": "${PF_REFRESH_TOKEN:-}",
   "api_base_url": "https://api-cx-portal.dev.projectsforce.com"
 }
@@ -152,8 +154,9 @@ EOF
     else
         SECRET_VALUE=$(cat <<EOF
 {
-  "api_token": "PLACEHOLDER_TOKEN_UPDATE_MANUALLY",
+  "bearer_token": "PLACEHOLDER_TOKEN_UPDATE_MANUALLY",
   "client_id": "$CLIENT_ID",
+  "user_id": "",
   "refresh_token": "PLACEHOLDER_REFRESH_TOKEN",
   "api_base_url": "https://api-cx-portal.dev.projectsforce.com"
 }
@@ -291,11 +294,31 @@ EOF
             --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole" \
             &>/dev/null
 
-        # Attach Secrets Manager policy
-        aws iam attach-role-policy \
+        # Add Secrets Manager permissions (inline policy)
+        cat > /tmp/secrets-policy.json <<EOFPOLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:PutSecretValue",
+        "secretsmanager:DescribeSecret"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:projectforce/api/credentials*"
+      ]
+    }
+  ]
+}
+EOFPOLICY
+
+        aws iam put-role-policy \
             --role-name "$ROLE_NAME" \
-            --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/projectforce-secrets-access-dev" \
-            &>/dev/null 2>&1 || echo "  ℹ️  Secrets policy not found (will create later)"
+            --policy-name "SecretsManagerAccess" \
+            --policy-document file:///tmp/secrets-policy.json \
+            &>/dev/null
 
         # Attach DynamoDB policy for scheduling function
         if [[ "$FUNCTION_NAME" == "pf-scheduling-actions" ]]; then
@@ -330,7 +353,7 @@ EOF
                 PF_API_BASE_URL=https://api-cx-portal.dev.projectsforce.com,
                 USE_MOCK_API=${USE_MOCK_API:-false},
                 API_ENVIRONMENT=$ENV,
-                TOKEN_SECRET_NAME=projectforce/api/dev/credentials,
+                TOKEN_SECRET_NAME=projectforce/api/credentials,
                 DEFAULT_CLIENT_ID=$CLIENT_ID,
                 LOG_LEVEL=INFO
             }" \
@@ -354,7 +377,7 @@ EOF
                 PF_API_BASE_URL=https://api-cx-portal.dev.projectsforce.com,
                 USE_MOCK_API=${USE_MOCK_API:-false},
                 API_ENVIRONMENT=$ENV,
-                TOKEN_SECRET_NAME=projectforce/api/dev/credentials,
+                TOKEN_SECRET_NAME=projectforce/api/credentials,
                 DEFAULT_CLIENT_ID=$CLIENT_ID,
                 LOG_LEVEL=INFO
             }" \
@@ -375,10 +398,9 @@ EOF
     echo "  ✅ Lambda deployed: $FUNCTION_NAME"
 }
 
-# Deploy Lambda functions
+# Deploy Lambda functions (only 2 - chitchat has no action groups)
 deploy_lambda "pf-scheduling-actions" "handler.lambda_handler"
 deploy_lambda "pf-information-actions" "handler.lambda_handler"
-deploy_lambda "pf-query-router" "handler.lambda_handler"
 
 ##############################################################################
 # Step 3: Create Bedrock Agents
@@ -394,7 +416,8 @@ create_bedrock_agent() {
     local AGENT_NAME=$1
     local DESCRIPTION=$2
     local INSTRUCTION=$3
-    local MODEL_ID="us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+    # Use Claude 3 Haiku (March 2024) - works without inference profile
+    local MODEL_ID="anthropic.claude-3-haiku-20240307-v1:0"
 
     echo "" >&2
     echo "Creating agent: $AGENT_NAME" >&2
@@ -448,7 +471,8 @@ EOF
       "Resource": [
         "arn:aws:bedrock:${REGION}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
         "arn:aws:bedrock:*::foundation-model/*",
-        "arn:aws:bedrock:${REGION}::inference-profile/*"
+        "arn:aws:bedrock:${REGION}::inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "arn:aws:bedrock:*::inference-profile/*"
       ]
     },
     {
@@ -456,9 +480,23 @@ EOF
       "Effect": "Allow",
       "Action": [
         "bedrock:ListFoundationModels",
-        "bedrock:GetFoundationModel"
+        "bedrock:GetFoundationModel",
+        "bedrock:GetInferenceProfile",
+        "bedrock:ListInferenceProfiles"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "LambdaInvokePermission",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:InvokeFunction"
+      ],
+      "Resource": [
+        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-scheduling-actions",
+        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-information-actions",
+        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-chitchat-actions"
+      ]
     }
   ]
 }
@@ -820,8 +858,7 @@ cat > "$BEDROCK_DIR/config/agent_ids.json" <<EOF
   },
   "lambdas": {
     "pf-scheduling-actions": "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-scheduling-actions",
-    "pf-information-actions": "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-information-actions",
-    "pf-query-router": "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-query-router"
+    "pf-information-actions": "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-information-actions"
   },
   "deployed_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
   "region": "$REGION",
@@ -843,15 +880,16 @@ echo ""
 echo "Created:"
 if [[ -n "$PF_API_TOKEN" ]] && [[ "$PF_API_TOKEN" != "PLACEHOLDER"* ]]; then
     echo "  ✅ 1 Secrets Manager secret (with real Bearer token)"
-    echo "  ✅ 3 Lambda functions (configured with Bearer token)"
+    echo "  ✅ 2 Lambda functions (configured with Bearer token)"
 else
     echo "  ⚠️  1 Secrets Manager secret (with PLACEHOLDER token)"
-    echo "  ⚠️  3 Lambda functions (need Bearer token update)"
+    echo "  ⚠️  2 Lambda functions (need Bearer token update)"
 fi
 echo "  ✅ 1 DynamoDB table"
 echo "  ✅ 4 Bedrock agents (all PREPARED)"
 echo "  ✅ 2 Action groups (SchedulingAgent, pf-information)"
-echo "  ✅ IAM roles (created automatically)"
+echo "  ℹ️  2 conversational agents (pf-chitchat, Supervisor - no Lambda needed)"
+echo "  ✅ IAM roles (with Secrets Manager permissions)"
 echo ""
 echo "Agent IDs:"
 echo "  • SchedulingAgent: $SCHEDULING_AGENT_ID"
@@ -861,7 +899,8 @@ echo "  • Supervisor: $SUPERVISOR_AGENT_ID"
 echo ""
 echo "Resources:"
 echo "  • DynamoDB: pf-sessions-dev"
-echo "  • Lambdas: pf-scheduling-actions, pf-information-actions, pf-query-router"
+echo "  • Lambdas: pf-scheduling-actions, pf-information-actions (2 total)"
+echo "  • Secrets: projectforce/api/credentials"
 echo "  • Config: config/agent_ids.json"
 echo ""
 
@@ -872,14 +911,16 @@ echo "=========================================="
 echo "Lambda functions need a Bearer token to access the ProjectForce API."
 echo "Set it and redeploy:"
 echo ""
-echo "  export PF_API_TOKEN='your-actual-token'"
-echo "  export PF_REFRESH_TOKEN='your-refresh-token'"
+echo "  export PF_API_TOKEN='your-actual-bearer-token'"
+echo "  export PF_USER_ID='your-user-id'"
+echo "  export PF_REFRESH_TOKEN='your-refresh-token' # optional"
 echo ""
 echo "  aws secretsmanager update-secret \\"
-echo "    --secret-id projectforce/api/dev/credentials \\"
-echo "    --secret-string \"{\\\"api_token\\\":\\\"\$PF_API_TOKEN\\\",\\\"client_id\\\":\\\"09PF05VD\\\",\\\"refresh_token\\\":\\\"\$PF_REFRESH_TOKEN\\\",\\\"api_base_url\\\":\\\"https://api-cx-portal.dev.projectsforce.com\\\"}\" \\"
+echo "    --secret-id projectforce/api/credentials \\"
+echo "    --secret-string \"{\\\"bearer_token\\\":\\\"\$PF_API_TOKEN\\\",\\\"client_id\\\":\\\"09PF05VD\\\",\\\"user_id\\\":\\\"\$PF_USER_ID\\\",\\\"refresh_token\\\":\\\"\$PF_REFRESH_TOKEN\\\",\\\"api_base_url\\\":\\\"https://api-cx-portal.dev.projectsforce.com\\\"}\" \\"
 echo "    --region us-east-1"
 echo ""
+echo "Then redeploy Lambdas:"
 echo "  ./DEPLOY.sh"
 echo ""
 fi

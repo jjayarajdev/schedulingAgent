@@ -70,17 +70,25 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
                 params = body
 
         # Resolve session attribute references
-        # Handles: "session.attr", "$session.attr", "{{session.attr}}", "${session.attr}"
+        # Handles: "$attr_name", "session.attr", "$session.attr", "{{session.attr}}", "${session.attr}"
         session_attrs = event.get('sessionAttributes', {})
         for key, value in params.items():
-            if isinstance(value, str) and ('session.' in value):
-                # Remove template markers: $, {{, }}, ${, }
-                clean_value = value.strip('{}').strip('$').strip('{}')
-                if clean_value.startswith('session.'):
-                    attr_name = clean_value.replace('session.', '')
+            if isinstance(value, str):
+                # Handle $param_name format (e.g., $customer_id)
+                if value.startswith('$') and not value.startswith('$session.'):
+                    attr_name = value[1:]  # Remove the $ prefix
                     if attr_name in session_attrs:
                         params[key] = session_attrs[attr_name]
-                        logger.info(f"Resolved {value} -> {params[key]}")
+                        logger.info(f"Resolved ${attr_name} -> {params[key]}")
+                # Handle session.attr format
+                elif 'session.' in value:
+                    # Remove template markers: $, {{, }}, ${, }
+                    clean_value = value.strip('{}').strip('$').strip('{}')
+                    if clean_value.startswith('session.'):
+                        attr_name = clean_value.replace('session.', '')
+                        if attr_name in session_attrs:
+                            params[key] = session_attrs[attr_name]
+                            logger.info(f"Resolved {value} -> {params[key]}")
 
         logger.info(f"Extracted parameters: {params}")
         return params

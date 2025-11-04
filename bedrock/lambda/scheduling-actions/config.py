@@ -58,6 +58,7 @@ def get_api_config(client_id: str = None, env: str = None) -> Dict[str, str]:
         "base_url": base_url,
         "dashboard_url": f"{base_url}/dashboard/get",  # OLD Portal API format: /dashboard/get/{client_id}/{customer_id}
         "scheduler_url": f"{base_url}/system/client-details",
+        "scheduler_base_url": base_url,  # Base URL for scheduler endpoints
         "notes_url": f"{base_url}/project-notes/add/{client_id}",
         "weather_url": "https://wttr.in",
         "use_mock": USE_MOCK_API
