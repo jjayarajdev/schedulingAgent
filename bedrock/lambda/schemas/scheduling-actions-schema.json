@@ -5,6 +5,12 @@
     "description": "API for scheduling-related actions including listing projects, checking availability, and managing appointments",
     "version": "1.0.0"
   },
+  "servers": [
+    {
+      "url": "https://api-cx-portal.dev.projectsforce.com",
+      "description": "Lambda function endpoint"
+    }
+  ],
   "paths": {
     "/list-projects": {
       "post": {

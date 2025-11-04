@@ -1,23 +1,19 @@
 {
   "environment": "dev",
-  "supervisor_id": "WF1S95L7X1",
-  "supervisor_alias": "TSTALIASID",
+  "supervisor_id": "HXOKSZFJV5",
+  "supervisor_alias": "DHKWVRZKFH",
   "agents": {
     "scheduling": {
-      "agent_id": "TIGRBGSXCS",
-      "alias_id": "TSTALIASID"
+      "agent_id": "HRLJYJFRRD",
+      "alias_id": "EJUYANKE6K"
     },
     "information": {
-      "agent_id": "JEK4SDJOOU",
-      "alias_id": "TSTALIASID"
-    },
-    "notes": {
-      "agent_id": "CF0IPHCFFY",
-      "alias_id": "TSTALIASID"
+      "agent_id": "IXILRCF5SL",
+      "alias_id": "BY5VY0VOEI"
     },
     "chitchat": {
-      "agent_id": "GXVZEOBQ64",
-      "alias_id": "TSTALIASID"
+      "agent_id": "P9RY2D9C73",
+      "alias_id": "IIVNREECRP"
     }
   },
   "routing": {

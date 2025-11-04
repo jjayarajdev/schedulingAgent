@@ -48,6 +48,7 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
     """
     Extract parameters from Bedrock Agent event
     Handles both actionGroup and requestBody formats
+    Resolves session attribute references (e.g., "session.customer_id" -> actual value from sessionAttributes)
     """
     try:
         # Bedrock Agent passes parameters in different ways
@@ -74,6 +75,19 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
             else:
                 params = body
 
+        # Resolve session attribute references
+        # Handles: "session.attr", "$session.attr", "{{session.attr}}", "${session.attr}"
+        session_attrs = event.get('sessionAttributes', {})
+        for key, value in params.items():
+            if isinstance(value, str) and ('session.' in value):
+                # Remove template markers: $, {{, }}, ${, }
+                clean_value = value.strip('{}').strip('$').strip('{}')
+                if clean_value.startswith('session.'):
+                    attr_name = clean_value.replace('session.', '')
+                    if attr_name in session_attrs:
+                        params[key] = session_attrs[attr_name]
+                        logger.info(f"Resolved {value} -> {params[key]}")
+
         logger.info(f"Extracted parameters: {params}")
         return params
 
@@ -82,7 +96,25 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
         return {}
 
 def format_success_response(event: Dict, action: str, result: Dict[str, Any]) -> Dict[str, Any]:
-    """Format successful response for Bedrock Agent"""
+    """Format successful response for Bedrock Agent - supports both OpenAPI and Function formats"""
+    # Check if this is function calling format (new format)
+    if 'function' in event:
+        return {
+            'messageVersion': '1.0',
+            'response': {
+                'actionGroup': event.get('actionGroup', 'scheduling'),
+                'function': event.get('function', action),
+                'functionResponse': {
+                    'responseBody': {
+                        'TEXT': {
+                            'body': json.dumps(result)
+                        }
+                    }
+                }
+            }
+        }
+
+    # Fall back to OpenAPI format (old format)
     return {
         'messageVersion': '1.0',
         'response': {
@@ -99,7 +131,27 @@ def format_success_response(event: Dict, action: str, result: Dict[str, Any]) ->
     }
 
 def format_error_response(event: Dict, action: str, error_message: str, status_code: int = 500) -> Dict[str, Any]:
-    """Format error response for Bedrock Agent"""
+    """Format error response for Bedrock Agent - supports both OpenAPI and Function formats"""
+    error_body = {'error': error_message, 'action': action}
+
+    # Check if this is function calling format (new format)
+    if 'function' in event:
+        return {
+            'messageVersion': '1.0',
+            'response': {
+                'actionGroup': event.get('actionGroup', 'scheduling'),
+                'function': event.get('function', action),
+                'functionResponse': {
+                    'responseBody': {
+                        'TEXT': {
+                            'body': json.dumps(error_body)
+                        }
+                    }
+                }
+            }
+        }
+
+    # Fall back to OpenAPI format (old format)
     return {
         'messageVersion': '1.0',
         'response': {
@@ -109,10 +161,7 @@ def format_error_response(event: Dict, action: str, error_message: str, status_c
             'httpStatusCode': status_code,
             'responseBody': {
                 'application/json': {
-                    'body': json.dumps({
-                        'error': error_message,
-                        'action': action
-                    })
+                    'body': json.dumps(error_body)
                 }
             }
         }
@@ -367,7 +416,8 @@ def lambda_handler(event, context):
 
     try:
         # Extract action from event
-        action = event.get('apiPath', '').lstrip('/')
+        # Function calling format uses 'function', OpenAPI format uses 'apiPath'
+        action = event.get('function', event.get('apiPath', '')).lstrip('/')
         if not action:
             # Fallback: check for action in parameters
             params = extract_parameters(event)
@@ -418,14 +468,23 @@ def lambda_handler(event, context):
         # Get auth headers (if not using mock)
         auth_headers = {}
         if not USE_MOCK_API:
-            # Use token from session attributes if available, otherwise fallback to env var
-            authorization = pf_bearer_token if pf_bearer_token else params.get('authorization', event.get('authorization', ''))
-            auth_headers = get_auth_headers(authorization, client_id)
-
-            if pf_bearer_token:
+            # Use token from session attributes if available and not a placeholder
+            # If it's PLACEHOLDER_TOKEN, let TokenManager retrieve the real token from Secrets Manager
+            authorization = None
+            if pf_bearer_token and pf_bearer_token != 'PLACEHOLDER_TOKEN':
+                authorization = pf_bearer_token
                 logger.info("Using ProjectForce Bearer token from session attributes")
-            else:
-                logger.warning("No ProjectForce Bearer token in session attributes, using environment variable")
+            elif not pf_bearer_token:
+                # Try params or event
+                authorization = params.get('authorization', event.get('authorization', ''))
+                if authorization:
+                    logger.info("Using authorization from params/event")
+
+            # If no valid token provided, get_auth_headers will use TokenManager
+            if not authorization:
+                logger.info("No valid token in session, will use TokenManager/Secrets Manager")
+
+            auth_headers = get_auth_headers(authorization, client_id)
 
         # Route to appropriate handler
         handlers = {

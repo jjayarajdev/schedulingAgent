@@ -73,13 +73,20 @@ def get_or_create_session(session_id: str, params: Dict[str, str]) -> Dict[str, 
     # Create new session from parameters
     logger.info(f"Creating new session: {session_id}")
 
-    # Extract required fields from params or use defaults
+    # Extract required fields from params or use environment variables as fallback
+    # First try params, then try PF_* env vars, then fallback to BEARER_TOKEN/DEFAULT_CLIENT_ID
+    bearer_token = params.get("authorization") or os.getenv("PF_BEARER_TOKEN") or os.getenv("BEARER_TOKEN", "")
+    client_id = params.get("client_id") or os.getenv("PF_CLIENT_ID") or os.getenv("DEFAULT_CLIENT_ID", "CLIENT001")
+    customer_id = params.get("customer_id") or os.getenv("PF_USER_ID", "CUST001")
+
     default_session_data = {
-        "customer_id": params.get("customer_id", "CUST001"),
-        "client_id": params.get("client_id", "CLIENT001"),
+        "customer_id": customer_id,
+        "client_id": client_id,
         "client_name": params.get("client_name", "testclient"),
-        "auth_token": params.get("authorization", "")
+        "auth_token": bearer_token
     }
+
+    logger.info(f"Creating session with customer_id={customer_id}, client_id={client_id}, has_token={bool(bearer_token)}")
 
     return session_manager.create_session(session_id, default_session_data)
 

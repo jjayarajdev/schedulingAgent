@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Intent Classification Testing UI - v2.0</title>
+    <title>Bedrock Agent Testing UI</title>
     <script src="pf_api_integration.js"></script>
     <style>
         * {
@@ -44,46 +44,11 @@
             margin-bottom: 15px;
         }
 
-        .header .stats {
-            display: flex;
-            gap: 20px;
-            flex-wrap: wrap;
-        }
-
-        .stat-box {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 15px 25px;
-            border-radius: 10px;
-            font-weight: 600;
-        }
-
-        .stat-box .label {
-            font-size: 0.85em;
-            opacity: 0.9;
-        }
-
-        .stat-box .value {
-            font-size: 1.8em;
-            margin-top: 5px;
-        }
-
-        .main-content {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-        }
-
-        @media (max-width: 1200px) {
-            .main-content {
-                grid-template-columns: 1fr;
-            }
-        }
-
         .panel {
             background: white;
             border-radius: 15px;
-            padding: 25px;
+            padding: 30px;
+            margin-bottom: 20px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
         }
 
@@ -91,93 +56,45 @@
             color: #667eea;
             margin-bottom: 20px;
             font-size: 1.5em;
-            display: flex;
-            align-items: center;
-            gap: 10px;
         }
 
-        .category-section {
-            margin-bottom: 20px;
+        .token-panel {
+            display: grid;
+            gap: 15px;
         }
 
-        .category-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 12px 20px;
+        .token-status {
+            padding: 15px;
             border-radius: 8px;
-            font-weight: 600;
-            margin-bottom: 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .category-badge {
-            background: rgba(255,255,255,0.3);
-            padding: 4px 12px;
-            border-radius: 15px;
-            font-size: 0.9em;
-        }
-
-        .query-button {
-            width: 100%;
-            text-align: left;
-            padding: 12px 15px;
-            margin-bottom: 8px;
-            border: 2px solid #e0e0e0;
-            background: white;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-size: 0.95em;
-        }
-
-        .query-button:hover {
-            background: #f8f9ff;
-            border-color: #667eea;
-            transform: translateX(5px);
-        }
-
-        .query-button.selected {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-color: #667eea;
-        }
-
-        .query-button.correct {
-            background: #d4edda;
-            border-color: #28a745;
-        }
-
-        .query-button.incorrect {
-            background: #f8d7da;
-            border-color: #dc3545;
-        }
-
-        .custom-input-section {
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: 2px solid #e0e0e0;
-        }
-
-        .input-group {
-            display: flex;
-            gap: 10px;
             margin-bottom: 15px;
+            display: none;
         }
 
-        .custom-input {
-            flex: 1;
-            padding: 12px 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 1em;
-            transition: border-color 0.3s;
+        .token-status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            display: block;
         }
 
-        .custom-input:focus {
-            outline: none;
-            border-color: #667eea;
+        .token-status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            display: block;
+        }
+
+        .token-status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+            display: block;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
         }
 
         .btn {
@@ -188,6 +105,8 @@
             cursor: pointer;
             transition: all 0.3s;
             font-size: 1em;
+            flex: 1;
+            min-width: 200px;
         }
 
         .btn-primary {
@@ -200,6 +119,15 @@
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
 
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
         .btn-secondary {
             background: #6c757d;
             color: white;
@@ -209,111 +137,141 @@
             background: #5a6268;
         }
 
-        .results-panel {
-            min-height: 300px;
+        .chat-container {
+            display: grid;
+            grid-template-rows: 1fr auto;
+            height: 600px;
+            gap: 20px;
         }
 
-        .result-card {
+        .messages-area {
+            overflow-y: auto;
+            padding: 20px;
             background: #f8f9ff;
             border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 15px;
-        }
-
-        .result-header {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
+            flex-direction: column;
+            gap: 15px;
         }
 
-        .result-query {
-            font-size: 1.1em;
-            color: #333;
-            font-weight: 600;
-            margin-bottom: 15px;
-            padding: 12px;
+        .message {
+            padding: 15px 20px;
+            border-radius: 10px;
+            max-width: 80%;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+
+        .message.agent {
             background: white;
-            border-radius: 8px;
-            border-left: 4px solid #667eea;
+            border: 2px solid #e0e0e0;
+            align-self: flex-start;
         }
 
-        .result-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 10px 0;
-            border-bottom: 1px solid #e0e0e0;
+        .message .timestamp {
+            font-size: 0.8em;
+            opacity: 0.7;
+            margin-top: 5px;
         }
 
-        .result-row:last-child {
-            border-bottom: none;
-        }
-
-        .result-label {
+        .message .agent-name {
             font-weight: 600;
-            color: #666;
-        }
-
-        .result-value {
-            color: #333;
-            font-weight: 500;
-        }
-
-        .intent-badge {
-            display: inline-block;
-            padding: 6px 15px;
-            border-radius: 20px;
-            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 5px;
             font-size: 0.9em;
         }
 
-        .intent-scheduling {
-            background: #d1ecf1;
-            color: #0c5460;
+        .message .response-text {
+            line-height: 1.6;
+            white-space: pre-wrap;
         }
 
-        .intent-information {
-            background: #fff3cd;
-            color: #856404;
+        .message .metadata {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(0,0,0,0.1);
+            font-size: 0.85em;
+            opacity: 0.8;
         }
 
-        .intent-notes {
-            background: #d4edda;
-            color: #155724;
+        .input-area {
+            display: flex;
+            gap: 10px;
         }
 
-        .intent-chitchat {
-            background: #e7d4f5;
-            color: #5a2d82;
+        .message-input {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+            font-family: inherit;
+            transition: border-color 0.3s;
         }
 
-        .match-indicator {
-            font-size: 1.5em;
-            font-weight: bold;
+        .message-input:focus {
+            outline: none;
+            border-color: #667eea;
         }
 
-        .match-yes {
-            color: #28a745;
+        .send-btn {
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 1em;
         }
 
-        .match-no {
-            color: #dc3545;
+        .send-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
 
-        .loading {
+        .send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .loading-indicator {
+            display: none;
             text-align: center;
-            padding: 40px;
+            padding: 20px;
             color: #667eea;
         }
 
+        .loading-indicator.active {
+            display: block;
+        }
+
         .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
             border-radius: 50%;
-            width: 40px;
-            height: 40px;
+            width: 30px;
+            height: 30px;
             animation: spin 1s linear infinite;
-            margin: 0 auto 15px;
+            margin: 0 auto 10px;
         }
 
         @keyframes spin {
@@ -321,391 +279,238 @@
             100% { transform: rotate(360deg); }
         }
 
-        .agent-info {
-            background: white;
-            padding: 12px;
-            border-radius: 8px;
-            margin-top: 10px;
-            border-left: 4px solid #764ba2;
-        }
-
-        .agent-info .agent-name {
-            font-weight: 600;
-            color: #764ba2;
-            margin-bottom: 5px;
-        }
-
-        .agent-info .agent-id {
-            font-family: monospace;
-            font-size: 0.85em;
-            color: #666;
-        }
-
-        .test-all-btn {
-            margin-top: 20px;
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 30px;
-            background: #e0e0e0;
-            border-radius: 15px;
-            overflow: hidden;
-            margin: 15px 0;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-            transition: width 0.3s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: 600;
-        }
-
-        .accuracy-display {
-            font-size: 3em;
-            font-weight: bold;
-            text-align: center;
-            margin: 20px 0;
-        }
-
-        .accuracy-100 {
-            color: #28a745;
-        }
-
-        .accuracy-good {
-            color: #ffc107;
-        }
-
-        .accuracy-poor {
-            color: #dc3545;
-        }
-
-        .no-results {
+        .empty-state {
             text-align: center;
             padding: 60px 20px;
             color: #999;
         }
 
-        .no-results-icon {
+        .empty-state-icon {
             font-size: 4em;
             margin-bottom: 15px;
         }
 
-        .login-panel {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            margin-bottom: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-        }
-
-        .login-form {
-            display: grid;
-            gap: 15px;
-            max-width: 500px;
-        }
-
-        .form-group {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-
-        .form-group label {
+        .clear-btn {
+            padding: 8px 15px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 6px;
             font-weight: 600;
-            color: #333;
+            cursor: pointer;
+            font-size: 0.9em;
         }
 
-        .form-group input {
-            padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 1em;
+        .clear-btn:hover {
+            background: #c82333;
         }
 
-        .form-group input:focus {
-            outline: none;
-            border-color: #667eea;
+        .chat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
         }
 
-        .login-status {
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 15px;
-        }
-
-        .login-status.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-
-        .login-status.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-
-        .login-status.info {
-            background: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
-        }
-
-        .token-display {
+        .session-info {
+            font-size: 0.9em;
+            color: #666;
+            background: #f8f9ff;
+            padding: 8px 15px;
+            border-radius: 6px;
             font-family: monospace;
-            font-size: 0.85em;
-            background: #f8f9fa;
-            padding: 10px;
-            border-radius: 5px;
-            word-break: break-all;
-            margin-top: 10px;
-        }
-
-        .hidden {
-            display: none;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Login Panel -->
-        <div class="login-panel" id="login-panel">
-            <h2 style="color: #667eea; margin-bottom: 20px;">🔐 ProjectForce API Token</h2>
-            <div class="login-form">
-                <div id="token-info" class="login-status hidden"></div>
-                <div style="display: flex; gap: 10px; margin-top: 15px;">
-                    <button class="btn btn-primary" onclick="openTokenGetter()" style="flex: 1;">
-                        🌐 Get Token from Browser
-                    </button>
-                    <button class="btn btn-secondary" onclick="checkToken()" style="flex: 1;">
-                        🔄 Check Token Status
-                    </button>
-                    <button class="btn btn-primary" onclick="testPFAPI()" style="flex: 1; background: #28a745;">
-                        ✅ Test ProjectForce API
-                    </button>
-                </div>
-            </div>
-        </div>
-
         <!-- Header -->
         <div class="header">
-            <h1>🧪 Intent Classification Testing UI</h1>
-            <div class="subtitle">v2.0 - Frontend Routing with Claude Haiku Classification</div>
-            <div class="stats">
-                <div class="stat-box">
-                    <div class="label">Total Queries</div>
-                    <div class="value" id="total-queries">27</div>
-                </div>
-                <div class="stat-box">
-                    <div class="label">Tested</div>
-                    <div class="value" id="tested-count">0</div>
-                </div>
-                <div class="stat-box">
-                    <div class="label">Correct</div>
-                    <div class="value" id="correct-count">0</div>
-                </div>
-                <div class="stat-box">
-                    <div class="label">Accuracy</div>
-                    <div class="value" id="accuracy-value">0%</div>
-                </div>
+            <h1>🤖 Bedrock Agent Testing UI</h1>
+            <div class="subtitle">Test your AWS Bedrock Agents with real ProjectForce API integration</div>
+        </div>
+
+        <!-- Token Management Panel -->
+        <div class="panel token-panel">
+            <h2>🔐 ProjectForce API Token</h2>
+
+            <div id="token-status" class="token-status"></div>
+
+            <div class="btn-group">
+                <button class="btn btn-primary" onclick="openTokenGetter()">
+                    🌐 Get Token from Browser
+                </button>
+                <button class="btn btn-secondary" onclick="checkToken()">
+                    🔄 Check Token Status
+                </button>
+                <button class="btn btn-success" onclick="testPFAPI()">
+                    ✅ Test API Connection
+                </button>
             </div>
         </div>
 
-        <!-- Main Content -->
-        <div class="main-content">
-            <!-- Left Panel: Test Queries -->
-            <div class="panel">
-                <h2>📝 Test Queries</h2>
-
-                <!-- Chitchat -->
-                <div class="category-section">
-                    <div class="category-header">
-                        <span>💬 Chitchat</span>
-                        <span class="category-badge">5 queries</span>
-                    </div>
-                    <div id="chitchat-queries"></div>
-                </div>
-
-                <!-- Scheduling -->
-                <div class="category-section">
-                    <div class="category-header">
-                        <span>📅 Scheduling</span>
-                        <span class="category-badge">12 queries</span>
-                    </div>
-                    <div id="scheduling-queries"></div>
-                </div>
-
-                <!-- Information -->
-                <div class="category-section">
-                    <div class="category-header">
-                        <span>📊 Information</span>
-                        <span class="category-badge">8 queries</span>
-                    </div>
-                    <div id="information-queries"></div>
-                </div>
-
-                <!-- Notes -->
-                <div class="category-section">
-                    <div class="category-header">
-                        <span>📝 Notes</span>
-                        <span class="category-badge">6 queries</span>
-                    </div>
-                    <div id="notes-queries"></div>
-                </div>
-
-                <!-- Ambiguous -->
-                <div class="category-section">
-                    <div class="category-header">
-                        <span>❓ Ambiguous / Edge Cases</span>
-                        <span class="category-badge">4 queries</span>
-                    </div>
-                    <div id="ambiguous-queries"></div>
-                </div>
-
-                <!-- Custom Input -->
-                <div class="custom-input-section">
-                    <h3 style="margin-bottom: 15px; color: #667eea;">✍️ Custom Query</h3>
-                    <div class="input-group">
-                        <input type="text" class="custom-input" id="custom-query" placeholder="Enter your own query to test...">
-                        <button class="btn btn-primary" onclick="testCustomQuery()">Test</button>
-                    </div>
-                    <button class="btn btn-secondary test-all-btn" onclick="testAllQueries()" style="width: 100%;">
-                        🚀 Test All Queries (Batch)
-                    </button>
+        <!-- Chat Interface Panel -->
+        <div class="panel">
+            <div class="chat-header">
+                <h2>💬 Chat with Agent</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <div class="session-info" id="session-info">Session: Not Started</div>
+                    <button class="clear-btn" onclick="clearChat()">Clear Chat</button>
                 </div>
             </div>
 
-            <!-- Right Panel: Results -->
-            <div class="panel results-panel">
-                <h2>📊 Results</h2>
-                <div id="results-container">
-                    <div class="no-results">
-                        <div class="no-results-icon">🎯</div>
-                        <div>Select a query from the left to test classification</div>
-                        <div style="margin-top: 10px; color: #ccc;">or use "Test All Queries" to run batch testing</div>
+            <div class="chat-container">
+                <div class="messages-area" id="messages-area">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">💭</div>
+                        <div>Start a conversation with your Bedrock Agent</div>
+                        <div style="margin-top: 10px; color: #ccc;">Type a message below and press Send</div>
                     </div>
+                </div>
+
+                <div class="loading-indicator" id="loading-indicator">
+                    <div class="spinner"></div>
+                    <div>Agent is thinking...</div>
+                </div>
+
+                <div class="input-area">
+                    <input
+                        type="text"
+                        class="message-input"
+                        id="message-input"
+                        placeholder="Type your message here..."
+                        onkeypress="handleKeyPress(event)"
+                    >
+                    <button class="send-btn" id="send-btn" onclick="sendMessage()">
+                        Send
+                    </button>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
-        // Test queries data
-        const TEST_QUERIES = {
-            "Chitchat": [
-                "Hey, how's it going?",
-                "What do you think about the weather today?",
-                "I'm feeling a bit stressed, just need to talk",
-                "Tell me a joke!",
-                "Good morning! Ready for the weekend?",
-                "Thanks for all your help!",
-                "How are you doing today?"
-            ],
-            "Scheduling": [
-                "Show me all my projects",
-                "What projects do I have scheduled?",
-                "Tell me about order number ORD-2025-001",
-                "Switch to my flooring installation project",
-                "What are the details of my kitchen cabinets project?",
-                "When is my deck repair scheduled for?",
-                "What dates are available for my windows installation?",
-                "Show me time slots available for November 5th",
-                "Schedule my bathroom remodel for November 8th at 2 PM",
-                "Confirm appointment for project PRJ-78946 on November 10th at 9:00 AM",
-                "Reschedule my flooring project to December 1st at 1 PM",
-                "Cancel the appointment for project PRJ-78945"
-            ],
-            "Information": [
-                "What's the weather in Tampa?",
-                "How's the weather in Clearwater Beach?",
-                "What's the temperature in St Petersburg today?",
-                "Is it going to rain in Tampa tomorrow?",
-                "What's the weather forecast for this week?",
-                "Check the weather for my installation address",
-                "What are your working days?",
-                "What are your business hours?"
-            ],
-            "Notes": [
-                "Add a note to project PRJ-78945: Customer prefers afternoon appointments",
-                "Save a note for my windows project: Gate code is 5678",
-                "Add a note: Need to confirm parking arrangements before installation",
-                "Create a note for order ORD-2025-003: Customer has a dog, call ahead",
-                "Add reminder: Bring measuring tape for the bathroom remodel",
-                "Note for kitchen project: Customer wants white cabinets only",
-                "Save note: Installation area needs to be cleared before arrival"
-            ],
-            "Ambiguous": [
-                "What's the status of my project?",
-                "When is my appointment?",
-                "I need to make a change",
-                "Can you help me with my order?"
-            ]
-        };
-
-        // Agent configuration
-        const AGENTS = {
-            'scheduling': { agent_id: 'TIGRBGSXCS', alias_id: 'TSTALIASID', name: 'Scheduling Agent' },
-            'information': { agent_id: 'JEK4SDJOOU', alias_id: 'TSTALIASID', name: 'Information Agent' },
-            'notes': { agent_id: 'CF0IPHCFFY', alias_id: 'TSTALIASID', name: 'Notes Agent' },
-            'chitchat': { agent_id: 'GXVZEOBQ64', alias_id: 'TSTALIASID', name: 'Chitchat Agent' }
-        };
-
-        // Backend URL
+        // Configuration
         const BACKEND_URL = 'http://localhost:5001';
+        window.BACKEND_URL = BACKEND_URL; // Expose to other scripts
+        let sessionId = null;
+        let messageHistory = [];
 
-        // Test results tracking
-        let testResults = [];
-        let currentTest = null;
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            checkToken();
+            sessionId = 'session-' + Date.now();
+            document.getElementById('session-info').textContent = `Session: ${sessionId}`;
+        });
 
-        // Initialize UI
-        function initializeUI() {
-            // Render all query buttons
-            Object.keys(TEST_QUERIES).forEach(category => {
-                const containerId = category.toLowerCase() + '-queries';
-                const container = document.getElementById(containerId);
+        // ========================================
+        // Token Management
+        // ========================================
 
-                TEST_QUERIES[category].forEach((query, index) => {
-                    const button = document.createElement('button');
-                    button.className = 'query-button';
-                    button.textContent = query;
-                    button.onclick = () => testQuery(query, category, button);
-                    button.dataset.category = category;
-                    button.dataset.query = query;
-                    container.appendChild(button);
-                });
-            });
+        function openTokenGetter() {
+            const tokenGetterPath = window.location.pathname.replace('/testing/ui/test_ui.html', '/get_token_from_browser.html');
+            const tokenGetterUrl = window.location.origin + tokenGetterPath;
+            window.open(tokenGetterUrl, 'tokenGetter', 'width=900,height=700');
 
-            // Allow Enter key in custom input
-            document.getElementById('custom-query').addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') testCustomQuery();
-            });
+            showTokenStatus('info', `
+                ℹ️ Token getter window opened!<br>
+                <small>Use it to log in and get your token, then come back here and click "Check Token Status"</small>
+            `);
         }
 
-        // Test a single query
-        async function testQuery(query, expectedCategory, buttonElement) {
-            // Clear previous selection
-            document.querySelectorAll('.query-button').forEach(btn => {
-                btn.classList.remove('selected');
-            });
+        function checkToken() {
+            const token = localStorage.getItem('pf_access_token');
+            const clientId = localStorage.getItem('pf_client_id');
+            const userId = localStorage.getItem('pf_user_id');
 
-            if (buttonElement) {
-                buttonElement.classList.add('selected');
+            if (!token) {
+                showTokenStatus('error', `
+                    ❌ No token found in localStorage<br>
+                    <small>Please use "Get Token from Browser" first</small>
+                `);
+                return;
             }
 
-            // Show loading
-            showLoading();
+            showTokenStatus('success', `
+                ✅ Token loaded successfully!<br>
+                Client ID: ${clientId || '09PF05VD'}<br>
+                User ID: ${userId || '1645869'}<br>
+                Token: ${token.substring(0, 50)}...<br>
+                <small>You can now test the Bedrock agents below</small>
+            `);
+        }
 
-            const startTime = Date.now();
+        async function testPFAPI() {
+            showTokenStatus('info', '🔄 Testing connection through backend...');
 
             try {
-                // Call classification endpoint
-                // Get ProjectForce token and user data
-                const pfToken = localStorage.getItem('pf_access_token');
+                const result = await window.ProjectForceAPI.testConnection();
+
+                if (result.success) {
+                    showTokenStatus('success', `
+                        ✅ Connection Successful!<br>
+                        Client ID: ${result.clientId}<br>
+                        Backend: Working ✓<br>
+                        Token: Valid ✓<br>
+                        <small>You can now chat with the Bedrock agents using real data</small>
+                    `);
+                } else {
+                    showTokenStatus('error', `
+                        ❌ Connection Failed<br>
+                        ${result.message}<br>
+                        <small>Please get/regenerate a fresh token or check if backend is running</small>
+                    `);
+                }
+            } catch (error) {
+                showTokenStatus('error', `
+                    ❌ Error: ${error.message}<br>
+                    <small>Make sure the backend server is running on localhost:5001</small>
+                `);
+            }
+        }
+
+        function showTokenStatus(type, message) {
+            const statusDiv = document.getElementById('token-status');
+            statusDiv.className = `token-status ${type}`;
+            statusDiv.innerHTML = message;
+        }
+
+        // ========================================
+        // Chat Functions
+        // ========================================
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('message-input');
+            const message = input.value.trim();
+
+            if (!message) {
+                return;
+            }
+
+            // Check token
+            const token = localStorage.getItem('pf_access_token');
+            if (!token) {
+                alert('Please get a token first using the "Get Token from Browser" button above');
+                return;
+            }
+
+            // Disable input
+            input.disabled = true;
+            document.getElementById('send-btn').disabled = true;
+            document.getElementById('loading-indicator').classList.add('active');
+
+            // Add user message to chat
+            addMessage('user', message);
+            input.value = '';
+
+            try {
                 const pfClientId = localStorage.getItem('pf_client_id') || '09PF05VD';
                 const pfUserId = localStorage.getItem('pf_user_id') || '1645869';
 
@@ -713,550 +518,106 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        message: query,
-                        pf_token: pfToken,
+                        message: message,
+                        pf_token: token,
                         pf_client_id: pfClientId,
-                        pf_user_id: pfUserId
+                        pf_user_id: pfUserId,
+                        session_id: sessionId
                     })
                 });
 
                 const result = await response.json();
-                const classificationTime = Date.now() - startTime;
 
-                // Determine expected intent
-                const categoryToIntent = {
-                    'Chitchat': 'chitchat',
-                    'Scheduling': 'scheduling',
-                    'Information': 'information',
-                    'Notes': 'notes',
-                    'Ambiguous': null  // No fixed expectation
-                };
-
-                const expectedIntent = categoryToIntent[expectedCategory];
-                const isCorrect = expectedCategory === 'Ambiguous' ? null : (result.intent === expectedIntent);
-
-                // Update button styling
-                if (buttonElement && isCorrect !== null) {
-                    buttonElement.classList.remove('correct', 'incorrect');
-                    buttonElement.classList.add(isCorrect ? 'correct' : 'incorrect');
-                }
-
-                // Track result
-                const testResult = {
-                    query,
-                    expectedCategory,
-                    expectedIntent,
-                    classifiedIntent: result.intent,
-                    isCorrect,
-                    classificationTime: result.classification_time_ms || classificationTime,
-                    invocationTime: result.invocation_time_ms,
-                    totalTime: result.total_time_ms,
-                    response: result.response,
-                    agent: AGENTS[result.intent],
-                    agentId: result.agent_id,
-                    sessionId: result.session_id,
-                    requestParameters: result.request_parameters
-                };
-
-                testResults.push(testResult);
-                updateStats();
-                displayResult(testResult);
-
-            } catch (error) {
-                console.error('Classification error:', error);
-                showError('Failed to classify query. Make sure the backend server is running on port 5001.');
-            }
-        }
-
-        // Test custom query
-        function testCustomQuery() {
-            const input = document.getElementById('custom-query');
-            const query = input.value.trim();
-
-            if (!query) {
-                alert('Please enter a query to test');
-                return;
-            }
-
-            testQuery(query, 'Custom', null);
-            input.value = '';
-        }
-
-        // Test all queries in batch
-        async function testAllQueries() {
-            if (!confirm('This will test all 27 queries. Continue?')) return;
-
-            // Reset results
-            testResults = [];
-            document.querySelectorAll('.query-button').forEach(btn => {
-                btn.classList.remove('correct', 'incorrect');
-            });
-
-            showBatchProgress(0, 27);
-
-            let tested = 0;
-            const total = 27;
-
-            for (const [category, queries] of Object.entries(TEST_QUERIES)) {
-                for (const query of queries) {
-                    const buttonElement = document.querySelector(`button[data-query="${query}"]`);
-                    await testQuery(query, category, buttonElement);
-                    tested++;
-                    showBatchProgress(tested, total);
-
-                    // Small delay to avoid rate limiting
-                    await new Promise(resolve => setTimeout(resolve, 300));
-                }
-            }
-
-            // Show final summary
-            showBatchSummary();
-        }
-
-        // Display classification result
-        function displayResult(result) {
-            const container = document.getElementById('results-container');
-
-            const matchIndicator = result.isCorrect === null ? '➖' : (result.isCorrect ? '✅' : '❌');
-            const matchClass = result.isCorrect === null ? '' : (result.isCorrect ? 'match-yes' : 'match-no');
-
-            container.innerHTML = `
-                <div class="result-card">
-                    <div class="result-header">
-                        <span style="font-weight: 600; color: #667eea;">Classification Result</span>
-                        <span class="match-indicator ${matchClass}">${matchIndicator}</span>
-                    </div>
-
-                    <div class="result-query">${result.query}</div>
-
-                    <div class="result-row">
-                        <span class="result-label">Expected Category:</span>
-                        <span class="result-value">${result.expectedCategory}</span>
-                    </div>
-
-                    <div class="result-row">
-                        <span class="result-label">Expected Intent:</span>
-                        <span class="result-value">${result.expectedIntent || 'N/A (ambiguous)'}</span>
-                    </div>
-
-                    <div class="result-row">
-                        <span class="result-label">Classified As:</span>
-                        <span class="intent-badge intent-${result.classifiedIntent}">${result.classifiedIntent}</span>
-                    </div>
-
-                    <div class="result-row">
-                        <span class="result-label">Classification Time:</span>
-                        <span class="result-value">${result.classificationTime} ms</span>
-                    </div>
-
-                    ${result.invocationTime ? `
-                        <div class="result-row">
-                            <span class="result-label">Agent Invocation Time:</span>
-                            <span class="result-value">${result.invocationTime} ms</span>
-                        </div>
-                    ` : ''}
-
-                    ${result.totalTime ? `
-                        <div class="result-row">
-                            <span class="result-label">Total Time:</span>
-                            <span class="result-value">${result.totalTime} ms</span>
-                        </div>
-                    ` : ''}
-
-                    <div class="result-row">
-                        <span class="result-label">Match:</span>
-                        <span class="result-value ${matchClass}">
-                            ${result.isCorrect === null ? 'N/A (Edge Case)' : (result.isCorrect ? 'Yes ✅' : 'No ❌')}
-                        </span>
-                    </div>
-
-                    ${result.agent ? `
-                        <div class="agent-info">
-                            <div class="agent-name">🤖 ${result.agent.name}</div>
-                            <div class="agent-id">Agent ID: ${result.agentId || result.agent.agent_id}</div>
-                        </div>
-                    ` : ''}
-
-                    ${result.requestParameters ? `
-                        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
-                            <div style="font-weight: 600; color: #667eea; margin-bottom: 10px;">
-                                📤 Request Parameters to AWS Bedrock:
-                            </div>
-                            <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; border-left: 4px solid #4a5568; font-family: monospace; font-size: 0.85em;">
-                                <div style="margin-bottom: 10px;">
-                                    <strong>Agent ID:</strong> ${result.requestParameters.agentId}
-                                </div>
-                                <div style="margin-bottom: 10px;">
-                                    <strong>Agent Alias ID:</strong> ${result.requestParameters.agentAliasId}
-                                </div>
-                                <div style="margin-bottom: 10px;">
-                                    <strong>Session ID:</strong> ${result.requestParameters.sessionId}
-                                </div>
-                                <div style="margin-bottom: 10px;">
-                                    <strong>Session Attributes:</strong>
-                                    <pre style="background: white; padding: 10px; border-radius: 4px; margin-top: 5px; overflow-x: auto;">${JSON.stringify(result.requestParameters.sessionState.sessionAttributes, null, 2)}</pre>
-                                </div>
-                                <div style="margin-bottom: 10px;">
-                                    <strong>Original Message:</strong>
-                                    <div style="background: white; padding: 10px; border-radius: 4px; margin-top: 5px;">${result.requestParameters.original_message}</div>
-                                </div>
-                                <div>
-                                    <strong>Input Text (Augmented Prompt):</strong>
-                                    <pre style="background: white; padding: 10px; border-radius: 4px; margin-top: 5px; white-space: pre-wrap; overflow-x: auto;">${result.requestParameters.inputText}</pre>
-                                </div>
-                            </div>
-                        </div>
-                    ` : ''}
-
-                    ${result.response ? `
-                        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
-                            <div style="font-weight: 600; color: #667eea; margin-bottom: 10px;">
-                                🤖 Agent Response:
-                            </div>
-                            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #667eea; white-space: pre-wrap; line-height: 1.6; color: #333;">
-${result.response}
-                            </div>
-                        </div>
-                    ` : ''}
-                </div>
-            `;
-        }
-
-        // Show loading state
-        function showLoading() {
-            document.getElementById('results-container').innerHTML = `
-                <div class="loading">
-                    <div class="spinner"></div>
-                    <div>Classifying query and invoking agent...</div>
-                    <div style="font-size: 0.9em; color: #888; margin-top: 10px;">
-                        This may take a few seconds
-                    </div>
-                </div>
-            `;
-        }
-
-        // Show error
-        function showError(message) {
-            document.getElementById('results-container').innerHTML = `
-                <div class="result-card" style="background: #f8d7da; border-left: 4px solid #dc3545;">
-                    <div style="color: #721c24; font-weight: 600; margin-bottom: 10px;">❌ Error</div>
-                    <div style="color: #721c24;">${message}</div>
-                </div>
-            `;
-        }
-
-        // Show batch progress
-        function showBatchProgress(tested, total) {
-            const percentage = Math.round((tested / total) * 100);
-            document.getElementById('results-container').innerHTML = `
-                <div class="loading">
-                    <div style="font-size: 1.5em; margin-bottom: 20px;">🚀 Batch Testing in Progress</div>
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: ${percentage}%">${percentage}%</div>
-                    </div>
-                    <div style="margin-top: 10px;">Testing query ${tested} of ${total}...</div>
-                </div>
-            `;
-        }
-
-        // Show batch summary
-        function showBatchSummary() {
-            const total = testResults.filter(r => r.isCorrect !== null).length;
-            const correct = testResults.filter(r => r.isCorrect === true).length;
-            const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
-
-            const accuracyClass = accuracy === 100 ? 'accuracy-100' : (accuracy >= 90 ? 'accuracy-good' : 'accuracy-poor');
-
-            document.getElementById('results-container').innerHTML = `
-                <div class="result-card">
-                    <div style="text-align: center;">
-                        <div style="font-size: 1.5em; font-weight: 600; color: #667eea; margin-bottom: 20px;">
-                            🎉 Batch Testing Complete!
-                        </div>
-
-                        <div class="accuracy-display ${accuracyClass}">
-                            ${accuracy}%
-                        </div>
-
-                        <div style="margin: 20px 0;">
-                            <div class="result-row">
-                                <span class="result-label">Total Tested:</span>
-                                <span class="result-value">${total} queries</span>
-                            </div>
-                            <div class="result-row">
-                                <span class="result-label">Correct:</span>
-                                <span class="result-value" style="color: #28a745;">${correct}</span>
-                            </div>
-                            <div class="result-row">
-                                <span class="result-label">Incorrect:</span>
-                                <span class="result-value" style="color: #dc3545;">${total - correct}</span>
-                            </div>
-                            <div class="result-row">
-                                <span class="result-label">Avg Classification Time:</span>
-                                <span class="result-value">${Math.round(testResults.reduce((sum, r) => sum + r.classificationTime, 0) / testResults.length)} ms</span>
-                            </div>
-                        </div>
-
-                        ${accuracy === 100 ? `
-                            <div style="background: #d4edda; padding: 20px; border-radius: 10px; margin-top: 20px;">
-                                <div style="font-size: 1.3em; color: #155724; font-weight: 600;">
-                                    🎯 Perfect Score!
-                                </div>
-                                <div style="color: #155724; margin-top: 10px;">
-                                    All queries were classified correctly. The v2.0 classification system is working flawlessly!
-                                </div>
-                            </div>
-                        ` : ''}
-                    </div>
-                </div>
-            `;
-        }
-
-        // Update stats
-        function updateStats() {
-            const tested = testResults.filter(r => r.isCorrect !== null).length;
-            const correct = testResults.filter(r => r.isCorrect === true).length;
-            const accuracy = tested > 0 ? Math.round((correct / tested) * 100) : 0;
-
-            document.getElementById('tested-count').textContent = tested;
-            document.getElementById('correct-count').textContent = correct;
-            document.getElementById('accuracy-value').textContent = accuracy + '%';
-        }
-
-        // ========================================
-        // ProjectForce API Token Management
-        // ========================================
-
-        let accessToken = null;
-        let clientId = null;
-
-        function openTokenGetter() {
-            const tokenGetterPath = window.location.pathname.replace('/testing/ui/test_ui.html', '/get_token_from_browser.html');
-            const tokenGetterUrl = window.location.origin + tokenGetterPath;
-            window.open(tokenGetterUrl, 'tokenGetter', 'width=900,height=700');
-
-            const statusDiv = document.getElementById('token-info');
-            statusDiv.className = 'login-status info';
-            statusDiv.classList.remove('hidden');
-            statusDiv.innerHTML = `
-                ℹ️ Token getter window opened!<br>
-                <small>Use it to log in and get your token, then come back here and click "Check Token Status"</small>
-            `;
-        }
-
-        function checkToken() {
-            const token = localStorage.getItem('pf_access_token');
-            const client = localStorage.getItem('pf_client_id');
-
-            if (!token) {
-                const statusDiv = document.getElementById('token-info');
-                statusDiv.className = 'login-status error';
-                statusDiv.classList.remove('hidden');
-                statusDiv.innerHTML = `
-                    ❌ No token found in localStorage<br>
-                    <small>Please use "Get Token from Browser" first</small>
-                `;
-                return;
-            }
-
-            accessToken = token;
-            clientId = client || '09PF05VD';
-
-            const statusDiv = document.getElementById('token-info');
-            statusDiv.className = 'login-status success';
-            statusDiv.classList.remove('hidden');
-            statusDiv.innerHTML = `
-                ✅ Token loaded successfully!<br>
-                Client ID: ${clientId}<br>
-                Token: ${token.substring(0, 50)}...<br>
-                <small>You can now test the Bedrock agents below</small>
-            `;
-        }
-
-        // Check for token on page load
-        window.addEventListener('DOMContentLoaded', () => {
-            const token = localStorage.getItem('pf_access_token');
-            if (token) {
-                checkToken();
-            }
-        });
-
-        // Test ProjectForce API connectivity
-        async function testPFAPI() {
-            const statusDiv = document.getElementById('token-info');
-            statusDiv.className = 'login-status info';
-            statusDiv.classList.remove('hidden');
-            statusDiv.innerHTML = '🔄 Testing ProjectForce API...';
-
-            try {
-                const result = await window.ProjectForceAPI.testConnection();
-
-                if (result.success) {
-                    // Get some additional data to display
-                    const projects = await window.ProjectForceAPI.getCustomerProjects();
-                    const projectCount = projects.data ? projects.data.length : 0;
-
-                    statusDiv.className = 'login-status success';
-                    statusDiv.innerHTML = `
-                        ✅ ProjectForce API Connected!<br>
-                        Client: ${result.clientName} (${result.clientId})<br>
-                        Found ${projectCount} projects<br>
-                        <small>You can now test queries using real ProjectForce data</small>
-                    `;
-                } else {
-                    statusDiv.className = 'login-status error';
-                    statusDiv.innerHTML = `
-                        ❌ API Connection Failed<br>
-                        ${result.message}<br>
-                        <small>Please get/regenerate a fresh token</small>
-                    `;
-                }
-            } catch (error) {
-                statusDiv.className = 'login-status error';
-                statusDiv.innerHTML = `
-                    ❌ Error: ${error.message}<br>
-                    <small>Make sure you have a valid token</small>
-                `;
-            }
-        }
-
-        async function login_old() {
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-            const statusDiv = document.getElementById('login-status');
-
-            // Show loading
-            statusDiv.className = 'login-status info';
-            statusDiv.classList.remove('hidden');
-            statusDiv.innerHTML = '🔄 Logging in via proxy server...';
-
-            try {
-                console.log('Attempting login via proxy...');
-
-                const loginResponse = await fetch(`${PROXY_URL}/api/login`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        email: email,
-                        password: password
-                    })
+                // Add agent response to chat
+                addMessage('agent', result.response, {
+                    intent: result.intent,
+                    agent_id: result.agent_id,
+                    classification_time: result.classification_time_ms,
+                    invocation_time: result.invocation_time_ms,
+                    total_time: result.total_time_ms
                 });
 
-                const loginData = await loginResponse.json();
-                console.log('Login response:', loginData);
-
-                if (loginData.token) {
-                    // Success via portal
-                    accessToken = loginData.token;
-                    clientId = loginData.user?.client_id || '09PF05VD';
-
-                    await testToken(accessToken, clientId);
-                    return;
-                } else if (loginData.access_token) {
-                    // Success via auth server
-                    accessToken = loginData.access_token;
-                    clientId = loginData.client_id || '09PF05VD';
-
-                    await testToken(accessToken, clientId);
-                    return;
-                }
-
-                // If we got here, login failed
-                statusDiv.className = 'login-status error';
-                statusDiv.innerHTML = `
-                    ❌ <strong>Login Failed</strong><br>
-                    ${loginData.error || 'Could not authenticate with ProjectForce API'}<br>
-                    <small>Check console for details.</small>
-                `;
-
             } catch (error) {
-                console.error('Login error:', error);
-                statusDiv.className = 'login-status error';
-                statusDiv.innerHTML = `
-                    ❌ <strong>Error</strong><br>
-                    ${error.message}<br>
-                    <small>Make sure the auth proxy server is running on port 5002</small>
-                `;
+                console.error('Error:', error);
+                addMessage('agent', `❌ Error: ${error.message}`, { error: true });
+            } finally {
+                // Re-enable input
+                input.disabled = false;
+                document.getElementById('send-btn').disabled = false;
+                document.getElementById('loading-indicator').classList.remove('active');
+                input.focus();
             }
         }
 
-        async function testToken(token, client) {
-            const statusDiv = document.getElementById('login-status');
+        function addMessage(type, content, metadata = null) {
+            const messagesArea = document.getElementById('messages-area');
 
-            statusDiv.className = 'login-status info';
-            statusDiv.innerHTML = '🔄 Testing token...';
-
-            try {
-                // Test the token via proxy
-                const testResponse = await fetch(`${PROXY_URL}/api/test-token`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        token: token,
-                        client_id: client,
-                        customer_id: '1645869'
-                    })
-                });
-
-                const testData = await testResponse.json();
-                console.log('API test response:', testData);
-
-                if (testData.data && Array.isArray(testData.data)) {
-                    // Success!
-                    statusDiv.className = 'login-status success';
-                    statusDiv.innerHTML = `
-                        ✅ <strong>Login Successful!</strong><br>
-                        Client ID: ${client}<br>
-                        Found ${testData.data.length} projects<br>
-                        <div style="margin-top: 10px;">
-                            <strong>Access Token:</strong>
-                            <div class="token-display">${token.substring(0, 100)}...</div>
-                            <button class="btn btn-secondary" onclick="copyToken()" style="margin-top: 10px; width: 150px;">
-                                📋 Copy Token
-                            </button>
-                        </div>
-                    `;
-                } else {
-                    statusDiv.className = 'login-status error';
-                    statusDiv.innerHTML = `
-                        ⚠️ <strong>Token obtained but not working</strong><br>
-                        Response: ${JSON.stringify(testData).substring(0, 200)}
-                    `;
-                }
-            } catch (error) {
-                console.error('Token test error:', error);
-                statusDiv.className = 'login-status error';
-                statusDiv.innerHTML = `
-                    ⚠️ <strong>Token obtained but test failed</strong><br>
-                    ${error.message}<br>
-                    <div style="margin-top: 10px;">
-                        <strong>Access Token (copy manually):</strong>
-                        <div class="token-display">${token.substring(0, 100)}...</div>
-                        <button class="btn btn-secondary" onclick="copyToken()" style="margin-top: 10px; width: 150px;">
-                            📋 Copy Token
-                        </button>
-                    </div>
-                `;
+            // Remove empty state if present
+            const emptyState = messagesArea.querySelector('.empty-state');
+            if (emptyState) {
+                emptyState.remove();
             }
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+
+            const timestamp = new Date().toLocaleTimeString();
+
+            let html = '';
+
+            if (type === 'agent' && metadata && !metadata.error) {
+                html += `<div class="agent-name">🤖 ${getAgentName(metadata.intent)}</div>`;
+            }
+
+            html += `<div class="response-text">${content}</div>`;
+
+            if (metadata && !metadata.error) {
+                html += `<div class="metadata">`;
+                if (metadata.intent) html += `Intent: ${metadata.intent} | `;
+                if (metadata.classification_time) html += `Classification: ${metadata.classification_time}ms | `;
+                if (metadata.invocation_time) html += `Invocation: ${metadata.invocation_time}ms | `;
+                if (metadata.total_time) html += `Total: ${metadata.total_time}ms`;
+                html += `</div>`;
+            }
+
+            html += `<div class="timestamp">${timestamp}</div>`;
+
+            messageDiv.innerHTML = html;
+            messagesArea.appendChild(messageDiv);
+
+            // Scroll to bottom
+            messagesArea.scrollTop = messagesArea.scrollHeight;
+
+            // Store in history
+            messageHistory.push({ type, content, metadata, timestamp });
         }
 
-        function copyToken() {
-            if (accessToken) {
-                navigator.clipboard.writeText(accessToken).then(() => {
-                    alert('Token copied to clipboard!');
-                }).catch(err => {
-                    console.error('Failed to copy:', err);
-                    alert('Failed to copy. Please select and copy manually.');
-                });
-            }
+        function getAgentName(intent) {
+            const agentNames = {
+                'scheduling': 'Scheduling Agent',
+                'information': 'Information Agent',
+                'notes': 'Notes Agent',
+                'chitchat': 'Chitchat Agent'
+            };
+            return agentNames[intent] || 'Agent';
         }
 
-        // Initialize on page load
-        document.addEventListener('DOMContentLoaded', initializeUI);
+        function clearChat() {
+            if (!confirm('Clear all messages?')) return;
+
+            const messagesArea = document.getElementById('messages-area');
+            messagesArea.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">💭</div>
+                    <div>Start a conversation with your Bedrock Agent</div>
+                    <div style="margin-top: 10px; color: #ccc;">Type a message below and press Send</div>
+                </div>
+            `;
+
+            messageHistory = [];
+            sessionId = 'session-' + Date.now();
+            document.getElementById('session-info').textContent = `Session: ${sessionId}`;
+        }
     </script>
 </body>
 </html>

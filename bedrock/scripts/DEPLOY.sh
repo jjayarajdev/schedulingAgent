@@ -1,0 +1,899 @@
+#!/bin/bash
+
+##############################################################################
+# DEPLOY.sh - Deploy 4-Agent Architecture
+#
+# Purpose: Automated deployment of ProjectForce Bedrock agents
+# Date: 2025-11-03
+#
+# Deploys:
+#   1. SchedulingAgent (primary)
+#   2. pf-information (weather only)
+#   3. pf-chitchat (conversational)
+#   4. Supervisor (orchestrator)
+#
+# Prerequisites:
+#   - AWS CLI configured
+#   - Secrets Manager secret: projectforce/api/dev/credentials
+#   - Lambda function code in lambda/ directories
+#
+# Usage: ./DEPLOY.sh
+##############################################################################
+
+set -e  # Exit on error
+
+# Determine paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BEDROCK_DIR="$(dirname "$SCRIPT_DIR")"
+
+REGION="us-east-1"
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ENV="dev"
+CLIENT_ID="09PF05VD"
+
+echo "=========================================="
+echo "ProjectForce 4-Agent Deployment"
+echo "=========================================="
+echo ""
+echo "Region: $REGION"
+echo "Account: $ACCOUNT_ID"
+echo "Environment: $ENV"
+echo ""
+
+##############################################################################
+# Step 0: Create Secrets Manager Secret
+##############################################################################
+
+echo ""
+echo "=========================================="
+echo "Step 0: Creating Secrets Manager Secret"
+echo "=========================================="
+
+SECRET_NAME="projectforce/api/dev/credentials"
+
+# Function to get fresh token using refresh token
+get_fresh_token() {
+    echo "  → Attempting to get fresh token using refresh token..."
+
+    local AUTH_URL="https://auth.dev.projectsforce.com"
+    local API_URL="https://api-cx-portal.dev.projectsforce.com"
+    local REFRESH_TOKEN="AWldtvQhQ+wt4HhRcU/2mOjT5Lsh5NKD+Zt//mXFQitxS8KqH5JefG65bVcirEXRIX2F3u3QXUz/inSZiFRNPA=="
+    local CLIENT_ID_AUTH="devapps"
+    local CLIENT_SECRET="devappssecret"
+
+    local RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "$AUTH_URL/token" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"grant_type\": \"refresh_token\",
+            \"refresh_token\": \"$REFRESH_TOKEN\",
+            \"client_id\": \"$CLIENT_ID_AUTH\",
+            \"client_secret\": \"$CLIENT_SECRET\"
+        }")
+
+    local HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE:" | cut -d':' -f2)
+    local BODY=$(echo "$RESPONSE" | sed '/HTTP_CODE:/d')
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        PF_API_TOKEN=$(echo "$BODY" | python3 -c "import sys, json; print(json.load(sys.stdin).get('access_token', ''))" 2>/dev/null)
+        PF_REFRESH_TOKEN=$(echo "$BODY" | python3 -c "import sys, json; print(json.load(sys.stdin).get('refresh_token', ''))" 2>/dev/null)
+
+        if [[ -n "$PF_API_TOKEN" ]]; then
+            echo "  ✅ Fresh token obtained successfully"
+            return 0
+        fi
+    fi
+
+    echo "  ⚠️  Could not get fresh token (HTTP $HTTP_CODE)"
+    return 1
+}
+
+echo ""
+echo "Checking secret: $SECRET_NAME"
+
+# Accept both PF_BEARER_TOKEN and PF_API_TOKEN (use whichever is set)
+if [[ -n "$PF_BEARER_TOKEN" ]]; then
+    PF_API_TOKEN="$PF_BEARER_TOKEN"
+fi
+
+# Try to get fresh token if not provided via environment
+if [[ -z "$PF_API_TOKEN" ]]; then
+    echo "  ℹ️  PF_API_TOKEN not in environment, attempting auto-fetch..."
+    if get_fresh_token; then
+        echo "  ℹ️  Using auto-fetched token"
+    else
+        echo "  ⚠️  Auto-fetch failed, will use PLACEHOLDER"
+    fi
+else
+    echo "  ✅ Using provided Bearer token from environment"
+fi
+
+if aws secretsmanager describe-secret \
+    --secret-id "$SECRET_NAME" \
+    --region "$REGION" \
+    &>/dev/null; then
+    echo "  ℹ️  Secret already exists"
+
+    # Update secret if we have a real token
+    if [[ -n "$PF_API_TOKEN" ]] && [[ "$PF_API_TOKEN" != "PLACEHOLDER"* ]]; then
+        echo "  → Updating secret with fresh token..."
+
+        SECRET_VALUE=$(cat <<EOF
+{
+  "api_token": "$PF_API_TOKEN",
+  "client_id": "$CLIENT_ID",
+  "refresh_token": "${PF_REFRESH_TOKEN:-PLACEHOLDER_REFRESH_TOKEN}",
+  "api_base_url": "https://api-cx-portal.dev.projectsforce.com"
+}
+EOF
+)
+
+        aws secretsmanager update-secret \
+            --secret-id "$SECRET_NAME" \
+            --secret-string "$SECRET_VALUE" \
+            --region "$REGION" \
+            &>/dev/null && echo "  ✅ Secret updated with fresh token"
+    else
+        echo "  ℹ️  Keeping existing secret (no fresh token available)"
+    fi
+else
+    echo "  → Creating secret: $SECRET_NAME"
+
+    if [[ -n "$PF_API_TOKEN" ]] && [[ "$PF_API_TOKEN" != "PLACEHOLDER"* ]]; then
+        SECRET_VALUE=$(cat <<EOF
+{
+  "api_token": "$PF_API_TOKEN",
+  "client_id": "$CLIENT_ID",
+  "refresh_token": "${PF_REFRESH_TOKEN:-}",
+  "api_base_url": "https://api-cx-portal.dev.projectsforce.com"
+}
+EOF
+)
+        echo "  ℹ️  Creating with fresh token"
+    else
+        SECRET_VALUE=$(cat <<EOF
+{
+  "api_token": "PLACEHOLDER_TOKEN_UPDATE_MANUALLY",
+  "client_id": "$CLIENT_ID",
+  "refresh_token": "PLACEHOLDER_REFRESH_TOKEN",
+  "api_base_url": "https://api-cx-portal.dev.projectsforce.com"
+}
+EOF
+)
+        echo "  ⚠️  Creating with PLACEHOLDER token - update later"
+    fi
+
+    aws secretsmanager create-secret \
+        --name "$SECRET_NAME" \
+        --description "ProjectForce API credentials for dev environment" \
+        --secret-string "$SECRET_VALUE" \
+        --region "$REGION" \
+        &>/dev/null && echo "  ✅ Secret created: $SECRET_NAME"
+fi
+
+##############################################################################
+# Step 1: Create DynamoDB Tables
+##############################################################################
+
+echo ""
+echo "=========================================="
+echo "Step 1: Creating DynamoDB Tables"
+echo "=========================================="
+
+# Create pf-sessions-dev table
+echo ""
+echo "Creating DynamoDB table: pf-sessions-dev"
+
+if aws dynamodb describe-table \
+    --table-name "pf-sessions-dev" \
+    --region "$REGION" \
+    &>/dev/null; then
+    echo "  ℹ️  Table already exists: pf-sessions-dev"
+else
+    echo "  → Creating table: pf-sessions-dev"
+
+    aws dynamodb create-table \
+        --table-name "pf-sessions-dev" \
+        --attribute-definitions \
+            AttributeName=session_id,AttributeType=S \
+            AttributeName=user_id,AttributeType=S \
+        --key-schema \
+            AttributeName=session_id,KeyType=HASH \
+        --global-secondary-indexes \
+            "IndexName=user_id-index,KeySchema=[{AttributeName=user_id,KeyType=HASH}],Projection={ProjectionType=ALL},ProvisionedThroughput={ReadCapacityUnits=5,WriteCapacityUnits=5}" \
+        --provisioned-throughput \
+            ReadCapacityUnits=5,WriteCapacityUnits=5 \
+        --region "$REGION" \
+        &>/dev/null && echo "  ✅ Table created: pf-sessions-dev"
+fi
+
+##############################################################################
+# Step 2: Deploy Lambda Functions
+##############################################################################
+
+echo ""
+echo "=========================================="
+echo "Step 2: Deploying Lambda Functions"
+echo "=========================================="
+
+# Function to deploy Lambda
+deploy_lambda() {
+    local FUNCTION_NAME=$1
+    local HANDLER=$2
+    local RUNTIME="python3.11"
+    local TIMEOUT=30
+    local MEMORY=512
+    local ROLE_NAME="${FUNCTION_NAME}-role-${ENV}"
+
+    echo ""
+    echo "Deploying Lambda: $FUNCTION_NAME"
+    echo "  Handler: $HANDLER"
+
+    # Save current directory and determine paths
+    local CURRENT_DIR="$(pwd)"
+    local LAMBDA_DIR="$BEDROCK_DIR/lambda/${FUNCTION_NAME#pf-}"
+
+    if [[ ! -d "$LAMBDA_DIR" ]]; then
+        echo "  ⚠️  Lambda directory not found: $LAMBDA_DIR"
+        return 1
+    fi
+
+    cd "$LAMBDA_DIR"
+
+    # Create deployment package
+    echo "  → Creating deployment package..."
+    if [[ -f function.zip ]]; then
+        rm function.zip
+    fi
+
+    # Install dependencies if requirements.txt exists
+    if [[ -f requirements.txt ]]; then
+        echo "  → Installing dependencies from requirements.txt..."
+        rm -rf package
+        mkdir -p package
+        pip3 install -r requirements.txt -t package/ --quiet 2>&1 | grep -v "dependency conflicts\|incompatible\|A new release of pip" || true
+        cd package
+        zip -r ../function.zip . --quiet
+        cd ..
+        zip -g function.zip *.py --quiet
+    else
+        zip -r function.zip . -x "*.pyc" -x "__pycache__/*" -x "*.git/*" -x "venv/*" -x "*.zip" -x "*.md" &>/dev/null
+    fi
+
+    # Create IAM role if it doesn't exist
+    echo "  → Checking IAM role..."
+    if ! aws iam get-role --role-name "$ROLE_NAME" &>/dev/null; then
+        echo "  → Creating IAM role: $ROLE_NAME"
+
+        # Trust policy
+        cat > /tmp/trust-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+        aws iam create-role \
+            --role-name "$ROLE_NAME" \
+            --assume-role-policy-document file:///tmp/trust-policy.json \
+            &>/dev/null
+
+        # Attach basic execution policy
+        aws iam attach-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole" \
+            &>/dev/null
+
+        # Attach Secrets Manager policy
+        aws iam attach-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/projectforce-secrets-access-dev" \
+            &>/dev/null 2>&1 || echo "  ℹ️  Secrets policy not found (will create later)"
+
+        # Attach DynamoDB policy for scheduling function
+        if [[ "$FUNCTION_NAME" == "pf-scheduling-actions" ]]; then
+            aws iam attach-role-policy \
+                --role-name "$ROLE_NAME" \
+                --policy-arn "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess" \
+                &>/dev/null
+        fi
+
+        echo "  → Waiting for IAM role to be ready..."
+        sleep 10
+    fi
+
+    ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
+
+    # Create or update Lambda function
+    if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" &>/dev/null; then
+        echo "  → Updating existing Lambda function code..."
+        aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file fileb://function.zip \
+            --region "$REGION" \
+            &>/dev/null
+
+        echo "  → Updating Lambda environment variables..."
+        aws lambda update-function-configuration \
+            --function-name "$FUNCTION_NAME" \
+            --environment "Variables={
+                BEARER_TOKEN=${PF_API_TOKEN:-},
+                PF_CLIENT_ID=$CLIENT_ID,
+                PF_USER_ID=${PF_USER_ID:-},
+                PF_API_BASE_URL=https://api-cx-portal.dev.projectsforce.com,
+                USE_MOCK_API=${USE_MOCK_API:-false},
+                API_ENVIRONMENT=$ENV,
+                TOKEN_SECRET_NAME=projectforce/api/dev/credentials,
+                DEFAULT_CLIENT_ID=$CLIENT_ID,
+                LOG_LEVEL=INFO
+            }" \
+            --region "$REGION" \
+            &>/dev/null
+    else
+        echo "  → Creating new Lambda function..."
+        aws lambda create-function \
+            --function-name "$FUNCTION_NAME" \
+            --runtime "$RUNTIME" \
+            --role "$ROLE_ARN" \
+            --handler "$HANDLER" \
+            --zip-file fileb://function.zip \
+            --timeout "$TIMEOUT" \
+            --memory-size "$MEMORY" \
+            --region "$REGION" \
+            --environment "Variables={
+                BEARER_TOKEN=${PF_API_TOKEN:-},
+                PF_CLIENT_ID=$CLIENT_ID,
+                PF_USER_ID=${PF_USER_ID:-},
+                PF_API_BASE_URL=https://api-cx-portal.dev.projectsforce.com,
+                USE_MOCK_API=${USE_MOCK_API:-false},
+                API_ENVIRONMENT=$ENV,
+                TOKEN_SECRET_NAME=projectforce/api/dev/credentials,
+                DEFAULT_CLIENT_ID=$CLIENT_ID,
+                LOG_LEVEL=INFO
+            }" \
+            &>/dev/null
+    fi
+
+    # Add resource-based policy for Bedrock
+    echo "  → Adding Bedrock invoke permission..."
+    aws lambda add-permission \
+        --function-name "$FUNCTION_NAME" \
+        --statement-id "AllowBedrockInvoke" \
+        --action "lambda:InvokeFunction" \
+        --principal "bedrock.amazonaws.com" \
+        --region "$REGION" \
+        &>/dev/null 2>&1 || echo "  ℹ️  Permission already exists"
+
+    cd "$CURRENT_DIR" &>/dev/null
+    echo "  ✅ Lambda deployed: $FUNCTION_NAME"
+}
+
+# Deploy Lambda functions
+deploy_lambda "pf-scheduling-actions" "handler.lambda_handler"
+deploy_lambda "pf-information-actions" "handler.lambda_handler"
+deploy_lambda "pf-query-router" "handler.lambda_handler"
+
+##############################################################################
+# Step 3: Create Bedrock Agents
+##############################################################################
+
+echo ""
+echo "=========================================="
+echo "Step 3: Creating Bedrock Agents"
+echo "=========================================="
+
+# Function to create Bedrock agent
+create_bedrock_agent() {
+    local AGENT_NAME=$1
+    local DESCRIPTION=$2
+    local INSTRUCTION=$3
+    local MODEL_ID="us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+
+    echo "" >&2
+    echo "Creating agent: $AGENT_NAME" >&2
+
+    # Create IAM role for Bedrock agent
+    local ROLE_NAME="AmazonBedrockExecutionRoleForAgents_${AGENT_NAME}"
+    echo "  → Creating Bedrock agent IAM role..." >&2
+
+    if ! aws iam get-role --role-name "$ROLE_NAME" &>/dev/null; then
+        # Trust policy for Bedrock
+        cat > /tmp/bedrock-trust-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "bedrock.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceAccount": "$ACCOUNT_ID"
+        },
+        "ArnLike": {
+          "aws:SourceArn": "arn:aws:bedrock:${REGION}:${ACCOUNT_ID}:agent/*"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+        aws iam create-role \
+            --role-name "$ROLE_NAME" \
+            --assume-role-policy-document file:///tmp/bedrock-trust-policy.json \
+            &>/dev/null
+
+        # Attach comprehensive Bedrock permissions (models, inference profiles, and runtime)
+        cat > /tmp/bedrock-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockModelAccess",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:${REGION}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "arn:aws:bedrock:*::foundation-model/*",
+        "arn:aws:bedrock:${REGION}::inference-profile/*"
+      ]
+    },
+    {
+      "Sid": "BedrockAgentRuntime",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:ListFoundationModels",
+        "bedrock:GetFoundationModel"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+        aws iam put-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-name "BedrockModelInvoke" \
+            --policy-document file:///tmp/bedrock-policy.json \
+            &>/dev/null
+
+        echo "  → Waiting for IAM role to propagate..."
+        sleep 10
+    fi
+
+    AGENT_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
+
+    # Check if agent already exists
+    EXISTING_AGENT=$(aws bedrock-agent list-agents \
+        --region "$REGION" \
+        --query "agentSummaries[?agentName=='$AGENT_NAME'].[agentId,agentStatus]" \
+        --output text 2>/dev/null | head -1)
+
+    if [[ -n "$EXISTING_AGENT" ]]; then
+        AGENT_ID=$(echo "$EXISTING_AGENT" | awk '{print $1}')
+        AGENT_STATUS=$(echo "$EXISTING_AGENT" | awk '{print $2}')
+        echo "  ℹ️  Agent already exists: $AGENT_NAME (ID: $AGENT_ID, Status: $AGENT_STATUS)" >&2
+
+        # Update the agent
+        echo "  → Updating agent..." >&2
+        aws bedrock-agent update-agent \
+            --agent-id "$AGENT_ID" \
+            --agent-name "$AGENT_NAME" \
+            --description "$DESCRIPTION" \
+            --agent-resource-role-arn "$AGENT_ROLE_ARN" \
+            --foundation-model "$MODEL_ID" \
+            --instruction "$INSTRUCTION" \
+            --region "$REGION" \
+            &>/dev/null
+
+        echo "  ✅ Agent updated: $AGENT_NAME (ID: $AGENT_ID)" >&2
+        echo "$AGENT_ID"
+    else
+        # Create the Bedrock agent
+        echo "  → Creating Bedrock agent..." >&2
+        AGENT_ID=$(aws bedrock-agent create-agent \
+            --agent-name "$AGENT_NAME" \
+            --description "$DESCRIPTION" \
+            --agent-resource-role-arn "$AGENT_ROLE_ARN" \
+            --foundation-model "$MODEL_ID" \
+            --instruction "$INSTRUCTION" \
+            --region "$REGION" \
+            --query 'agent.agentId' \
+            --output text 2>&1)
+
+        if [[ $? -eq 0 ]] && [[ -n "$AGENT_ID" ]] && [[ ! "$AGENT_ID" =~ "error" ]]; then
+            echo "  ✅ Agent created: $AGENT_NAME (ID: $AGENT_ID)" >&2
+            echo "$AGENT_ID"
+        else
+            echo "  ⚠️  Failed to create agent: $AGENT_NAME" >&2
+            echo "     Error: $AGENT_ID" >&2
+            return 1
+        fi
+    fi
+}
+
+# Create agents
+SCHEDULING_AGENT_ID=$(create_bedrock_agent \
+    "SchedulingAgent" \
+    "Primary agent for scheduling and project management" \
+    "You are the SchedulingAgent for ProjectForce. You handle scheduling operations, project management, and business information. When users ask about weather, let them know the information agent will help with that.")
+
+INFORMATION_AGENT_ID=$(create_bedrock_agent \
+    "pf-information" \
+    "Weather information specialist using external API" \
+    "You are the Weather Information Specialist. You provide weather forecasts, current conditions, and temperature information. Use external weather APIs for accurate data.")
+
+CHITCHAT_AGENT_ID=$(create_bedrock_agent \
+    "pf-chitchat" \
+    "Conversational agent for greetings and general queries" \
+    "You are a friendly conversational assistant. Handle greetings, thank you messages, and general questions. Be warm and helpful. If the user needs specific scheduling or weather help, guide them to ask specific questions.")
+
+SUPERVISOR_AGENT_ID=$(create_bedrock_agent \
+    "Supervisor" \
+    "Orchestrator agent that routes queries to specialized agents" \
+    "You are the Supervisor agent. Route user queries to the appropriate specialist: SchedulingAgent for scheduling/projects, pf-information for weather, pf-chitchat for conversational queries.")
+
+# Prepare all agents
+echo ""
+echo "Preparing all agents..."
+for agent_id in "$SCHEDULING_AGENT_ID" "$INFORMATION_AGENT_ID" "$CHITCHAT_AGENT_ID" "$SUPERVISOR_AGENT_ID"; do
+    if [[ -n "$agent_id" ]]; then
+        aws bedrock-agent prepare-agent \
+            --agent-id "$agent_id" \
+            --region "$REGION" \
+            &>/dev/null && echo "  ✅ Agent prepared: $agent_id"
+    fi
+done
+
+##############################################################################
+# Step 4: Create Action Groups
+##############################################################################
+
+echo ""
+echo "=========================================="
+echo "Step 4: Creating Action Groups"
+echo "=========================================="
+
+# Function to create action group with function schema
+create_action_group() {
+    local AGENT_ID=$1
+    local AGENT_NAME=$2
+    local ACTION_GROUP_NAME=$3
+    local LAMBDA_ARN=$4
+    local FUNCTION_SCHEMA=$5
+
+    echo ""
+    echo "Creating action group for $AGENT_NAME..."
+
+    # Delete existing action group if it exists (find by name first)
+    EXISTING_AG_ID=$(aws bedrock-agent list-agent-action-groups \
+        --agent-id "$AGENT_ID" \
+        --agent-version "DRAFT" \
+        --region "$REGION" \
+        --query "actionGroupSummaries[?actionGroupName=='$ACTION_GROUP_NAME'].actionGroupId" \
+        --output text 2>/dev/null)
+
+    if [[ -n "$EXISTING_AG_ID" ]]; then
+        echo "  → Found existing action group: $ACTION_GROUP_NAME (ID: $EXISTING_AG_ID)"
+        echo "  → Replacing with updated action group (disable + delete + recreate)..."
+
+        # Write schema to temp file
+        echo "$FUNCTION_SCHEMA" > /tmp/function-schema.json
+
+        # Disable first
+        aws bedrock-agent update-agent-action-group \
+            --agent-id "$AGENT_ID" \
+            --agent-version "DRAFT" \
+            --action-group-id "$EXISTING_AG_ID" \
+            --action-group-name "$ACTION_GROUP_NAME" \
+            --action-group-state "DISABLED" \
+            --action-group-executor "lambda=$LAMBDA_ARN" \
+            --function-schema file:///tmp/function-schema.json \
+            --region "$REGION" \
+            &>/dev/null
+
+        sleep 5
+
+        # Now delete
+        aws bedrock-agent delete-agent-action-group \
+            --agent-id "$AGENT_ID" \
+            --agent-version "DRAFT" \
+            --action-group-id "$EXISTING_AG_ID" \
+            --region "$REGION" \
+            &>/dev/null
+
+        echo "  → Waiting for deletion to complete..."
+        sleep 15
+    fi
+
+    # Create action group with function schema
+    echo "  → Creating action group: $ACTION_GROUP_NAME"
+
+    # Write schema to temp file to avoid escaping issues
+    echo "$FUNCTION_SCHEMA" > /tmp/function-schema.json
+
+    ACTION_GROUP_ID=$(aws bedrock-agent create-agent-action-group \
+        --agent-id "$AGENT_ID" \
+        --agent-version "DRAFT" \
+        --action-group-name "$ACTION_GROUP_NAME" \
+        --action-group-executor "lambda=$LAMBDA_ARN" \
+        --function-schema file:///tmp/function-schema.json \
+        --region "$REGION" \
+        --query 'agentActionGroup.actionGroupId' \
+        --output text 2>&1)
+
+    if [[ $? -eq 0 ]] && [[ ! "$ACTION_GROUP_ID" =~ "error" ]] && [[ ! "$ACTION_GROUP_ID" =~ "Error" ]]; then
+        echo "  ✅ Action group created: $ACTION_GROUP_NAME (ID: $ACTION_GROUP_ID)"
+        rm -f /tmp/function-schema.json
+    else
+        echo "  ⚠️  Failed to create action group: $ACTION_GROUP_NAME"
+        echo "     Error: $ACTION_GROUP_ID"
+        rm -f /tmp/function-schema.json
+        return 1
+    fi
+}
+
+# Get Lambda ARNs
+SCHEDULING_LAMBDA_ARN="arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-scheduling-actions"
+INFORMATION_LAMBDA_ARN="arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-information-actions"
+
+# Define function schemas
+SCHEDULING_SCHEMA='{
+  "functions": [
+    {
+      "name": "list_projects",
+      "description": "Get all projects for a customer. For B2B customers, can optionally filter by client_id.",
+      "parameters": {
+        "customer_id": {"description": "Customer ID", "required": true, "type": "string"},
+        "client_id": {"description": "Optional client ID for B2B filtering", "required": false, "type": "string"}
+      }
+    },
+    {
+      "name": "get_available_dates",
+      "description": "Get available dates for scheduling a project",
+      "parameters": {
+        "project_id": {"description": "Project ID", "required": true, "type": "string"}
+      }
+    },
+    {
+      "name": "get_time_slots",
+      "description": "Get available time slots for a specific date",
+      "parameters": {
+        "project_id": {"description": "Project ID", "required": true, "type": "string"},
+        "date": {"description": "Date in YYYY-MM-DD format", "required": true, "type": "string"},
+        "request_id": {"description": "Request ID from get_available_dates", "required": true, "type": "string"}
+      }
+    },
+    {
+      "name": "confirm_appointment",
+      "description": "Confirm and schedule an appointment",
+      "parameters": {
+        "project_id": {"description": "Project ID", "required": true, "type": "string"},
+        "date": {"description": "Date in YYYY-MM-DD format", "required": true, "type": "string"},
+        "time": {"description": "Time in HH:MM format", "required": true, "type": "string"},
+        "request_id": {"description": "Request ID from get_available_dates", "required": true, "type": "string"}
+      }
+    },
+    {
+      "name": "reschedule_appointment",
+      "description": "Reschedule an existing appointment to a new date and time",
+      "parameters": {
+        "project_id": {"description": "Project ID", "required": true, "type": "string"},
+        "new_date": {"description": "New date in YYYY-MM-DD format", "required": true, "type": "string"},
+        "new_time": {"description": "New time in HH:MM format", "required": true, "type": "string"},
+        "request_id": {"description": "Request ID", "required": true, "type": "string"}
+      }
+    },
+    {
+      "name": "cancel_appointment",
+      "description": "Cancel an existing appointment",
+      "parameters": {
+        "project_id": {"description": "Project ID", "required": true, "type": "string"}
+      }
+    }
+  ]
+}'
+
+INFORMATION_SCHEMA='{
+  "functions": [
+    {
+      "name": "get_project_details",
+      "description": "Get detailed information about a specific project",
+      "parameters": {
+        "project_id": {"description": "Project ID", "required": true, "type": "string"}
+      }
+    },
+    {
+      "name": "get_appointment_status",
+      "description": "Check the status of an appointment",
+      "parameters": {
+        "project_id": {"description": "Project ID", "required": true, "type": "string"}
+      }
+    },
+    {
+      "name": "get_working_hours",
+      "description": "Get business working hours and availability",
+      "parameters": {}
+    },
+    {
+      "name": "get_weather",
+      "description": "Get weather forecast for project location",
+      "parameters": {
+        "location": {"description": "Location (city or zip code)", "required": true, "type": "string"},
+        "date": {"description": "Optional date in YYYY-MM-DD format", "required": false, "type": "string"}
+      }
+    }
+  ]
+}'
+
+# Create action groups
+create_action_group "$SCHEDULING_AGENT_ID" "SchedulingAgent" "scheduling-actions" "$SCHEDULING_LAMBDA_ARN" "$SCHEDULING_SCHEMA"
+create_action_group "$INFORMATION_AGENT_ID" "pf-information" "information-actions" "$INFORMATION_LAMBDA_ARN" "$INFORMATION_SCHEMA"
+
+echo ""
+echo "  ℹ️  pf-chitchat and Supervisor agents don't need action groups (conversational only)"
+
+##############################################################################
+# Step 5: Prepare All Agents
+##############################################################################
+
+echo ""
+echo "=========================================="
+echo "Step 5: Preparing All Agents"
+echo "=========================================="
+
+# Prepare all agents
+echo ""
+echo "Preparing SchedulingAgent..."
+aws bedrock-agent prepare-agent \
+    --agent-id "$SCHEDULING_AGENT_ID" \
+    --region "$REGION" \
+    &>/dev/null && echo "  ✅ SchedulingAgent prepared"
+
+echo ""
+echo "Preparing pf-information..."
+aws bedrock-agent prepare-agent \
+    --agent-id "$INFORMATION_AGENT_ID" \
+    --region "$REGION" \
+    &>/dev/null && echo "  ✅ pf-information prepared"
+
+echo ""
+echo "Preparing pf-chitchat..."
+aws bedrock-agent prepare-agent \
+    --agent-id "$CHITCHAT_AGENT_ID" \
+    --region "$REGION" \
+    &>/dev/null && echo "  ✅ pf-chitchat prepared"
+
+echo ""
+echo "Preparing Supervisor..."
+aws bedrock-agent prepare-agent \
+    --agent-id "$SUPERVISOR_AGENT_ID" \
+    --region "$REGION" \
+    &>/dev/null && echo "  ✅ Supervisor prepared"
+
+##############################################################################
+# Step 6: Save Agent IDs
+##############################################################################
+
+echo ""
+echo "=========================================="
+echo "Step 6: Saving Agent IDs"
+echo "=========================================="
+
+mkdir -p "$BEDROCK_DIR/config"
+cat > "$BEDROCK_DIR/config/agent_ids.json" <<EOF
+{
+  "agents": {
+    "SchedulingAgent": {
+      "id": "$SCHEDULING_AGENT_ID",
+      "name": "SchedulingAgent",
+      "purpose": "Scheduling and project management"
+    },
+    "pf-information": {
+      "id": "$INFORMATION_AGENT_ID",
+      "name": "pf-information",
+      "purpose": "Weather information"
+    },
+    "pf-chitchat": {
+      "id": "$CHITCHAT_AGENT_ID",
+      "name": "pf-chitchat",
+      "purpose": "Conversational"
+    },
+    "Supervisor": {
+      "id": "$SUPERVISOR_AGENT_ID",
+      "name": "Supervisor",
+      "purpose": "Query routing"
+    }
+  },
+  "lambdas": {
+    "pf-scheduling-actions": "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-scheduling-actions",
+    "pf-information-actions": "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-information-actions",
+    "pf-query-router": "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-query-router"
+  },
+  "deployed_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "region": "$REGION",
+  "account_id": "$ACCOUNT_ID"
+}
+EOF
+
+echo "  ✅ Agent IDs saved to: $BEDROCK_DIR/config/agent_ids.json"
+
+##############################################################################
+# Summary
+##############################################################################
+
+echo ""
+echo "=========================================="
+echo "Deployment Complete!"
+echo "=========================================="
+echo ""
+echo "Created:"
+if [[ -n "$PF_API_TOKEN" ]] && [[ "$PF_API_TOKEN" != "PLACEHOLDER"* ]]; then
+    echo "  ✅ 1 Secrets Manager secret (with real Bearer token)"
+    echo "  ✅ 3 Lambda functions (configured with Bearer token)"
+else
+    echo "  ⚠️  1 Secrets Manager secret (with PLACEHOLDER token)"
+    echo "  ⚠️  3 Lambda functions (need Bearer token update)"
+fi
+echo "  ✅ 1 DynamoDB table"
+echo "  ✅ 4 Bedrock agents (all PREPARED)"
+echo "  ✅ 2 Action groups (SchedulingAgent, pf-information)"
+echo "  ✅ IAM roles (created automatically)"
+echo ""
+echo "Agent IDs:"
+echo "  • SchedulingAgent: $SCHEDULING_AGENT_ID"
+echo "  • pf-information: $INFORMATION_AGENT_ID"
+echo "  • pf-chitchat: $CHITCHAT_AGENT_ID"
+echo "  • Supervisor: $SUPERVISOR_AGENT_ID"
+echo ""
+echo "Resources:"
+echo "  • DynamoDB: pf-sessions-dev"
+echo "  • Lambdas: pf-scheduling-actions, pf-information-actions, pf-query-router"
+echo "  • Config: config/agent_ids.json"
+echo ""
+
+# Only show token warning if token is not set
+if [[ -z "$PF_API_TOKEN" ]] || [[ "$PF_API_TOKEN" == "PLACEHOLDER"* ]]; then
+echo "⚠️  IMPORTANT: Update API Token"
+echo "=========================================="
+echo "Lambda functions need a Bearer token to access the ProjectForce API."
+echo "Set it and redeploy:"
+echo ""
+echo "  export PF_API_TOKEN='your-actual-token'"
+echo "  export PF_REFRESH_TOKEN='your-refresh-token'"
+echo ""
+echo "  aws secretsmanager update-secret \\"
+echo "    --secret-id projectforce/api/dev/credentials \\"
+echo "    --secret-string \"{\\\"api_token\\\":\\\"\$PF_API_TOKEN\\\",\\\"client_id\\\":\\\"09PF05VD\\\",\\\"refresh_token\\\":\\\"\$PF_REFRESH_TOKEN\\\",\\\"api_base_url\\\":\\\"https://api-cx-portal.dev.projectsforce.com\\\"}\" \\"
+echo "    --region us-east-1"
+echo ""
+echo "  ./DEPLOY.sh"
+echo ""
+fi
+
+echo "Next Steps:"
+echo "=========================================="
+echo "  1. Test agents via AWS Console or CLI:"
+echo "     aws bedrock-agent-runtime invoke-agent \\"
+echo "       --agent-id $SCHEDULING_AGENT_ID \\"
+echo "       --agent-alias-id TSTALIASID \\"
+echo "       --session-id test-\$(date +%s) \\"
+echo "       --input-text 'Show me my projects' output.txt"
+echo ""
+echo "  2. View agent IDs:"
+echo "     cat config/agent_ids.json"
+echo ""
+echo "=========================================="

@@ -5,6 +5,12 @@
     "description": "API for information-related actions including project details, appointment status, working hours, and weather",
     "version": "1.0.0"
   },
+  "servers": [
+    {
+      "url": "https://api-cx-portal.dev.projectsforce.com",
+      "description": "Lambda function endpoint"
+    }
+  ],
   "paths": {
     "/get-project-details": {
       "post": {

@@ -1,8 +1,8 @@
 # ProjectForce AI Scheduling Agent
 
-**Version**: 3.0 (Phase 1-3 Complete)
-**Status**: 🚧 Phase 1 API Integration In Progress
-**Framework**: AWS Bedrock Agents (Primary) + SuperAgent (Backup Option)
+**Version**: 3.1 (Phase 1 Complete, Phases 2-3 Ready)
+**Status**: ✅ Core System Deployed - Lambda Integration Complete
+**Framework**: AWS Bedrock Multi-Agent Architecture
 
 ---
 
@@ -30,23 +30,21 @@ Customer Input (Chat/Voice/SMS)
     ↓
 Supervisor Agent (Orchestrator)
     ↓
-├── Information Agent → get_projects, get_weather
-├── Scheduling Agent → schedule_project, reschedule, cancel
-├── Notification Agent → send_sms, send_email
-└── Escalation Agent → create_ticket, escalate
+├── SchedulingAgent → schedule_project, reschedule, cancel
+├── pf-information → get_projects, get_weather
+└── pf-chitchat → greetings, general conversation
 
     ↓
 Lambda Action Functions
     ↓
-ProjectForce Backend APIs
+ProjectForce Backend APIs (Real Integration)
 ```
 
-**5 Agents Total:**
-1. **Supervisor Agent** - Routes requests, orchestrates collaborators
-2. **Information Agent** - Project data, weather, general info
-3. **Scheduling Agent** - Appointments, bookings, availability
-4. **Notification Agent** - SMS, email, alerts
-5. **Escalation Agent** - Support tickets, escalations
+**4 Agents Total:**
+1. **Supervisor** - Routes requests, orchestrates multi-agent collaboration
+2. **SchedulingAgent** - Appointments, bookings, availability
+3. **pf-information** - Project data, customer information
+4. **pf-chitchat** - Conversational interactions, greetings
 
 ### Voice Integration (Phase 3)
 
@@ -78,18 +76,30 @@ Response (Text-to-Speech)
 ### Option 1: Automated Deployment (Recommended)
 
 ```bash
-cd bedrock
+cd bedrock/scripts
 ./DEPLOY.sh
 ```
 
 This deploys:
-- ✅ 5 Bedrock agents
-- ✅ 5+ Lambda functions
+- ✅ 4 Bedrock agents (Supervisor + 3 collaborators)
+- ✅ 3 Lambda functions with real ProjectForce API integration
 - ✅ DynamoDB session table
-- ✅ Step Functions (3 state machines)
-- ✅ S3 buckets for storage
+- ✅ IAM roles and policies
+- ✅ Secrets Manager for API credentials
 
-**Duration**: ~30-45 minutes
+**Duration**: ~15-20 minutes
+
+### Environment Variables
+
+Before deployment, export your ProjectForce API credentials:
+
+```bash
+export PF_BEARER_TOKEN="your-bearer-token"
+export PF_CLIENT_ID="09PF05VD"
+export PF_USER_ID="1645869"
+```
+
+Or the script will use placeholder values (requires manual update later).
 
 ### Option 2: Manual Step-by-Step
 
@@ -100,15 +110,20 @@ See [`QUICK_START.md`](./QUICK_START.md) for detailed instructions.
 ## 📦 What's Deployed
 
 ### Phase 1: Core Multi-Agent System ✅
-**Status**: Deployed, API integration in progress
+**Status**: Complete - Real API Integration Working
 
-- 5 Bedrock agents (Supervisor + 4 collaborators)
-- Lambda action functions (information, scheduling, notification, escalation)
+- 4 Bedrock agents (Supervisor + 3 collaborators)
+  - Model: Claude 3.5 Sonnet V2 (us.anthropic.claude-3-5-sonnet-20241022-v2:0)
+  - Multi-agent collaboration enabled on Supervisor
+- 3 Lambda action functions with real ProjectForce API calls:
+  - pf-scheduling-actions (schedule, reschedule, cancel)
+  - pf-information-actions (projects, weather)
+  - pf-chitchat-actions (conversation)
 - DynamoDB for session management
-- Web chat interface (React + Flask)
-- Testing UI for agent testing
+- Secrets Manager for API credentials
+- IAM roles with comprehensive Bedrock permissions
 
-**Current Work**: Updating Lambda functions to call real ProjectForce APIs
+**Verified Working**: Lambda returns 25 real projects from ProjectForce API
 
 ### Phase 2: SMS Integration ✅
 **Status**: Code complete, not deployed
@@ -235,23 +250,29 @@ python3 test_supervisor_routing.py
 ## 🔄 Current Status
 
 ### Completed ✅
-- [x] Phase 1: Bedrock agents deployed
-- [x] Web chat interface working
-- [x] Step Functions for complex queries
-- [x] Testing UI deployed
+- [x] Phase 1: Core Bedrock agents deployed and working
+- [x] Real ProjectForce API integration (25 projects returned)
+- [x] Multi-agent collaboration with Supervisor pattern
+- [x] Lambda functions with Bearer token authentication
+- [x] DynamoDB session management
+- [x] Deployment automation (DEPLOY.sh, CLEANUP.sh)
+- [x] Validation and testing scripts (VALIDATE.sh, TEST_AGENTS.sh)
 - [x] Phase 3: Voice infrastructure code ready
 - [x] Phase 2: SMS code complete
+- [x] Project organization and documentation
 
-### In Progress 🚧
-- [ ] Phase 1: Integrate real ProjectForce APIs
-  - Update Lambda functions
-  - Add authentication (Bearer token)
-  - Update data models
-  - Add missing actions (reschedule-slots, cancel-reschedule)
+### Known Issues 🐛
+- [ ] Agent invocation via bedrock-agent-runtime (accessDeniedException)
+  - Direct model invocation: ✅ Works
+  - Lambda functions: ✅ Works (returns real data)
+  - Agent invocation: ❌ Blocked (likely account-level service enablement)
+  - **Workaround**: Use Lambda functions directly
 
 ### Planned 📋
-- [ ] Deploy Phase 3 (Voice) after Phase 1 API integration
-- [ ] Deploy Phase 2 (SMS) after Phase 1 API integration
+- [ ] Resolve agent invocation permissions (AWS Support or console enablement)
+- [ ] Deploy Phase 3 (Voice integration)
+- [ ] Deploy Phase 2 (SMS integration)
+- [ ] Web chat UI integration with agents
 - [ ] Multi-client (B2B) support
 - [ ] Advanced analytics dashboard
 
@@ -288,25 +309,37 @@ python3 test_supervisor_routing.py
 
 ```
 bedrock/
-├── infrastructure/
-│   ├── terraform/          # Main infrastructure
-│   │   ├── bedrock_agents.tf
-│   │   ├── dynamodb.tf
-│   │   └── voice/          # Phase 3 voice infrastructure
+├── scripts/                    # Main deployment & testing
+│   ├── DEPLOY.sh              # Main deployment script
+│   ├── CLEANUP.sh             # Cleanup/deletion script
+│   ├── VALIDATE.sh            # Validation script
+│   ├── TEST_AGENTS.sh         # Agent testing script
+│   ├── deployment/            # Additional deployment utilities
+│   ├── testing/               # Test scripts
+│   └── token-management/      # Token fetch/update scripts
+├── lambda/                    # Lambda function code
+│   ├── scheduling-actions/    # Scheduling operations
+│   ├── information-actions/   # Project/customer info
+│   └── chitchat-actions/      # Conversational responses
+├── agent-instructions/        # Agent prompt instructions
+│   ├── supervisor.txt
+│   ├── scheduling.txt
+│   ├── information.txt
+│   └── chitchat.txt
+├── docs/                      # Comprehensive documentation
+│   ├── archive/               # Historical docs
+│   └── *.md                   # All project documentation
+├── logs/                      # Deployment and test logs
+├── infrastructure/            # Terraform (future phases)
+│   ├── terraform/
+│   │   └── voice/            # Phase 3 voice infrastructure
 │   └── voice/
-│       └── contact-flows/  # AWS Connect flows
-├── lambda/
-│   ├── information-actions/
-│   ├── scheduling-actions/
-│   ├── lex-fulfillment/    # Phase 3
-│   └── voice-bedrock-bridge/ # Phase 3
-├── frontend/
-│   ├── backend/            # Flask API
-│   └── src/                # React app
-├── testing/ui/             # Test UI
-├── tests/                  # Test suites
-├── scripts/                # Deployment scripts
-└── docs/                   # Documentation
+│       └── contact-flows/    # AWS Connect flows
+├── frontend/                  # Web chat UI (future)
+│   ├── backend/              # Flask API
+│   └── src/                  # React app
+├── testing/ui/               # Test UI
+└── tests/                    # Test suites
 ```
 
 ---
@@ -328,28 +361,31 @@ bedrock/
 
 ## 🗺️ Roadmap
 
-### Phase 1.1: API Integration (Current)
-- Real ProjectForce API calls
-- Authentication setup
-- Customer lookup by phone
-- Additional actions (slots, cancel)
+### Phase 1.1: Agent Testing & Troubleshooting (Current)
+- ✅ Real ProjectForce API integration complete
+- ✅ Lambda functions returning live data (25 projects)
+- 🐛 Resolve agent invocation permissions
+- Test end-to-end agent workflows
+- Web chat UI integration
 
-### Phase 3.1: Voice Production
-- Deploy to production
-- Optimize Lex intents
-- Add DTMF fallback
+### Phase 3.1: Voice Production (Next)
+- Deploy voice infrastructure (Terraform ready)
+- AWS Connect instance setup
+- Lex V2 bot integration
+- Test phone call workflows
 - Call analytics dashboard
 
 ### Phase 2.1: SMS Production
-- Deploy SMS infrastructure
+- Deploy SMS infrastructure (code ready)
 - Customer opt-in flow
+- Two-way SMS conversations
 - SMS analytics
 
 ### Phase 4: Advanced Features
-- Outbound calling
-- Proactive notifications
+- Outbound calling & notifications
+- Multi-client (B2B) support
 - Multi-language support
-- Advanced analytics
+- Advanced analytics dashboard
 
 ---
 
@@ -367,6 +403,6 @@ Internal project for ProjectForce
 
 ---
 
-**Last Updated**: 2025-10-28
-**Current Phase**: 1.1 (API Integration)
-**Next Milestone**: Real API integration complete
+**Last Updated**: 2025-11-04
+**Current Phase**: 1.1 (Agent Testing & Troubleshooting)
+**Next Milestone**: Resolve agent invocation, then Voice integration (Phase 3)

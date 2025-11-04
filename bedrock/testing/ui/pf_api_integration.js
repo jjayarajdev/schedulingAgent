@@ -1,9 +1,7 @@
 /**
  * ProjectForce API Integration
- * Uses the regenerated token from localStorage to call real ProjectForce APIs
+ * Simplified - All API calls go through the Flask backend to avoid CORS issues
  */
-
-const PF_API_BASE = 'https://api-cx-portal.dev.projectsforce.com';
 
 // Get token from localStorage
 function getPFToken() {
@@ -19,200 +17,84 @@ function getPFUserId() {
 }
 
 /**
- * ProjectForce API calls that match the scheduling agent needs
+ * ProjectForce API Integration
+ * All calls go through Flask backend which proxies to real API
  */
 const ProjectForceAPI = {
     /**
-     * Get all projects for a customer
-     */
-    async getCustomerProjects(customerId = '1645869') {
-        const token = getPFToken();
-        const clientId = getPFClientId();
-
-        if (!token) {
-            throw new Error('No token available. Please get/regenerate token first.');
-        }
-
-        const response = await fetch(`${PF_API_BASE}/cx-scheduled/projects?customer_id=${customerId}`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status} ${response.statusText}`);
-        }
-
-        return await response.json();
-    },
-
-    /**
-     * Get client details/configuration
-     */
-    async getClientDetails() {
-        const token = getPFToken();
-
-        const response = await fetch(`${PF_API_BASE}/system/client-details`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
-        }
-
-        return await response.json();
-    },
-
-    /**
-     * Get all stores
-     */
-    async getStores() {
-        const token = getPFToken();
-
-        const response = await fetch(`${PF_API_BASE}/stores/all-stores`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
-        }
-
-        return await response.json();
-    },
-
-    /**
-     * Get project categories
-     */
-    async getProjectCategories() {
-        const token = getPFToken();
-
-        const response = await fetch(`${PF_API_BASE}/projects/master/project-category`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
-        }
-
-        return await response.json();
-    },
-
-    /**
-     * Get project types
-     */
-    async getProjectTypes() {
-        const token = getPFToken();
-
-        const response = await fetch(`${PF_API_BASE}/projects/master/project-type`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
-        }
-
-        return await response.json();
-    },
-
-    /**
-     * Get project status list
-     */
-    async getProjectStatuses() {
-        const token = getPFToken();
-
-        const response = await fetch(`${PF_API_BASE}/system/status`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
-        }
-
-        return await response.json();
-    },
-
-    /**
-     * Get customers list
-     */
-    async getCustomers() {
-        const token = getPFToken();
-
-        const response = await fetch(`${PF_API_BASE}/customers`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
-        }
-
-        return await response.json();
-    },
-
-    /**
-     * Get user profile
-     */
-    async getUserProfile() {
-        const token = getPFToken();
-
-        const response = await fetch(`${PF_API_BASE}/auth/user/profile`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
-        }
-
-        return await response.json();
-    },
-
-    /**
-     * Test API connectivity - calls client details as a health check
+     * Test API connectivity by sending a simple test message to the backend
+     * The backend will invoke the Bedrock agent which will call ProjectForce API
      */
     async testConnection() {
-        try {
-            const result = await this.getClientDetails();
+        const token = getPFToken();
+        const clientId = getPFClientId();
+        const userId = getPFUserId();
+
+        if (!token) {
             return {
-                success: true,
-                message: 'API connection successful',
-                clientName: result.client_name,
-                clientId: result.client_id
+                success: false,
+                message: 'No token available. Please get a token first.'
             };
+        }
+
+        try {
+            // Get BACKEND_URL from window or use default
+            const backendUrl = window.BACKEND_URL || 'http://localhost:5001';
+
+            // Send a simple test query through the backend
+            const response = await fetch(`${backendUrl}/api/classify`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    message: 'List my projects',
+                    pf_token: token,
+                    pf_client_id: clientId,
+                    pf_user_id: userId
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Backend error: ${response.status}`);
+            }
+
+            const result = await response.json();
+
+            // Check if we got a valid response
+            if (result.response && result.response.length > 0) {
+                return {
+                    success: true,
+                    message: 'API connection successful',
+                    clientName: 'ProjectForce User',
+                    clientId: clientId,
+                    testResponse: result.response
+                };
+            } else {
+                return {
+                    success: false,
+                    message: 'Got response but no data. Token might be invalid.'
+                };
+            }
+
         } catch (error) {
             return {
                 success: false,
                 message: error.message
             };
         }
+    },
+
+    /**
+     * Get customer projects (for testing - returns simplified result)
+     */
+    async getCustomerProjects() {
+        // This is just a placeholder for the UI
+        // Actual project data comes through the Bedrock agent
+        return {
+            data: [],
+            message: 'Use the chat interface to query projects'
+        };
     }
 };
 

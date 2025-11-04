@@ -20,7 +20,16 @@
 # - Detailed logging
 # - Can resume from failures
 #
-# Usage: ./DEPLOY.sh [--env dev|staging|prod] [--region us-east-1] [--skip-terraform]
+# Usage:
+#   Basic (with mock data):
+#     ./DEPLOY.sh [--env dev|staging|prod] [--region us-east-1] [--skip-terraform]
+#
+#   With real ProjectForce API:
+#     export PF_BEARER_TOKEN="your-token-here"
+#     export PF_CLIENT_ID="09PF05VD"
+#     export PF_USER_ID="1645869"
+#     export USE_MOCK_API=false
+#     ./DEPLOY.sh
 ################################################################################
 
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
@@ -44,7 +53,7 @@ NC='\033[0m'
 
 # Configuration
 PROJECT_NAME="scheduling-agent"
-FOUNDATION_MODEL="us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+FOUNDATION_MODEL="us.anthropic.claude-3-5-sonnet-20241022-v2:0"  # Claude 3.5 Sonnet V2 inference profile (supports multi-agent supervisor)
 LAMBDA_RUNTIME="python3.11"
 LAMBDA_TIMEOUT=30
 LAMBDA_MEMORY=256
@@ -252,7 +261,7 @@ create_iam_roles() {
     log "Creating IAM roles and policies..."
 
     # Lambda execution roles (one per Lambda function for fine-grained control)
-    for service in scheduling information notes; do
+    for service in scheduling information; do
         local role_name="${PROJECT_NAME}-${service}-lambda-role-${ENVIRONMENT}"
 
         if aws iam get-role --role-name "$role_name" &>/dev/null; then
@@ -379,7 +388,7 @@ create_lambda_function() {
             --zip-file "fileb://${zip_path}" \
             --timeout "$LAMBDA_TIMEOUT" \
             --memory-size "$LAMBDA_MEMORY" \
-            --environment "Variables={USE_MOCK_API=true,API_ENVIRONMENT=${ENVIRONMENT},DYNAMODB_TABLE_NAME=${PROJECT_NAME}-sessions-${ENVIRONMENT}}" \
+            --environment "Variables={USE_MOCK_API=${USE_MOCK_API:-true},API_ENVIRONMENT=${ENVIRONMENT},DYNAMODB_TABLE_NAME=${PROJECT_NAME}-sessions-${ENVIRONMENT},PF_BEARER_TOKEN=${PF_BEARER_TOKEN:-},PF_CLIENT_ID=${PF_CLIENT_ID:-},PF_USER_ID=${PF_USER_ID:-},PF_API_BASE_URL=${PF_API_BASE_URL:-https://api-cx-portal.dev.projectsforce.com}}" \
             --region "$AWS_REGION" \
             >> "$LOG_FILE" 2>&1
     else
@@ -433,7 +442,7 @@ deploy_lambda_functions() {
     fi
 
     # Deploy each Lambda function
-    for service in scheduling information notes; do
+    for service in scheduling information; do
         if ! create_lambda_function "$service"; then
             log_error "Failed to deploy $service Lambda"
             return 1
@@ -490,7 +499,6 @@ create_aliases_and_collaborators() {
     local supervisor_id=$(terraform output -raw supervisor_agent_id 2>/dev/null)
     local scheduling_alias=$(terraform output -raw scheduling_alias_arn 2>/dev/null)
     local information_alias=$(terraform output -raw information_alias_arn 2>/dev/null)
-    local notes_alias=$(terraform output -raw notes_alias_arn 2>/dev/null)
     local chitchat_alias=$(terraform output -raw chitchat_alias_arn 2>/dev/null)
 
     cd ../..
@@ -515,16 +523,6 @@ create_aliases_and_collaborators() {
         --collaborator-name "information_collaborator" \
         --collaboration-instruction "Route all information requests to this agent, including project details and appointment status checks." \
         --agent-descriptor "aliasArn=$information_alias" \
-        --relay-conversation-history "TO_COLLABORATOR" \
-        --region "$AWS_REGION" >> "$LOG_FILE" 2>&1 || true
-
-    # Notes collaborator
-    aws bedrock-agent associate-agent-collaborator \
-        --agent-id "$supervisor_id" \
-        --agent-version "DRAFT" \
-        --collaborator-name "notes_collaborator" \
-        --collaboration-instruction "Route all note management requests to this agent." \
-        --agent-descriptor "aliasArn=$notes_alias" \
         --relay-conversation-history "TO_COLLABORATOR" \
         --region "$AWS_REGION" >> "$LOG_FILE" 2>&1 || true
 
@@ -578,7 +576,7 @@ validate_deployment() {
 
     # Check Lambda functions
     log_info "Checking Lambda functions..."
-    for service in scheduling information notes; do
+    for service in scheduling information; do
         local function_name="${PROJECT_NAME}-${service}-actions"
         local state=$(aws lambda get-function \
             --function-name "$function_name" \
@@ -626,17 +624,19 @@ output_configuration() {
 
     cd infrastructure/terraform
 
-    # Get agent IDs
+    # Get agent IDs and alias IDs
     local supervisor_id=$(terraform output -raw supervisor_agent_id 2>/dev/null || echo "")
     local supervisor_alias=$(terraform output -raw supervisor_alias_id 2>/dev/null || echo "")
     local scheduling_id=$(terraform output -raw scheduling_agent_id 2>/dev/null || echo "")
+    local scheduling_alias=$(terraform output -raw scheduling_alias_id 2>/dev/null || echo "")
     local information_id=$(terraform output -raw information_agent_id 2>/dev/null || echo "")
-    local notes_id=$(terraform output -raw notes_agent_id 2>/dev/null || echo "")
+    local information_alias=$(terraform output -raw information_alias_id 2>/dev/null || echo "")
     local chitchat_id=$(terraform output -raw chitchat_agent_id 2>/dev/null || echo "")
+    local chitchat_alias=$(terraform output -raw chitchat_alias_id 2>/dev/null || echo "")
 
     cd ../..
 
-    # Create agent_config.json
+    # Create agent_config.json (root level - for reference)
     cat > agent_config.json <<EOF
 {
   "supervisor_id": "$supervisor_id",
@@ -644,7 +644,6 @@ output_configuration() {
   "specialists": {
     "scheduling": "$scheduling_id",
     "information": "$information_id",
-    "notes": "$notes_id",
     "chitchat": "$chitchat_id"
   },
   "region": "$AWS_REGION",
@@ -653,6 +652,47 @@ output_configuration() {
 EOF
 
     log_success "Configuration saved to agent_config.json"
+
+    # Create backend/agent_config.dev.json (for Flask backend)
+    cat > backend/agent_config.dev.json <<EOF
+{
+  "environment": "dev",
+  "supervisor_id": "$supervisor_id",
+  "supervisor_alias": "$supervisor_alias",
+  "agents": {
+    "scheduling": {
+      "agent_id": "$scheduling_id",
+      "alias_id": "$scheduling_alias"
+    },
+    "information": {
+      "agent_id": "$information_id",
+      "alias_id": "$information_alias"
+    },
+    "chitchat": {
+      "agent_id": "$chitchat_id",
+      "alias_id": "$chitchat_alias"
+    }
+  },
+  "routing": {
+    "enabled": true,
+    "method": "supervisor",
+    "use_supervisor": true,
+    "classifier_model": "$FOUNDATION_MODEL"
+  },
+  "region": "$AWS_REGION",
+  "prefix": "pf_",
+  "customer_context": {
+    "injection_method": "prompt_augmentation_and_session_attributes",
+    "session_attributes": [
+      "customer_id",
+      "customer_type",
+      "client_id"
+    ]
+  }
+}
+EOF
+
+    log_success "Backend configuration saved to backend/agent_config.dev.json"
 
     # Display summary
     echo ""

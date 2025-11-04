@@ -3,7 +3,7 @@
 # ==============================================================================
 # This Terraform configuration creates:
 # - 1 Supervisor Agent
-# - 4 Collaborator Agents (Scheduling, Information, Notes, Chitchat)
+# - 3 Collaborator Agents (Scheduling, Information, Chitchat)
 # - IAM roles and policies for agents
 # - S3 bucket for OpenAPI schemas
 # - S3 objects for OpenAPI schemas
@@ -54,15 +54,6 @@ resource "aws_s3_object" "information_actions_schema" {
   key    = "information_actions.json"
   source = "${path.module}/../openapi_schemas/information_actions.json"
   etag   = filemd5("${path.module}/../openapi_schemas/information_actions.json")
-
-  content_type = "application/json"
-}
-
-resource "aws_s3_object" "notes_actions_schema" {
-  bucket = aws_s3_bucket.agent_schemas.id
-  key    = "notes_actions.json"
-  source = "${path.module}/../openapi_schemas/notes_actions.json"
-  etag   = filemd5("${path.module}/../openapi_schemas/notes_actions.json")
 
   content_type = "application/json"
 }
@@ -183,17 +174,6 @@ resource "aws_iam_role" "information_agent" {
   }
 }
 
-# Notes agent role
-resource "aws_iam_role" "notes_agent" {
-  name               = "${var.project_name}-notes-agent-role-${var.environment}"
-  assume_role_policy = data.aws_iam_policy_document.bedrock_agent_trust.json
-
-  tags = {
-    Name        = "${var.project_name}-notes-agent-role"
-    Environment = var.environment
-  }
-}
-
 # Chitchat agent role
 resource "aws_iam_role" "chitchat_agent" {
   name               = "${var.project_name}-chitchat-agent-role-${var.environment}"
@@ -244,8 +224,7 @@ data "aws_iam_policy_document" "collaborator_agent_permissions" {
     ]
     resources = [
       "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-scheduling-actions",
-      "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-information-actions",
-      "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-notes-actions"
+      "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-information-actions"
     ]
   }
 }
@@ -260,12 +239,6 @@ resource "aws_iam_role_policy" "scheduling_agent_permissions" {
 resource "aws_iam_role_policy" "information_agent_permissions" {
   name   = "${var.project_name}-information-agent-policy"
   role   = aws_iam_role.information_agent.id
-  policy = data.aws_iam_policy_document.collaborator_agent_permissions.json
-}
-
-resource "aws_iam_role_policy" "notes_agent_permissions" {
-  name   = "${var.project_name}-notes-agent-policy"
-  role   = aws_iam_role.notes_agent.id
   policy = data.aws_iam_policy_document.collaborator_agent_permissions.json
 }
 
@@ -359,30 +332,6 @@ resource "aws_bedrockagent_agent" "information" {
   }
 }
 
-# Notes Collaborator Agent
-resource "aws_bedrockagent_agent" "notes" {
-  agent_name              = "${var.project_name}-notes"
-  agent_resource_role_arn = aws_iam_role.notes_agent.arn
-  foundation_model        = var.foundation_model
-  instruction             = file("${path.module}/../agent_instructions/notes_collaborator.txt")
-  description             = "Notes specialist agent for managing appointment notes and documentation"
-
-  # Disable collaboration for collaborator agents
-  agent_collaboration = "DISABLED"
-
-  # Don't auto-prepare - will be prepared after association
-  prepare_agent = false
-
-  idle_session_ttl_in_seconds = 1800
-
-  tags = {
-    Name        = "${var.project_name}-notes"
-    Environment = var.environment
-    AgentType   = "collaborator"
-    Specialty   = "notes"
-  }
-}
-
 # Chitchat Collaborator Agent
 resource "aws_bedrockagent_agent" "chitchat" {
   agent_name              = "${var.project_name}-chitchat"
@@ -462,31 +411,6 @@ resource "aws_bedrockagent_agent" "chitchat" {
 #  }
 #}
 
-# Associate Notes Agent with Supervisor
-##resource "aws_bedrockagent_agent_collaborator" "notes" {
-#  agent_id               = aws_bedrockagent_agent.supervisor.agent_id
-#  agent_version          = "DRAFT"
-#  collaborator_name      = "notes_collaborator"
-#  collaboration_instruction = "Route all note management requests to this agent, including adding notes to appointments and viewing existing notes. This agent only handles note-related operations."
-#
-#  # Don't auto-prepare - we'll do it manually after all associations
-#  prepare_agent = false
-#
-#  agent_descriptor {
-#    alias_arn = aws_bedrockagent_agent_alias.notes.agent_alias_arn
-#  }
-#
-#  depends_on = [
-#    aws_bedrockagent_agent.supervisor,
-#    aws_bedrockagent_agent.notes,
-#    aws_bedrockagent_agent_alias.notes
-#  ]
-#
-#  lifecycle {
-#    ignore_changes = [relay_conversation_history]
-#  }
-#}
-
 # Associate Chitchat Agent with Supervisor
 ##resource "aws_bedrockagent_agent_collaborator" "chitchat" {
 #  agent_id               = aws_bedrockagent_agent.supervisor.agent_id
@@ -541,11 +465,6 @@ output "information_agent_id" {
   value       = aws_bedrockagent_agent.information.agent_id
 }
 
-output "notes_agent_id" {
-  description = "ID of the notes agent"
-  value       = aws_bedrockagent_agent.notes.agent_id
-}
-
 output "chitchat_agent_id" {
   description = "ID of the chitchat agent"
   value       = aws_bedrockagent_agent.chitchat.agent_id
@@ -562,7 +481,6 @@ output "all_agent_ids" {
     supervisor  = aws_bedrockagent_agent.supervisor.agent_id
     scheduling  = aws_bedrockagent_agent.scheduling.agent_id
     information = aws_bedrockagent_agent.information.agent_id
-    notes       = aws_bedrockagent_agent.notes.agent_id
     chitchat    = aws_bedrockagent_agent.chitchat.agent_id
   }
 }

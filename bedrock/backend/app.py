@@ -47,7 +47,6 @@ except FileNotFoundError:
     AGENTS = {
         'scheduling': {'agent_id': 'YDCJTJBSLO', 'alias_id': 'VB7IU4DNIZ'},
         'information': {'agent_id': 'I4UC076CNX', 'alias_id': '7VLJCIYKM5'},
-        'notes': {'agent_id': 'H2GHYHEDS7', 'alias_id': 'XBAYBM3ID9'},
         'chitchat': {'agent_id': '0HRRAJHJOA', 'alias_id': '9M3HS9XRDD'}
     }
     ROUTING_CONFIG = {'enabled': True, 'use_supervisor': False}
@@ -226,10 +225,9 @@ def get_routing_metrics():
     return {
         'total_requests': 0,
         'intents': {
-            'chitchat': 0,
             'scheduling': 0,
             'information': 0,
-            'notes': 0
+            'chitchat': 0
         },
         'avg_classification_time_ms': 0,
         'avg_invocation_time_ms': 0,
@@ -244,9 +242,9 @@ def get_routing_metrics():
 def classify_intent(message):
     """
     Classify user intent using Claude 3.5 Sonnet V2 for accurate classification.
-    Returns: 'scheduling', 'information', 'notes', or 'chitchat'
+    Returns: 'scheduling', 'information', or 'chitchat'
 
-    Version: 2.1 - Updated to Claude 3.5 Sonnet V2
+    Version: 3.0 - Updated to 3-agent system with Claude 3.5 Sonnet V2
     """
     prompt = f"""You are an intent classifier for a property management scheduling system.
 
@@ -267,16 +265,8 @@ Given a user message, classify it into ONE of these categories:
    - Working hours ("what time do you open")
    - Weather forecasts, general knowledge queries
    - Factual information lookups ("population of", "exchange rate")
-   - EXCLUDE: Personal reminders and lists (those are notes)
 
-3. **notes**:
-   - Adding notes ("add a note", "write a note", "remember this", "save a note")
-   - Creating lists ("shopping list", "to-do list", "add to my list")
-   - Viewing notes ("show notes", "what notes do I have", "find my note")
-   - Deleting notes ("delete note", "remove note")
-   - Personal reminders and memory aids
-
-4. **chitchat**:
+3. **chitchat**:
    - Greetings ("hi", "hello", "good morning", "thanks", "goodbye")
    - Small talk, jokes, casual conversation
    - Emotional expressions ("I'm feeling stressed", "need to talk", "how are you")
@@ -285,13 +275,13 @@ Given a user message, classify it into ONE of these categories:
 
 User message: "{message}"
 
-Respond with ONLY the category name (scheduling/information/notes/chitchat), nothing else."""
+Respond with ONLY the category name (scheduling/information/chitchat), nothing else."""
 
     classification_start_time = time.time()
 
     try:
         response = bedrock_runtime.invoke_model(
-            modelId='us.anthropic.claude-3-5-sonnet-20241022-v2:0',  # Inference profile
+            modelId='anthropic.claude-3-5-sonnet-20241022-v2:0',  # Claude 3.5 Sonnet V2
             body=json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
                 "max_tokens": 10,
@@ -304,7 +294,7 @@ Respond with ONLY the category name (scheduling/information/notes/chitchat), not
         intent = response_body['content'][0]['text'].strip().lower()
 
         # Validate intent
-        valid_intents = ['scheduling', 'information', 'notes', 'chitchat']
+        valid_intents = ['scheduling', 'information', 'chitchat']
         if intent not in valid_intents:
             logger.warning(f"Invalid intent '{intent}' returned, defaulting to chitchat")
             intent = 'chitchat'
@@ -510,8 +500,8 @@ def get_metrics():
 @app.route('/api/classify', methods=['POST'])
 def classify_only():
     """
-    Classification endpoint for testing UI
-    Returns intent classification AND invokes the agent to get actual response
+    Route requests to the Supervisor agent with multi-agent collaboration
+    The Supervisor will automatically route to the appropriate collaborator agent
     """
     data = request.json
     message = data.get('message')
@@ -531,14 +521,11 @@ def classify_only():
     start_time = time.time()
 
     try:
-        # Classify the intent
-        intent = classify_intent(message)
-        classification_time = time.time() - start_time
+        # Route directly to Supervisor - it will handle classification and routing
+        agent_id = SUPERVISOR_ID
+        alias_id = SUPERVISOR_ALIAS
 
-        # Get agent info
-        agent_config = AGENTS.get(intent, AGENTS['chitchat'])
-        agent_id = agent_config['agent_id']
-        alias_id = agent_config['alias_id']
+        logger.info(f"Routing to Supervisor agent: {agent_id} with alias: {alias_id}")
 
         # Use real ProjectForce data if token is available
         if pf_token:
@@ -625,10 +612,9 @@ Please help the customer with their request using their customer ID and client I
         total_time = time.time() - start_time
 
         return jsonify({
-            'intent': intent,
+            'intent': 'supervisor',  # All requests go through supervisor
             'agent_id': agent_id,
             'agent_alias_id': alias_id,
-            'classification_time_ms': round(classification_time * 1000, 2),
             'invocation_time_ms': round(invocation_time * 1000, 2),
             'total_time_ms': round(total_time * 1000, 2),
             'response': full_response,
@@ -651,12 +637,33 @@ Please help the customer with their request using their customer ID and client I
         })
 
     except Exception as e:
-        logger.error(f"Classification endpoint error: {e}")
+        logger.error(f"Supervisor routing error: {e}")
         return jsonify({
             'error': str(e),
-            'intent': 'chitchat',  # Fallback
-            'classification_time_ms': round((time.time() - start_time) * 1000, 2)
+            'intent': 'supervisor',
+            'total_time_ms': round((time.time() - start_time) * 1000, 2)
         }), 500
+
+
+@app.route('/api/test-queries', methods=['GET'])
+def get_test_queries():
+    """
+    Get test queries for the Testing UI
+    Returns all predefined test queries organized by category
+    """
+    try:
+        test_queries_path = os.path.join(os.path.dirname(__file__), 'test_queries.json')
+
+        with open(test_queries_path, 'r') as f:
+            test_queries = json.load(f)
+
+        return jsonify(test_queries)
+    except FileNotFoundError:
+        logger.error("test_queries.json file not found")
+        return jsonify({'error': 'Test queries file not found'}), 404
+    except Exception as e:
+        logger.error(f"Error loading test queries: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
@@ -673,7 +680,6 @@ Region: {REGION}
 Available Agents:
   • Scheduling:   {AGENTS['scheduling']['agent_id']}
   • Information:  {AGENTS['information']['agent_id']}
-  • Notes:        {AGENTS['notes']['agent_id']}
   • Chitchat:     {AGENTS['chitchat']['agent_id']}
 
 Supervisor (for future use): {SUPERVISOR_ID}
