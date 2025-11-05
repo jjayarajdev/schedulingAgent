@@ -228,66 +228,183 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
 def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
     """
     Action: get_project_details
-    Returns detailed information for a specific project
+    Returns detailed information for a specific project with enhanced formatting and validation
     """
     project_id = params.get('project_id')
     client_id = params.get('client_id', 'default')
 
+    # Validation
     if not project_id:
         raise ValueError("Missing required parameter: project_id")
 
     logger.info(f"[REAL] Fetching project details for project {project_id}, client {client_id}")
 
-    # New CX Portal API format: /dashboard/find-one-project/{CLIENT_ID}/{PROJECT_ID}
-    url = f"{config['base_url']}/dashboard/find-one-project/{client_id}/{project_id}"
-    logger.info(f"Making API request to: {url}")
+    try:
+        # New CX Portal API format: /dashboard/find-one-project/{CLIENT_ID}/{PROJECT_ID}
+        url = f"{config['base_url']}/dashboard/find-one-project/{client_id}/{project_id}"
+        logger.info(f"Making API request to: {url}")
 
-    res = requests.get(url, headers=auth_headers, timeout=30)
-    res.raise_for_status()
-    response = res.json()
+        res = requests.get(url, headers=auth_headers, timeout=30)
+        res.raise_for_status()
+        response = res.json()
 
-    data = response.get("data", {})
+        data = response.get("data", {})
 
-    # Extract and format project details with nested objects preserved
-    return {
-        "action": "get_project_details",
-        "project_id": data.get("project_id"),
-        "project_number": data.get("project_number"),
-        "client_id": data.get("client_id"),
-        "customer_id": data.get("customer_id"),
-        "category": data.get("project_category", {}).get("category"),
-        "type": data.get("project_type", {}).get("project_type"),
-        "status": data.get("status_info", {}).get("status"),
-        "status_id": data.get("status_id"),
-        "scheduled_start": data.get("date_scheduled_start"),
-        "scheduled_end": data.get("date_scheduled_end"),
-        "date_sold": data.get("date_sold"),
-        "customer": {
-            "customer_id": data.get("customer", {}).get("customerId"),
-            "first_name": data.get("customer", {}).get("firstName"),
-            "last_name": data.get("customer", {}).get("lastName"),
-            "email": data.get("customer", {}).get("email"),
-            "phone": data.get("customer", {}).get("phone")
-        },
-        "installation_address": {
-            "address_id": data.get("installation_address", {}).get("address_id"),
-            "address1": data.get("installation_address", {}).get("address1"),
-            "address2": data.get("installation_address", {}).get("address2"),
-            "city": data.get("installation_address", {}).get("city"),
-            "state": data.get("installation_address", {}).get("state"),
-            "zipcode": data.get("installation_address", {}).get("zipcode"),
-            "full_address": f"{data.get('installation_address', {}).get('address1', '')}, {data.get('installation_address', {}).get('city', '')}, {data.get('installation_address', {}).get('state', '')} {data.get('installation_address', {}).get('zipcode', '')}"
-        },
-        "store_info": {
-            "store_id": data.get("store_info", {}).get("store_id"),
-            "store_number": data.get("store_info", {}).get("store_number"),
-            "store_name": data.get("store_info", {}).get("store_name")
-        },
-        "service_time": data.get("service_time", {}).get("duration_value"),
-        "default_service_time": data.get("default_service_time"),
-        "client_timezone": data.get("client_timezone"),
-        "full_data": data  # Complete API response for complex queries
-    }
+        # Validate we got data back
+        if not data or not data.get("project_id"):
+            raise ValueError(f"Project {project_id} not found or no data returned from API")
+
+        # Helper function to safely get nested values
+        def safe_get(obj, *keys, default=None):
+            """Safely navigate nested dictionaries"""
+            result = obj
+            for key in keys:
+                if isinstance(result, dict):
+                    result = result.get(key)
+                else:
+                    return default
+                if result is None:
+                    return default
+            return result if result is not None else default
+
+        # Extract customer information
+        customer_info = safe_get(data, "customer", default={})
+        customer_first = safe_get(customer_info, "firstName", default="")
+        customer_last = safe_get(customer_info, "lastName", default="")
+        customer_name = f"{customer_first} {customer_last}".strip() or "Unknown Customer"
+
+        # Extract address information
+        address_info = safe_get(data, "installation_address", default={})
+        address1 = safe_get(address_info, "address1", default="")
+        address2 = safe_get(address_info, "address2", default="")
+        city = safe_get(address_info, "city", default="")
+        state = safe_get(address_info, "state", default="")
+        zipcode = safe_get(address_info, "zipcode", default="")
+
+        # Build full address with proper formatting
+        address_parts = [address1]
+        if address2:
+            address_parts.append(address2)
+        city_state_zip = f"{city}, {state} {zipcode}".strip()
+        if city_state_zip and city_state_zip != ", ":
+            address_parts.append(city_state_zip)
+        full_address = ", ".join(filter(None, address_parts)) or "Address not available"
+
+        # Extract project details
+        project_category = safe_get(data, "project_category", "category", default="Not specified")
+        project_type = safe_get(data, "project_type", "project_type", default="Not specified")
+        status = safe_get(data, "status_info", "status", default="Unknown")
+
+        # Extract and format dates
+        scheduled_start = safe_get(data, "date_scheduled_start")
+        scheduled_end = safe_get(data, "date_scheduled_end")
+        date_sold = safe_get(data, "date_sold")
+
+        # Create human-readable scheduling status
+        if scheduled_start and scheduled_end:
+            scheduling_status = f"Scheduled from {scheduled_start} to {scheduled_end}"
+        elif scheduled_start:
+            scheduling_status = f"Scheduled for {scheduled_start}"
+        else:
+            scheduling_status = "Not yet scheduled"
+
+        # Extract store information
+        store_info = safe_get(data, "store_info", default={})
+        store_number = safe_get(store_info, "store_number", default="")
+        store_name = safe_get(store_info, "store_name", default="")
+        store_display = f"{store_name} (#{store_number})" if store_number and store_name else store_name or store_number or "Not specified"
+
+        # Extract service time
+        service_duration = safe_get(data, "service_time", "duration_value")
+        service_unit = safe_get(data, "service_time", "duration_type", default="hours")
+        service_time_display = f"{service_duration} {service_unit}" if service_duration else safe_get(data, "default_service_time", default="Not specified")
+
+        # Create a human-readable summary for the agent
+        summary = f"""Project #{safe_get(data, 'project_number', default='Unknown')} - {project_category} ({project_type})
+Status: {status}
+Customer: {customer_name}
+Installation Address: {full_address}
+Store: {store_display}
+{scheduling_status}
+Service Time: {service_time_display}"""
+
+        if date_sold:
+            summary += f"\nSold Date: {date_sold}"
+
+        # Return enhanced response
+        return {
+            "action": "get_project_details",
+            "project_id": safe_get(data, "project_id"),
+            "project_number": safe_get(data, "project_number"),
+            "client_id": safe_get(data, "client_id"),
+            "customer_id": safe_get(data, "customer_id"),
+
+            # Enhanced fields for better agent responses
+            "summary": summary,
+            "customer_name": customer_name,
+            "full_address": full_address,
+            "scheduling_status": scheduling_status,
+            "store_display": store_display,
+            "service_time_display": service_time_display,
+
+            # Original detailed fields
+            "category": project_category,
+            "type": project_type,
+            "status": status,
+            "status_id": safe_get(data, "status_id"),
+            "scheduled_start": scheduled_start,
+            "scheduled_end": scheduled_end,
+            "date_sold": date_sold,
+
+            # Nested objects with validation
+            "customer": {
+                "customer_id": safe_get(customer_info, "customerId"),
+                "first_name": customer_first,
+                "last_name": customer_last,
+                "full_name": customer_name,
+                "email": safe_get(customer_info, "email"),
+                "phone": safe_get(customer_info, "phone")
+            },
+            "installation_address": {
+                "address_id": safe_get(address_info, "address_id"),
+                "address1": address1,
+                "address2": address2,
+                "city": city,
+                "state": state,
+                "zipcode": zipcode,
+                "full_address": full_address
+            },
+            "store_info": {
+                "store_id": safe_get(store_info, "store_id"),
+                "store_number": store_number,
+                "store_name": store_name,
+                "display_name": store_display
+            },
+            "service_time": service_duration,
+            "service_time_unit": service_unit,
+            "default_service_time": safe_get(data, "default_service_time"),
+            "client_timezone": safe_get(data, "client_timezone"),
+
+            # Complete API response for complex queries
+            "full_data": data
+        }
+
+    except requests.HTTPError as e:
+        if e.response.status_code == 404:
+            raise ValueError(f"Project {project_id} not found")
+        elif e.response.status_code == 401:
+            raise ValueError("Authentication failed - invalid or expired token")
+        elif e.response.status_code == 403:
+            raise ValueError("Access denied - insufficient permissions for this project")
+        else:
+            logger.error(f"HTTP error fetching project details: {str(e)}")
+            raise ValueError(f"Failed to fetch project details: {e.response.status_code}")
+    except requests.RequestException as e:
+        logger.error(f"Request error fetching project details: {str(e)}")
+        raise ValueError(f"Unable to connect to project API: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in get_project_details: {str(e)}", exc_info=True)
+        raise
 
 def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
     """
