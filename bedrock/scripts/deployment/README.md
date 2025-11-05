@@ -22,7 +22,6 @@ That's it! This script will:
 | **dev_deploy.sh** | ✅ Automated deployment wrapper (recommended) |
 | **DEPLOYMENT_GUIDE.md** | 📖 Complete deployment documentation |
 | **README.md** | 📄 This file |
-| ~~DEPLOY.sh~~ | ❌ Old duplicate - DO NOT USE (use `../DEPLOY.sh` instead) |
 
 ## Actual Working Scripts
 

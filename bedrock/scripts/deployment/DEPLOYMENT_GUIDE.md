@@ -607,7 +607,6 @@ You may notice multiple DEPLOY.sh files in the repository. Here's the clarificat
 | **DEPLOY.sh** | `bedrock/scripts/DEPLOY.sh` | **Main deployment script** (1119 lines) - This is the working script you use | ✅ **YES** |
 | **dev_deploy.sh** | `bedrock/scripts/deployment/dev_deploy.sh` | **Wrapper script** - Runs DEPLOY.sh + SETUP_COLLABORATION.sh automatically | ✅ **YES (Recommended)** |
 | **SETUP_COLLABORATION.sh** | `bedrock/scripts/SETUP_COLLABORATION.sh` | Sets up agent collaboration after main deployment | ✅ **YES** |
-| **DEPLOY.sh** | `bedrock/scripts/deployment/DEPLOY.sh` | Old/duplicate copy (750 lines) - **NOT USED** | ❌ **NO** |
 
 **Recommended workflow for new deployments**:
 ```bash
