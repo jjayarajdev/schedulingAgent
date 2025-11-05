@@ -397,15 +397,19 @@ EOFPOLICY
 
     # Create or update Lambda function
     if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" &>/dev/null; then
-        echo "  → Updating existing Lambda function code..."
-        aws lambda update-function-code \
+        echo "  → Updating existing Lambda function code (this may take 1-2 minutes for large packages)..."
+        if aws lambda update-function-code \
             --function-name "$FUNCTION_NAME" \
             --zip-file fileb://function.zip \
-            --region "$REGION" \
-            &>/dev/null
+            --region "$REGION" 2>&1 | grep -v "FunctionArn\|CodeSize\|LastModified"; then
+            echo "  ✅ Lambda code updated: $FUNCTION_NAME"
+        else
+            echo "  ❌ Failed to update Lambda code: $FUNCTION_NAME"
+            return 1
+        fi
 
         echo "  → Updating Lambda environment variables..."
-        aws lambda update-function-configuration \
+        if aws lambda update-function-configuration \
             --function-name "$FUNCTION_NAME" \
             --environment "Variables={
                 BEARER_TOKEN=${PF_API_TOKEN:-},
@@ -418,8 +422,12 @@ EOFPOLICY
                 DEFAULT_CLIENT_ID=$CLIENT_ID,
                 LOG_LEVEL=INFO
             }" \
-            --region "$REGION" \
-            &>/dev/null
+            --region "$REGION" 2>&1 | grep -v "FunctionArn\|Runtime\|LastModified"; then
+            echo "  ✅ Lambda configuration updated: $FUNCTION_NAME"
+        else
+            echo "  ❌ Failed to update Lambda configuration: $FUNCTION_NAME"
+            return 1
+        fi
     else
         echo "  → Creating new Lambda function (this may take 1-2 minutes for large packages)..."
         if aws lambda create-function \
@@ -442,8 +450,7 @@ EOFPOLICY
                 DEFAULT_CLIENT_ID=$CLIENT_ID,
                 LOG_LEVEL=INFO
             }" \
-            --region "$REGION" \
-            &>/dev/null; then
+            --region "$REGION" 2>&1 | grep -v "FunctionArn\|CodeSize\|LastModified"; then
             echo "  ✅ Lambda function created: $FUNCTION_NAME"
         else
             echo "  ❌ Failed to create Lambda function: $FUNCTION_NAME"
