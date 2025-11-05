@@ -397,32 +397,80 @@ EOFPOLICY
 
     # Create or update Lambda function
     if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" &>/dev/null; then
-        echo "  → Updating existing Lambda function code..."
-        aws lambda update-function-code \
+        echo "  → Updating existing Lambda function code (this may take 1-2 minutes for large packages)..."
+        if aws lambda update-function-code \
             --function-name "$FUNCTION_NAME" \
             --zip-file fileb://function.zip \
-            --region "$REGION" \
-            &>/dev/null
+            --region "$REGION" 2>&1 | grep -v "FunctionArn\|CodeSize\|LastModified"; then
+            echo "  ✅ Lambda code updated: $FUNCTION_NAME"
+        else
+            echo "  ❌ Failed to update Lambda code: $FUNCTION_NAME"
+            return 1
+        fi
 
         echo "  → Updating Lambda environment variables..."
-        aws lambda update-function-configuration \
+        # Create environment variables JSON file using jq to properly escape special characters
+        jq -n \
+            --arg bearer_token "${PF_API_TOKEN:-}" \
+            --arg client_id "$CLIENT_ID" \
+            --arg user_id "${PF_USER_ID:-}" \
+            --arg api_base_url "https://api-cx-portal.dev.projectsforce.com" \
+            --arg use_mock_api "${USE_MOCK_API:-false}" \
+            --arg api_env "$ENV" \
+            --arg token_secret "projectforce/api/credentials" \
+            --arg default_client_id "$CLIENT_ID" \
+            --arg log_level "INFO" \
+            '{
+                Variables: {
+                    BEARER_TOKEN: $bearer_token,
+                    PF_CLIENT_ID: $client_id,
+                    PF_USER_ID: $user_id,
+                    PF_API_BASE_URL: $api_base_url,
+                    USE_MOCK_API: $use_mock_api,
+                    API_ENVIRONMENT: $api_env,
+                    TOKEN_SECRET_NAME: $token_secret,
+                    DEFAULT_CLIENT_ID: $default_client_id,
+                    LOG_LEVEL: $log_level
+                }
+            }' > /tmp/lambda-env.json
+        if aws lambda update-function-configuration \
             --function-name "$FUNCTION_NAME" \
-            --environment "Variables={
-                BEARER_TOKEN=${PF_API_TOKEN:-},
-                PF_CLIENT_ID=$CLIENT_ID,
-                PF_USER_ID=${PF_USER_ID:-},
-                PF_API_BASE_URL=https://api-cx-portal.dev.projectsforce.com,
-                USE_MOCK_API=${USE_MOCK_API:-false},
-                API_ENVIRONMENT=$ENV,
-                TOKEN_SECRET_NAME=projectforce/api/credentials,
-                DEFAULT_CLIENT_ID=$CLIENT_ID,
-                LOG_LEVEL=INFO
-            }" \
-            --region "$REGION" \
-            &>/dev/null
+            --environment file:///tmp/lambda-env.json \
+            --region "$REGION" 2>&1 | grep -v "FunctionArn\|Runtime\|LastModified"; then
+            echo "  ✅ Lambda configuration updated: $FUNCTION_NAME"
+        else
+            echo "  ❌ Failed to update Lambda configuration: $FUNCTION_NAME"
+            rm -f /tmp/lambda-env.json
+            return 1
+        fi
+        rm -f /tmp/lambda-env.json
     else
-        echo "  → Creating new Lambda function..."
-        aws lambda create-function \
+        echo "  → Creating new Lambda function (this may take 1-2 minutes for large packages)..."
+        # Create environment variables JSON file using jq to properly escape special characters
+        jq -n \
+            --arg bearer_token "${PF_API_TOKEN:-}" \
+            --arg client_id "$CLIENT_ID" \
+            --arg user_id "${PF_USER_ID:-}" \
+            --arg api_base_url "https://api-cx-portal.dev.projectsforce.com" \
+            --arg use_mock_api "${USE_MOCK_API:-false}" \
+            --arg api_env "$ENV" \
+            --arg token_secret "projectforce/api/credentials" \
+            --arg default_client_id "$CLIENT_ID" \
+            --arg log_level "INFO" \
+            '{
+                Variables: {
+                    BEARER_TOKEN: $bearer_token,
+                    PF_CLIENT_ID: $client_id,
+                    PF_USER_ID: $user_id,
+                    PF_API_BASE_URL: $api_base_url,
+                    USE_MOCK_API: $use_mock_api,
+                    API_ENVIRONMENT: $api_env,
+                    TOKEN_SECRET_NAME: $token_secret,
+                    DEFAULT_CLIENT_ID: $default_client_id,
+                    LOG_LEVEL: $log_level
+                }
+            }' > /tmp/lambda-env.json
+        if aws lambda create-function \
             --function-name "$FUNCTION_NAME" \
             --runtime "$RUNTIME" \
             --role "$ROLE_ARN" \
@@ -431,18 +479,15 @@ EOFPOLICY
             --timeout "$TIMEOUT" \
             --memory-size "$MEMORY" \
             --region "$REGION" \
-            --environment "Variables={
-                BEARER_TOKEN=${PF_API_TOKEN:-},
-                PF_CLIENT_ID=$CLIENT_ID,
-                PF_USER_ID=${PF_USER_ID:-},
-                PF_API_BASE_URL=https://api-cx-portal.dev.projectsforce.com,
-                USE_MOCK_API=${USE_MOCK_API:-false},
-                API_ENVIRONMENT=$ENV,
-                TOKEN_SECRET_NAME=projectforce/api/credentials,
-                DEFAULT_CLIENT_ID=$CLIENT_ID,
-                LOG_LEVEL=INFO
-            }" \
-            &>/dev/null
+            --environment file:///tmp/lambda-env.json \
+            --region "$REGION" 2>&1 | grep -v "FunctionArn\|CodeSize\|LastModified"; then
+            echo "  ✅ Lambda function created: $FUNCTION_NAME"
+            rm -f /tmp/lambda-env.json
+        else
+            echo "  ❌ Failed to create Lambda function: $FUNCTION_NAME"
+            rm -f /tmp/lambda-env.json
+            return 1
+        fi
     fi
 
     # Add resource-based policy for Bedrock
