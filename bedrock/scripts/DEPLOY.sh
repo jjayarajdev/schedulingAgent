@@ -837,6 +837,14 @@ SCHEDULING_SCHEMA='{
       }
     },
     {
+      "name": "get_project_details",
+      "description": "Get detailed information about a specific project including customer details, installation address, and status",
+      "parameters": {
+        "project_id": {"description": "Project ID", "required": true, "type": "string"},
+        "client_id": {"description": "Client identifier (e.g., 09PF05VD)", "required": false, "type": "string"}
+      }
+    },
+    {
       "name": "get_available_dates",
       "description": "Get available dates for scheduling a project",
       "parameters": {
@@ -884,13 +892,6 @@ SCHEDULING_SCHEMA='{
 
 INFORMATION_SCHEMA='{
   "functions": [
-    {
-      "name": "get_project_details",
-      "description": "Get detailed information about a specific project",
-      "parameters": {
-        "project_id": {"description": "Project ID", "required": true, "type": "string"}
-      }
-    },
     {
       "name": "get_appointment_status",
       "description": "Check the status of an appointment",

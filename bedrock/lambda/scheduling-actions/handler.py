@@ -225,6 +225,70 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
         "mock_mode": USE_MOCK_API
     }
 
+def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
+    """
+    Action: get_project_details
+    Returns detailed information for a specific project
+    """
+    project_id = params.get('project_id')
+    client_id = params.get('client_id', 'default')
+
+    if not project_id:
+        raise ValueError("Missing required parameter: project_id")
+
+    logger.info(f"[REAL] Fetching project details for project {project_id}, client {client_id}")
+
+    # New CX Portal API format: /dashboard/find-one-project/{CLIENT_ID}/{PROJECT_ID}
+    url = f"{config['base_url']}/dashboard/find-one-project/{client_id}/{project_id}"
+    logger.info(f"Making API request to: {url}")
+
+    res = requests.get(url, headers=auth_headers, timeout=30)
+    res.raise_for_status()
+    response = res.json()
+
+    data = response.get("data", {})
+
+    # Extract and format project details with nested objects preserved
+    return {
+        "action": "get_project_details",
+        "project_id": data.get("project_id"),
+        "project_number": data.get("project_number"),
+        "client_id": data.get("client_id"),
+        "customer_id": data.get("customer_id"),
+        "category": data.get("project_category", {}).get("category"),
+        "type": data.get("project_type", {}).get("project_type"),
+        "status": data.get("status_info", {}).get("status"),
+        "status_id": data.get("status_id"),
+        "scheduled_start": data.get("date_scheduled_start"),
+        "scheduled_end": data.get("date_scheduled_end"),
+        "date_sold": data.get("date_sold"),
+        "customer": {
+            "customer_id": data.get("customer", {}).get("customerId"),
+            "first_name": data.get("customer", {}).get("firstName"),
+            "last_name": data.get("customer", {}).get("lastName"),
+            "email": data.get("customer", {}).get("email"),
+            "phone": data.get("customer", {}).get("phone")
+        },
+        "installation_address": {
+            "address_id": data.get("installation_address", {}).get("address_id"),
+            "address1": data.get("installation_address", {}).get("address1"),
+            "address2": data.get("installation_address", {}).get("address2"),
+            "city": data.get("installation_address", {}).get("city"),
+            "state": data.get("installation_address", {}).get("state"),
+            "zipcode": data.get("installation_address", {}).get("zipcode"),
+            "full_address": f"{data.get('installation_address', {}).get('address1', '')}, {data.get('installation_address', {}).get('city', '')}, {data.get('installation_address', {}).get('state', '')} {data.get('installation_address', {}).get('zipcode', '')}"
+        },
+        "store_info": {
+            "store_id": data.get("store_info", {}).get("store_id"),
+            "store_number": data.get("store_info", {}).get("store_number"),
+            "store_name": data.get("store_info", {}).get("store_name")
+        },
+        "service_time": data.get("service_time", {}).get("duration_value"),
+        "default_service_time": data.get("default_service_time"),
+        "client_timezone": data.get("client_timezone"),
+        "full_data": data  # Complete API response for complex queries
+    }
+
 def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
     """
     Action: get_available_dates
@@ -497,6 +561,7 @@ def lambda_handler(event, context):
         # Route to appropriate handler
         handlers = {
             'list-projects': handle_list_projects,
+            'get-project-details': handle_get_project_details,
             'get-available-dates': handle_get_available_dates,
             'get-time-slots': handle_get_time_slots,
             'confirm-appointment': handle_confirm_appointment,
