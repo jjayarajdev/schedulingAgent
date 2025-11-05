@@ -237,22 +237,36 @@ def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -
     if not project_id:
         raise ValueError("Missing required parameter: project_id")
 
-    logger.info(f"[REAL] Fetching project details for project {project_id}, client {client_id}")
+    # Get customer_id from session attributes if available
+    customer_id = params.get('customer_id')
+    if not customer_id:
+        logger.warning("customer_id not provided in parameters, this may cause issues")
+
+    logger.info(f"[REAL] Fetching project details for project {project_id}, client {client_id}, customer {customer_id}")
 
     try:
-        # New CX Portal API format: /dashboard/find-one-project/{CLIENT_ID}/{PROJECT_ID}
-        url = f"{config['base_url']}/dashboard/find-one-project/{client_id}/{project_id}"
+        # Use the same endpoint as list_projects, then filter for the specific project
+        # This approach is more reliable since we know /dashboard/get works
+        url = f"{config['base_url']}/dashboard/get/{client_id}/{customer_id}"
         logger.info(f"Making API request to: {url}")
 
         res = requests.get(url, headers=auth_headers, timeout=30)
         res.raise_for_status()
         response = res.json()
 
-        data = response.get("data", {})
+        # Extract the projects array
+        projects = response.get("data", {}).get("records", [])
 
-        # Validate we got data back
-        if not data or not data.get("project_id"):
-            raise ValueError(f"Project {project_id} not found or no data returned from API")
+        # Find the specific project by project_id
+        data = None
+        for project in projects:
+            if str(project.get("project_id")) == str(project_id):
+                data = project
+                break
+
+        # Validate we found the project
+        if not data:
+            raise ValueError(f"Project {project_id} not found in the customer's project list")
 
         # Helper function to safely get nested values
         def safe_get(obj, *keys, default=None):
