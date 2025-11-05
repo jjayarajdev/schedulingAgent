@@ -547,6 +547,43 @@
             }
         }
 
+        function formatAgentResponse(content) {
+            // Convert markdown-style lists to HTML lists
+            let formatted = content;
+
+            // Convert bullet lists (- Item)
+            formatted = formatted.replace(/^- (.+)$/gm, '<li>$1</li>');
+            formatted = formatted.replace(/(<li>.*<\/li>\s*)+/g, '<ul style="margin: 10px 0; padding-left: 25px;">$&</ul>');
+
+            // Convert numbered lists (1. Item, 2. Item, etc.)
+            formatted = formatted.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
+
+            // Bold text with **text** or __text__
+            formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            formatted = formatted.replace(/__(.+?)__/g, '<strong>$1</strong>');
+
+            // Italic text with *text* or _text_
+            formatted = formatted.replace(/\*(.+?)\*/g, '<em>$1</em>');
+            formatted = formatted.replace(/_(.+?)_/g, '<em>$1</em>');
+
+            // Code blocks with `code`
+            formatted = formatted.replace(/`([^`]+)`/g, '<code style="background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: monospace; font-size: 0.9em;">$1</code>');
+
+            // Convert line breaks to <br>
+            formatted = formatted.replace(/\n/g, '<br>');
+
+            // Highlight project IDs (7-8 digits)
+            formatted = formatted.replace(/\b(\d{7,8})\b/g, '<span style="background: #e8f4fd; padding: 2px 6px; border-radius: 3px; font-family: monospace; color: #0066cc; font-weight: 600;">$1</span>');
+
+            // Highlight dates (YYYY-MM-DD)
+            formatted = formatted.replace(/\b(\d{4}-\d{2}-\d{2})\b/g, '<span style="background: #fff3cd; padding: 2px 6px; border-radius: 3px; font-family: monospace;">$1</span>');
+
+            // Highlight times (HH:MM)
+            formatted = formatted.replace(/\b(\d{1,2}:\d{2}\s?(?:AM|PM|am|pm)?)\b/g, '<span style="background: #d4edda; padding: 2px 6px; border-radius: 3px; font-family: monospace;">$1</span>');
+
+            return formatted;
+        }
+
         function addChatMessage(type, content, agentName = null) {
             const chatMessages = document.getElementById('chat-messages');
 
@@ -557,29 +594,30 @@
             }
 
             const messageDiv = document.createElement('div');
-            messageDiv.style.marginBottom = '15px';
+            messageDiv.style.marginBottom = '20px';
             messageDiv.style.animation = 'slideIn 0.3s ease-out';
 
             if (type === 'user') {
                 messageDiv.style.textAlign = 'right';
                 messageDiv.innerHTML = `
-                    <div style="display: inline-block; max-width: 70%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 18px; border-radius: 18px; text-align: left;">
-                        ${content}
+                    <div style="display: inline-block; max-width: 75%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 20px; border-radius: 18px 18px 4px 18px; text-align: left; box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);">
+                        <div style="font-size: 1em; line-height: 1.5;">${content}</div>
                     </div>
-                    <div style="font-size: 0.8em; color: #999; margin-top: 5px;">${new Date().toLocaleTimeString()}</div>
+                    <div style="font-size: 0.75em; color: #999; margin-top: 5px; margin-right: 5px;">${new Date().toLocaleTimeString()}</div>
                 `;
             } else if (type === 'agent') {
+                const formattedContent = formatAgentResponse(content);
                 messageDiv.innerHTML = `
-                    <div style="display: inline-block; max-width: 70%; background: white; border: 2px solid #e0e0e0; padding: 12px 18px; border-radius: 18px;">
-                        ${agentName ? `<div style="font-weight: 600; color: #667eea; margin-bottom: 5px; font-size: 0.9em;">🤖 ${agentName}</div>` : ''}
-                        <div style="white-space: pre-wrap;">${content}</div>
+                    <div style="display: inline-block; max-width: 80%; background: white; border: 2px solid #e0e0e0; padding: 18px 22px; border-radius: 18px 18px 18px 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                        ${agentName ? `<div style="font-weight: 600; color: #667eea; margin-bottom: 10px; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">🤖 ${agentName}</div>` : ''}
+                        <div style="color: #333; line-height: 1.7; font-size: 0.95em;">${formattedContent}</div>
                     </div>
-                    <div style="font-size: 0.8em; color: #999; margin-top: 5px;">${new Date().toLocaleTimeString()}</div>
+                    <div style="font-size: 0.75em; color: #999; margin-top: 5px; margin-left: 5px;">${new Date().toLocaleTimeString()}</div>
                 `;
             } else if (type === 'error') {
                 messageDiv.innerHTML = `
-                    <div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 12px 18px; border-radius: 8px;">
-                        ⚠️ ${content}
+                    <div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(220, 53, 69, 0.1);">
+                        ⚠️ <strong>Error:</strong> ${content}
                     </div>
                 `;
             }
