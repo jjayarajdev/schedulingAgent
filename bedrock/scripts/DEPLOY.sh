@@ -830,18 +830,18 @@ SCHEDULING_SCHEMA='{
   "functions": [
     {
       "name": "list_projects",
-      "description": "Get all projects for a customer. For B2B customers, can optionally filter by client_id.",
+      "description": "List ALL projects for the current user. Use ONLY when user asks to see all projects, show projects list, or list projects. DO NOT use for getting details of a single specific project. The customer_id will be automatically retrieved from the session context.",
       "parameters": {
-        "customer_id": {"description": "Customer ID", "required": true, "type": "string"},
-        "client_id": {"description": "Optional client ID for B2B filtering", "required": false, "type": "string"}
+        "customer_id": {"description": "Customer ID (automatically provided from session context - do not specify)", "required": false, "type": "string"},
+        "client_id": {"description": "Optional client ID for B2B filtering (automatically provided from session context)", "required": false, "type": "string"}
       }
     },
     {
       "name": "get_project_details",
-      "description": "Get detailed information about a specific project including customer details, installation address, and status",
+      "description": "Get DETAILED information about ONE specific project when user provides a project ID. Returns customer name, full address, status, scheduling info. Use when user says: details of project, information about project, show project, tell me about project. ALWAYS use this for single project lookups with project ID.",
       "parameters": {
         "project_id": {"description": "Project ID", "required": true, "type": "string"},
-        "client_id": {"description": "Client identifier (e.g., 09PF05VD)", "required": false, "type": "string"}
+        "client_id": {"description": "Client identifier (automatically provided from session context)", "required": false, "type": "string"}
       }
     },
     {
