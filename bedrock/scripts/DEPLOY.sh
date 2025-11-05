@@ -421,8 +421,8 @@ EOFPOLICY
             --region "$REGION" \
             &>/dev/null
     else
-        echo "  → Creating new Lambda function..."
-        aws lambda create-function \
+        echo "  → Creating new Lambda function (this may take 1-2 minutes for large packages)..."
+        if aws lambda create-function \
             --function-name "$FUNCTION_NAME" \
             --runtime "$RUNTIME" \
             --role "$ROLE_ARN" \
@@ -442,7 +442,13 @@ EOFPOLICY
                 DEFAULT_CLIENT_ID=$CLIENT_ID,
                 LOG_LEVEL=INFO
             }" \
-            &>/dev/null
+            --region "$REGION" \
+            &>/dev/null; then
+            echo "  ✅ Lambda function created: $FUNCTION_NAME"
+        else
+            echo "  ❌ Failed to create Lambda function: $FUNCTION_NAME"
+            return 1
+        fi
     fi
 
     # Add resource-based policy for Bedrock
