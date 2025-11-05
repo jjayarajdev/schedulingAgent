@@ -13,7 +13,27 @@ This guide documents the **proven deployment workflow** for the ProjectForce 4-a
 
 ## Quick Start (TL;DR)
 
-For a new environment, run these 3 commands:
+For a new environment, you have **two options**:
+
+### Option 1: Automated (Recommended)
+
+Run the single automated deployment script:
+
+```bash
+cd /Users/jjayaraj/workspaces/studios/projectsforce/schedulingAgent-bb/bedrock/scripts/deployment
+./dev_deploy.sh
+```
+
+This script:
+- Runs `DEPLOY.sh` (creates infrastructure and agents)
+- Runs `SETUP_COLLABORATION.sh` (configures agent collaboration)
+- Provides next steps for testing
+
+**Total time**: ~15 minutes
+
+### Option 2: Manual Step-by-Step
+
+Run the scripts individually if you need more control:
 
 ```bash
 # 1. Deploy everything
@@ -25,7 +45,7 @@ cd /Users/jjayaraj/workspaces/studios/projectsforce/schedulingAgent-bb/bedrock/s
 
 # 3. Test with UI
 cd ../testing/ui
-open test_ui.html
+./launch_auth_demo.sh
 ```
 
 **Total time**: ~20 minutes (including manual alias creation)
@@ -573,6 +593,45 @@ aws bedrock-agent prepare-agent \
 ### Update Action Group Schema
 
 Use the `/tmp/update_scheduling_action_group.sh` script (modify function descriptions, then run it).
+
+---
+
+## File Organization & Clarification
+
+### Deployment Scripts Explained
+
+You may notice multiple DEPLOY.sh files in the repository. Here's the clarification:
+
+| File | Location | Purpose | Use This? |
+|------|----------|---------|-----------|
+| **DEPLOY.sh** | `bedrock/scripts/DEPLOY.sh` | **Main deployment script** (1119 lines) - This is the working script you use | ✅ **YES** |
+| **dev_deploy.sh** | `bedrock/scripts/deployment/dev_deploy.sh` | **Wrapper script** - Runs DEPLOY.sh + SETUP_COLLABORATION.sh automatically | ✅ **YES (Recommended)** |
+| **SETUP_COLLABORATION.sh** | `bedrock/scripts/SETUP_COLLABORATION.sh` | Sets up agent collaboration after main deployment | ✅ **YES** |
+| **DEPLOY.sh** | `bedrock/scripts/deployment/DEPLOY.sh` | Old/duplicate copy (750 lines) - **NOT USED** | ❌ **NO** |
+
+**Recommended workflow for new deployments**:
+```bash
+cd bedrock/scripts/deployment
+./dev_deploy.sh  # This runs everything in the right order
+```
+
+**For manual control**:
+```bash
+cd bedrock/scripts
+./DEPLOY.sh                    # Step 1: Deploy infrastructure and agents
+./SETUP_COLLABORATION.sh       # Step 2: Configure collaboration
+```
+
+### What Terraform Does
+
+The main `DEPLOY.sh` script uses Terraform for **infrastructure foundation only**:
+
+- **Terraform creates**: DynamoDB tables, IAM roles/policies, S3 buckets (rarely change)
+- **Bash scripts create**: Bedrock agents, aliases, collaborations, action groups (frequently updated)
+
+This hybrid approach gives you:
+- State management and drift detection for infrastructure
+- Flexibility and speed for agent configuration updates
 
 ---
 

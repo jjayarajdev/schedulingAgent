@@ -316,7 +316,7 @@ deploy_terraform() {
 
     log "Deploying Terraform infrastructure..."
 
-    cd infrastructure/terraform
+    cd ../../infrastructure/terraform
 
     # Initialize Terraform
     if [ ! -d ".terraform" ]; then
