@@ -210,7 +210,33 @@ echo ""
 aws bedrock-agent prepare-agent \
     --agent-id "$SUPERVISOR_AGENT_ID" \
     --region "$REGION" \
-    &>/dev/null && echo -e "  ${GREEN}✅ Supervisor prepared with collaborators${NC}" || echo -e "  ${RED}❌ Failed to prepare Supervisor${NC}"
+    &>/dev/null && echo -e "  ${GREEN}✅ Supervisor prepare initiated${NC}" || echo -e "  ${RED}❌ Failed to prepare Supervisor${NC}"
+
+# Wait for agent to be ready before verification
+echo -e "  ${YELLOW}→ Waiting for agent to be ready...${NC}"
+MAX_WAIT=60
+WAIT_TIME=0
+while [ $WAIT_TIME -lt $MAX_WAIT ]; do
+    AGENT_STATUS=$(aws bedrock-agent get-agent \
+        --agent-id "$SUPERVISOR_AGENT_ID" \
+        --region "$REGION" \
+        --query 'agent.agentStatus' \
+        --output text 2>/dev/null)
+
+    if [ "$AGENT_STATUS" = "PREPARED" ] || [ "$AGENT_STATUS" = "NOT_PREPARED" ]; then
+        echo -e "  ${GREEN}✅ Agent is ready (status: $AGENT_STATUS)${NC}"
+        break
+    fi
+
+    sleep 3
+    WAIT_TIME=$((WAIT_TIME + 3))
+    echo -n "."
+done
+echo ""
+
+if [ $WAIT_TIME -ge $MAX_WAIT ]; then
+    echo -e "  ${YELLOW}⚠️  Timeout waiting for agent, proceeding anyway...${NC}"
+fi
 
 echo ""
 
