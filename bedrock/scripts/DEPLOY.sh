@@ -408,6 +408,35 @@ EOFPOLICY
             return 1
         fi
 
+        echo "  → Waiting for Lambda update to complete..."
+        # Wait for the function to be in Active state before updating configuration
+        local max_wait=120  # Maximum 2 minutes
+        local wait_time=0
+        while [ $wait_time -lt $max_wait ]; do
+            STATUS=$(aws lambda get-function \
+                --function-name "$FUNCTION_NAME" \
+                --region "$REGION" \
+                --query 'Configuration.LastUpdateStatus' \
+                --output text 2>/dev/null)
+
+            if [ "$STATUS" = "Successful" ]; then
+                echo "  ✅ Lambda function is ready"
+                break
+            elif [ "$STATUS" = "Failed" ]; then
+                echo "  ❌ Lambda update failed"
+                return 1
+            fi
+
+            sleep 3
+            wait_time=$((wait_time + 3))
+            echo -n "."
+        done
+        echo ""
+
+        if [ $wait_time -ge $max_wait ]; then
+            echo "  ⚠️  Timeout waiting for Lambda update, attempting configuration update anyway..."
+        fi
+
         echo "  → Updating Lambda environment variables..."
         # Create environment variables JSON file using jq to properly escape special characters
         jq -n \
