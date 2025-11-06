@@ -1,22 +1,22 @@
 {
   "agents": {
     "SchedulingAgent": {
-      "id": "3L0QABDNOR",
+      "id": "0PD0ZMG6UQ",
       "name": "SchedulingAgent",
       "purpose": "Scheduling and project management"
     },
     "pf-information": {
-      "id": "ZNRHW6QAAN",
+      "id": "LTMK3FTWRC",
       "name": "pf-information",
       "purpose": "Weather information"
     },
     "pf-chitchat": {
-      "id": "4CEB7QKGSR",
+      "id": "T1OIHI7WL0",
       "name": "pf-chitchat",
       "purpose": "Conversational"
     },
     "Supervisor": {
-      "id": "76VIQYAT6R",
+      "id": "2MKPZHYTNX",
       "name": "Supervisor",
       "purpose": "Query routing"
     }
@@ -25,7 +25,7 @@
     "pf-scheduling-actions": "arn:aws:lambda:us-east-1:618048437522:function:pf-scheduling-actions",
     "pf-information-actions": "arn:aws:lambda:us-east-1:618048437522:function:pf-information-actions"
   },
-  "deployed_at": "2025-11-06T12:53:55Z",
+  "deployed_at": "2025-11-06T14:14:00Z",
   "region": "us-east-1",
   "account_id": "618048437522"
 }

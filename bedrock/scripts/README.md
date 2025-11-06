@@ -351,6 +351,77 @@ backend/
 
 ---
 
+## 🆕 NEW: AWS Resources Inventory (November 2025)
+
+### generate_aws_inventory.sh ⭐
+**Purpose:** Generate comprehensive inventory of all AWS resources for the project
+
+**What it does:**
+1. Gathers all Bedrock agents with detailed configuration
+2. Lists all Lambda functions with environment variables
+3. Inventories IAM roles and their attached/inline policies
+4. Lists DynamoDB tables, S3 buckets, CloudWatch log groups
+5. Generates detailed markdown documentation
+6. Includes cost estimates and security recommendations
+
+**Usage:**
+```bash
+# Generate inventory to default location (../AWS_RESOURCES_INVENTORY.md)
+./generate_aws_inventory.sh
+
+# Generate inventory to custom location
+./generate_aws_inventory.sh /path/to/output.md
+```
+
+**Output includes:**
+- Complete resource inventory with IDs and configurations
+- Agent collaboration flow diagrams
+- Estimated monthly AWS costs
+- Security considerations and recommendations
+- Maintenance commands and best practices
+- Cleanup candidates for cost optimization
+
+**Example output:**
+```
+========================================
+AWS Resources Inventory Generator
+========================================
+
+Gathering AWS account information...
+  Account ID: 618048437522
+  User: arn:aws:iam::618048437522:user/pfuser
+  Region: us-east-1
+
+Gathering Bedrock Agents...
+  Found 4 agents
+Gathering Lambda Functions...
+  Found 5 Lambda functions
+...
+
+✅ Inventory generated successfully!
+
+Summary:
+  - Bedrock Agents: 4
+  - Lambda Functions: 5
+  - IAM Roles: 13
+  - DynamoDB Tables: 1
+  - S3 Buckets: 1
+  - CloudWatch Log Groups: 7
+
+Total AWS Resources: 31
+```
+
+**When to use:**
+- Documenting current infrastructure
+- Audit and compliance reviews
+- Cost optimization planning
+- Onboarding new team members
+- Before major infrastructure changes
+
+**Time:** ~30 seconds
+
+---
+
 **Last Updated:** 2025-11-06
 **Status:** All scripts tested and working ✅
-**New Scripts:** ✅ update_agent_configs.sh, ✅ test_agent_flow.py
+**New Scripts:** ✅ update_agent_configs.sh, ✅ test_agent_flow.py, ✅ generate_aws_inventory.sh
