@@ -551,9 +551,12 @@ create_bedrock_agent() {
     local AGENT_NAME=$1
     local DESCRIPTION=$2
     local INSTRUCTION=$3
-    # Use Claude 3 Haiku (March 2024) - works without inference profile
-    local MODEL_ID="anthropic.claude-3-haiku-20240307-v1:0"
-
+    # Use Amazon Nova Lite - works without marketplace subscription or payment method
+    # Claude models require INVALID_PAYMENT_INSTRUMENT (payment method setup)
+    # local MODEL_ID="anthropic.claude-3-haiku-20240307-v1:0"
+    local MODEL_ID="us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+    # local MODEL_ID="amazon.nova-lite-v1:0"
+    
     echo "" >&2
     echo "Creating agent: $AGENT_NAME" >&2
 
@@ -609,7 +612,8 @@ EOF
         "arn:aws:bedrock:${REGION}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
         "arn:aws:bedrock:*::foundation-model/*",
         "arn:aws:bedrock:${REGION}::inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
-        "arn:aws:bedrock:*::inference-profile/*"
+        "arn:aws:bedrock:*::inference-profile/*",
+        "arn:aws:bedrock:${REGION}:${ACCOUNT_ID}:inference-profile/*"
       ]
     },
     {
@@ -620,6 +624,14 @@ EOF
         "bedrock:GetFoundationModel",
         "bedrock:GetInferenceProfile",
         "bedrock:ListInferenceProfiles"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AWSMarketplaceAccess",
+      "Effect": "Allow",
+      "Action": [
+        "aws-marketplace:ViewSubscriptions"
       ],
       "Resource": "*"
     },
@@ -667,7 +679,8 @@ EOF
         "arn:aws:bedrock:${REGION}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
         "arn:aws:bedrock:*::foundation-model/*",
         "arn:aws:bedrock:${REGION}::inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
-        "arn:aws:bedrock:*::inference-profile/*"
+        "arn:aws:bedrock:*::inference-profile/*",
+        "arn:aws:bedrock:${REGION}:${ACCOUNT_ID}:inference-profile/*"
       ]
     },
     {
@@ -678,6 +691,14 @@ EOF
         "bedrock:GetFoundationModel",
         "bedrock:GetInferenceProfile",
         "bedrock:ListInferenceProfiles"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AWSMarketplaceAccess",
+      "Effect": "Allow",
+      "Action": [
+        "aws-marketplace:ViewSubscriptions"
       ],
       "Resource": "*"
     },

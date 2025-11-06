@@ -1,18 +1,18 @@
 {
   "environment": "dev",
-  "supervisor_id": "2ISTTH2SMI",
+  "supervisor_id": "76VIQYAT6R",
   "supervisor_alias": "TSTALIASID",
   "agents": {
     "scheduling": {
-      "agent_id": "INJAT6DHEJ",
-      "alias_id": "F2MUR5HDGE"
+      "agent_id": "3L0QABDNOR",
+      "alias_id": "TSTALIASID"
     },
     "information": {
-      "agent_id": "BGPHWLGRC8",
+      "agent_id": "ZNRHW6QAAN",
       "alias_id": "TSTALIASID"
     },
     "chitchat": {
-      "agent_id": "CP9PMY5EF8",
+      "agent_id": "4CEB7QKGSR",
       "alias_id": "TSTALIASID"
     }
   },
