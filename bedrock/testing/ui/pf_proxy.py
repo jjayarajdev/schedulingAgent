@@ -8,6 +8,9 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
 import logging
+import json
+import os
+from pathlib import Path
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -18,6 +21,40 @@ logger = logging.getLogger(__name__)
 
 # ProjectForce API base URL
 PF_API_BASE = "https://api-cx-portal.dev.projectsforce.com"
+
+# Load agent configuration dynamically
+def load_agent_config():
+    """Load agent configuration from config/agent_config.dev.json"""
+    # Try multiple possible paths (from testing/ui to bedrock/config)
+    possible_paths = [
+        Path(__file__).parent / "../../config/agent_config.dev.json",               # bedrock/testing/ui -> bedrock/config
+        Path(__file__).resolve().parent.parent.parent / "config" / "agent_config.dev.json",  # Absolute path
+        Path(__file__).parent.parent / "config" / "agent_config.dev.json",          # Alternative
+    ]
+
+    for config_path in possible_paths:
+        try:
+            resolved_path = config_path.resolve()
+            if resolved_path.exists():
+                logger.info(f"✅ Loading agent config from: {resolved_path}")
+                with open(resolved_path, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.debug(f"Could not load from {config_path}: {e}")
+            continue
+
+    # Fallback to hardcoded values if config not found
+    logger.warning("⚠️  Could not find agent_config.dev.json, using hardcoded values")
+    logger.warning(f"⚠️  Tried paths: {[str(p) for p in possible_paths]}")
+    return {
+        "supervisor_id": "76VIQYAT6R",
+        "supervisor_alias": "TSTALIASID"
+    }
+
+# Load configuration at startup
+AGENT_CONFIG = load_agent_config()
+logger.info(f"📋 Loaded Supervisor Agent: {AGENT_CONFIG.get('supervisor_id')}")
+logger.info(f"📋 Loaded Supervisor Alias: {AGENT_CONFIG.get('supervisor_alias')}")
 
 
 @app.route('/health', methods=['GET'])
@@ -123,13 +160,16 @@ def invoke_agent():
         # Initialize Bedrock client
         bedrock_client = boto3.client('bedrock-agent-runtime', region_name='us-east-1')
 
-        # Get Supervisor agent ID from config or environment
-        SUPERVISOR_AGENT_ID = 'WWBMPFWMNG'  # Your Supervisor agent ID
+        # Get Supervisor agent ID and alias from config
+        SUPERVISOR_AGENT_ID = AGENT_CONFIG.get('supervisor_id')
+        SUPERVISOR_ALIAS_ID = AGENT_CONFIG.get('supervisor_alias')
+
+        logger.info(f"Using Supervisor Agent: {SUPERVISOR_AGENT_ID} (Alias: {SUPERVISOR_ALIAS_ID})")
 
         # Invoke the Supervisor agent
         response = bedrock_client.invoke_agent(
             agentId=SUPERVISOR_AGENT_ID,
-            agentAliasId='TSTALIASID',
+            agentAliasId=SUPERVISOR_ALIAS_ID,
             sessionId=session_id,
             inputText=message,
             sessionState={

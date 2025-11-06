@@ -1102,6 +1102,12 @@ EOF
 
 echo "  ✅ Agent IDs saved to: $BEDROCK_DIR/config/agent_ids.json"
 
+# Update environment-specific agent configurations
+echo ""
+echo "📝 Updating agent configuration files..."
+"$SCRIPT_DIR/update_agent_configs.sh" 2>&1 | grep -E "(✅|📂|💡)" || true
+echo ""
+
 ##############################################################################
 # Summary
 ##############################################################################
