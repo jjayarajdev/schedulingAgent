@@ -156,10 +156,50 @@ echo "  ChitchatAgent:    $CHITCHAT_ARN"
 echo ""
 
 ###############################################################################
-# Step 3: Associate Collaborators with Supervisor
+# Step 3: Enable Collaboration on Supervisor Agent
 ###############################################################################
 
-echo -e "${BLUE}Step 3: Associating Collaborators with Supervisor${NC}"
+echo -e "${BLUE}Step 3: Enabling Collaboration on Supervisor Agent${NC}"
+echo ""
+
+# Check current collaboration status
+CURRENT_COLLAB=$(aws bedrock-agent get-agent \
+    --agent-id "$SUPERVISOR_AGENT_ID" \
+    --region "$REGION" \
+    --query 'agent.agentCollaboration' \
+    --output text 2>/dev/null)
+
+echo "  Current collaboration mode: $CURRENT_COLLAB"
+
+if [ "$CURRENT_COLLAB" != "SUPERVISOR" ]; then
+    echo "  → Enabling SUPERVISOR collaboration mode..."
+
+    # Get current agent details
+    AGENT_ROLE=$(aws bedrock-agent get-agent --agent-id "$SUPERVISOR_AGENT_ID" --region "$REGION" --query 'agent.agentResourceRoleArn' --output text)
+    AGENT_MODEL=$(aws bedrock-agent get-agent --agent-id "$SUPERVISOR_AGENT_ID" --region "$REGION" --query 'agent.foundationModel' --output text)
+    AGENT_INSTRUCTION=$(aws bedrock-agent get-agent --agent-id "$SUPERVISOR_AGENT_ID" --region "$REGION" --query 'agent.instruction' --output text)
+
+    # Update agent to enable collaboration
+    aws bedrock-agent update-agent \
+        --agent-id "$SUPERVISOR_AGENT_ID" \
+        --agent-name "Supervisor" \
+        --agent-resource-role-arn "$AGENT_ROLE" \
+        --foundation-model "$AGENT_MODEL" \
+        --instruction "$AGENT_INSTRUCTION" \
+        --agent-collaboration "SUPERVISOR" \
+        --region "$REGION" \
+        &>/dev/null && echo -e "  ${GREEN}✅ Collaboration enabled${NC}" || echo -e "  ${RED}❌ Failed to enable collaboration${NC}"
+else
+    echo -e "  ${GREEN}✅ Collaboration already enabled${NC}"
+fi
+
+echo ""
+
+###############################################################################
+# Step 4: Associate Collaborators with Supervisor
+###############################################################################
+
+echo -e "${BLUE}Step 4: Associating Collaborators with Supervisor${NC}"
 echo ""
 
 # Associate SchedulingAgent
@@ -201,10 +241,10 @@ aws bedrock-agent associate-agent-collaborator \
 echo ""
 
 ###############################################################################
-# Step 4: Prepare Supervisor
+# Step 5: Prepare Supervisor
 ###############################################################################
 
-echo -e "${BLUE}Step 4: Preparing Supervisor Agent${NC}"
+echo -e "${BLUE}Step 5: Preparing Supervisor Agent${NC}"
 echo ""
 
 aws bedrock-agent prepare-agent \
@@ -241,10 +281,10 @@ fi
 echo ""
 
 ###############################################################################
-# Step 5: Verify Collaboration
+# Step 6: Verify Collaboration
 ###############################################################################
 
-echo -e "${BLUE}Step 5: Verifying Collaboration${NC}"
+echo -e "${BLUE}Step 6: Verifying Collaboration${NC}"
 echo ""
 
 COLLABORATORS=$(aws bedrock-agent list-agent-collaborators \
