@@ -66,8 +66,8 @@ def get_api_config(client_id: str = None, env: str = None) -> Dict[str, str]:
 
     return {
         "base_url": base_url,
-        "dashboard_url": f"{base_url}/cx-scheduled/projects",
-        "business_hours_url": f"{base_url}/system/client-details",
+        "dashboard_url": f"{base_url}/dashboard/get",  # Matches HAR file and scheduling Lambda
+        "business_hours_url": f"{base_url}/scheduler/client/{client_id}/business-hours",  # Matches HAR file
         "weather_url": WEATHER_API_URL,
         "environment": env,
         "use_mock": USE_MOCK_API
@@ -115,5 +115,5 @@ def get_auth_headers(authorization: str = None, client_id: str = None) -> Dict[s
     return {
         "Authorization": authorization,
         "Content-Type": "application/json",
-        "Client_Id": client_id
+        "client_id": client_id  # Lowercase to match real portal headers
     }

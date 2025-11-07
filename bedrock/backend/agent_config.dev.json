@@ -1,1 +1,39 @@
-../config/agent_config.dev.json
+{
+  "environment": "dev",
+  "supervisor_id": "2MKPZHYTNX",
+  "supervisor_alias": "TSTALIASID",
+  "agents": {
+    "scheduling": {
+      "agent_id": "0PD0ZMG6UQ",
+      "alias_id": "TSTALIASID"
+    },
+    "information": {
+      "agent_id": "LTMK3FTWRC",
+      "alias_id": "TSTALIASID"
+    },
+    "chitchat": {
+      "agent_id": "T1OIHI7WL0",
+      "alias_id": "TSTALIASID"
+    },
+    "notes": {
+      "agent_id": "REPLACE_WITH_NOTES_AGENT_ID",
+      "alias_id": "TSTALIASID"
+    }
+  },
+  "routing": {
+    "enabled": true,
+    "method": "supervisor",
+    "use_supervisor": true,
+    "classifier_model": "anthropic.claude-3-haiku-20240307-v1:0"
+  },
+  "region": "us-east-1",
+  "prefix": "pf_",
+  "customer_context": {
+    "injection_method": "prompt_augmentation_and_session_attributes",
+    "session_attributes": [
+      "customer_id",
+      "customer_type",
+      "client_id"
+    ]
+  }
+}

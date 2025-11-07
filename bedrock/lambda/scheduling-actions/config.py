@@ -56,8 +56,8 @@ def get_api_config(client_id: str = None, env: str = None) -> Dict[str, str]:
 
     return {
         "base_url": base_url,
-        "dashboard_url": f"{base_url}/dashboard/get",  # OLD Portal API format: /dashboard/get/{client_id}/{customer_id}
-        "scheduler_url": f"{base_url}/system/client-details",
+        "dashboard_url": f"{base_url}/dashboard/get",  # Portal API format: /dashboard/get/{client_id}/{customer_id}
+        "scheduler_business_hours_url": f"{base_url}/scheduler/client/{client_id}/business-hours",  # Matches HAR file
         "scheduler_base_url": base_url,  # Base URL for scheduler endpoints
         "notes_url": f"{base_url}/project-notes/add/{client_id}",
         "weather_url": "https://wttr.in",
@@ -101,7 +101,7 @@ def get_auth_headers(authorization: str = None, client_id: str = None) -> Dict[s
         "Authorization": authorization,
         "Accept": "application/json, text/plain, */*",
         "Content-Type": "application/json",
-        "Client_Id": client_id
+        "client_id": client_id  # Lowercase to match real portal headers
     }
 
 # Mock mode notification

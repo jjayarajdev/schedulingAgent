@@ -123,6 +123,162 @@ bedrock_runtime = boto3.client('bedrock-runtime', region_name=REGION)
 
 
 # ==============================================================================
+# Session Management for Conversation Memory
+# ==============================================================================
+
+class SessionManager:
+    """
+    Manages Bedrock agent sessions to enable conversation memory.
+
+    Features:
+    - Reuses session IDs for the same customer (maintains conversation context)
+    - Automatic session timeout (default 30 minutes)
+    - Session cleanup to prevent memory leaks
+    - Thread-safe operations
+
+    Usage:
+        session_id, is_new = session_manager.get_or_create_session(customer_id)
+    """
+
+    def __init__(self, timeout_minutes=30):
+        """
+        Initialize session manager
+
+        Args:
+            timeout_minutes: Session timeout in minutes (default 30)
+        """
+        self.sessions = {}  # {customer_id: (session_id, last_used_time)}
+        self.timeout = timeout_minutes * 60  # Convert to seconds
+        self.timeout_minutes = timeout_minutes
+        logger.info(f"SessionManager initialized with {timeout_minutes}-minute timeout")
+
+    def get_or_create_session(self, customer_id: str) -> tuple:
+        """
+        Get existing session or create a new one
+
+        Args:
+            customer_id: Unique customer identifier
+
+        Returns:
+            tuple: (session_id, is_new_session)
+        """
+        now = time.time()
+
+        # Check if session exists and is still valid
+        if customer_id in self.sessions:
+            session_id, last_used = self.sessions[customer_id]
+            session_age = now - last_used
+
+            if session_age < self.timeout:
+                # Reuse existing session (update last_used time)
+                self.sessions[customer_id] = (session_id, now)
+                logger.info(f"♻️  Reusing session for {customer_id}: {session_id} (age: {int(session_age)}s)")
+                return session_id, False  # Not a new session
+            else:
+                # Session expired
+                logger.info(f"⏰ Session expired for {customer_id} (age: {int(session_age)}s > timeout: {self.timeout}s)")
+
+        # Create new session
+        session_id = f"session-{customer_id}-{int(now)}"
+        self.sessions[customer_id] = (session_id, now)
+        logger.info(f"🆕 Created NEW session for {customer_id}: {session_id}")
+        return session_id, True  # New session
+
+    def clear_session(self, customer_id: str) -> bool:
+        """
+        Clear session for a specific customer (forces new session on next request)
+
+        Args:
+            customer_id: Customer ID to clear
+
+        Returns:
+            bool: True if session was cleared, False if no session existed
+        """
+        if customer_id in self.sessions:
+            session_id, _ = self.sessions[customer_id]
+            del self.sessions[customer_id]
+            logger.info(f"🗑️  Cleared session for {customer_id}: {session_id}")
+            return True
+        return False
+
+    def get_session_info(self, customer_id: str) -> dict:
+        """
+        Get information about a customer's session
+
+        Args:
+            customer_id: Customer ID to query
+
+        Returns:
+            dict: Session information (session_id, age, is_active)
+        """
+        if customer_id not in self.sessions:
+            return {
+                'has_session': False,
+                'session_id': None,
+                'age_seconds': 0,
+                'is_active': False
+            }
+
+        session_id, last_used = self.sessions[customer_id]
+        age = time.time() - last_used
+        is_active = age < self.timeout
+
+        return {
+            'has_session': True,
+            'session_id': session_id,
+            'age_seconds': int(age),
+            'age_minutes': round(age / 60, 1),
+            'is_active': is_active,
+            'timeout_minutes': self.timeout_minutes
+        }
+
+    def cleanup_expired_sessions(self) -> int:
+        """
+        Remove expired sessions to prevent memory bloat
+        Should be called periodically (e.g., every hour)
+
+        Returns:
+            int: Number of sessions cleaned up
+        """
+        now = time.time()
+        expired = []
+
+        for customer_id, (session_id, last_used) in self.sessions.items():
+            if now - last_used >= self.timeout:
+                expired.append(customer_id)
+
+        for customer_id in expired:
+            del self.sessions[customer_id]
+
+        if expired:
+            logger.info(f"🧹 Cleaned up {len(expired)} expired sessions")
+
+        return len(expired)
+
+    def get_stats(self) -> dict:
+        """
+        Get statistics about active sessions
+
+        Returns:
+            dict: Session statistics
+        """
+        now = time.time()
+        active_count = sum(1 for _, (_, last_used) in self.sessions.items()
+                          if now - last_used < self.timeout)
+
+        return {
+            'total_sessions': len(self.sessions),
+            'active_sessions': active_count,
+            'expired_sessions': len(self.sessions) - active_count,
+            'timeout_minutes': self.timeout_minutes
+        }
+
+
+# Global session manager instance
+session_manager = SessionManager(timeout_minutes=30)
+
+
+# ==============================================================================
 # Monitoring and Logging Functions
 # ==============================================================================
 
@@ -326,7 +482,7 @@ def invoke_agent_with_context(message, customer_id, customer_type='B2C'):
     1. If use_supervisor=True: use supervisor agent (for when AWS fixes the bug)
     2. If use_supervisor=False: classify intent and route to appropriate agent
 
-    Version: 2.0 - With monitoring and logging
+    Version: 3.0 - With session memory for conversation continuity
     """
 
     # CRITICAL: Inject customer context into prompt
@@ -340,7 +496,8 @@ User Request: {message}
 
 Please help the customer with their request using their customer ID and client ID for any actions."""
 
-    session_id = f"session-{customer_id}-{int(time.time())}"
+    # Use session manager for conversation memory
+    session_id, is_new_session = session_manager.get_or_create_session(customer_id)
     invocation_start_time = time.time()
     intent = 'unknown'
     agent_id = None
@@ -540,7 +697,9 @@ def classify_only():
             client_id = SAMPLE_USER.get('client_id', 'CLIENT001')
             client_name = SAMPLE_USER.get('name', 'John Doe')
 
-        session_id = f"test-session-{customer_id}-{int(time.time())}"
+        # Use session manager for conversation memory
+        session_id, is_new_session = session_manager.get_or_create_session(customer_id)
+        logger.info(f"Session: {'NEW' if is_new_session else 'REUSED'} - {session_id}")
 
         # Create augmented prompt with context
         augmented_prompt = f"""Session Context:
@@ -664,6 +823,72 @@ def get_test_queries():
     except Exception as e:
         logger.error(f"Error loading test queries: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/session/info', methods=['GET'])
+def get_session_info():
+    """
+    Get session information for a customer
+    Query params: customer_id (optional, defaults to sample user)
+    """
+    customer_id = request.args.get('customer_id', SAMPLE_USER['customer_id'])
+    info = session_manager.get_session_info(customer_id)
+    return jsonify({
+        'customer_id': customer_id,
+        **info
+    })
+
+
+@app.route('/api/session/reset', methods=['POST'])
+def reset_session():
+    """
+    Reset (clear) session for a customer to start a fresh conversation
+    Body: { "customer_id": "..." } (optional, defaults to sample user)
+    """
+    data = request.json or {}
+    customer_id = data.get('customer_id', SAMPLE_USER['customer_id'])
+
+    cleared = session_manager.clear_session(customer_id)
+
+    if cleared:
+        return jsonify({
+            'status': 'success',
+            'message': f'Session reset for customer {customer_id}',
+            'customer_id': customer_id
+        })
+    else:
+        return jsonify({
+            'status': 'info',
+            'message': f'No active session found for customer {customer_id}',
+            'customer_id': customer_id
+        })
+
+
+@app.route('/api/session/stats', methods=['GET'])
+def get_session_stats():
+    """
+    Get statistics about all active sessions
+    """
+    stats = session_manager.get_stats()
+    return jsonify({
+        'status': 'success',
+        **stats,
+        'timestamp': datetime.now().isoformat()
+    })
+
+
+@app.route('/api/session/cleanup', methods=['POST'])
+def cleanup_sessions():
+    """
+    Manually trigger cleanup of expired sessions
+    """
+    cleaned = session_manager.cleanup_expired_sessions()
+    return jsonify({
+        'status': 'success',
+        'message': f'Cleaned up {cleaned} expired sessions',
+        'cleaned_count': cleaned,
+        'timestamp': datetime.now().isoformat()
+    })
 
 
 if __name__ == '__main__':

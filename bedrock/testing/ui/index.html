@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProjectForce - Agent Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: white;
+            border-bottom: 1px solid #e1e4e8;
+            padding: 16px 32px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo {
+            font-size: 20px;
+            font-weight: 600;
+            color: #0066cc;
+        }
+
+        .user-badge {
+            background: #e8f4fd;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            color: #0066cc;
+            font-weight: 500;
+        }
+
+        /* Container */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px 32px;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 24px;
+            border-bottom: 2px solid #e1e4e8;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 500;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+        }
+
+        .tab.active {
+            color: #0066cc;
+            border-bottom-color: #0066cc;
+        }
+
+        /* Project Cards */
+        .projects-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+            gap: 20px;
+        }
+
+        .project-card {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            border: 1px solid #e1e4e8;
+            transition: all 0.2s;
+        }
+
+        .project-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            transform: translateY(-2px);
+        }
+
+        .project-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #0066cc;
+            margin-bottom: 8px;
+        }
+
+        .project-number {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 16px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-bottom: 16px;
+        }
+
+        .status-scheduled { background: #d4edda; color: #155724; }
+        .status-new { background: #28a745; color: white; }
+        .status-awaiting { background: #e3d5ff; color: #6f42c1; }
+        .status-pending { background: #fff3cd; color: #856404; }
+
+        .project-info {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin: 16px 0;
+        }
+
+        .info-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #444;
+        }
+
+        .icon {
+            width: 18px;
+            height: 18px;
+            color: #0066cc;
+        }
+
+        .project-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e1e4e8;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex: 1;
+        }
+
+        .btn-primary {
+            background: #0066cc;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0052a3;
+        }
+
+        .btn-secondary {
+            background: white;
+            color: #0066cc;
+            border: 1px solid #0066cc;
+        }
+
+        .btn-secondary:hover {
+            background: #f0f7ff;
+        }
+
+        /* Chat Interface */
+        .chat-panel {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            border: 1px solid #e1e4e8;
+        }
+
+        .chat-messages {
+            height: 500px;
+            overflow-y: auto;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        .message {
+            margin-bottom: 16px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            text-align: right;
+        }
+
+        .message-bubble {
+            display: inline-block;
+            max-width: 75%;
+            padding: 12px 18px;
+            border-radius: 16px;
+            text-align: left;
+        }
+
+        .message.user .message-bubble {
+            background: #0066cc;
+            color: white;
+        }
+
+        .message.agent .message-bubble {
+            background: white;
+            border: 1px solid #e1e4e8;
+            color: #333;
+        }
+
+        .message-meta {
+            font-size: 12px;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        .input-area {
+            display: flex;
+            gap: 10px;
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .message-input:focus {
+            outline: none;
+            border-color: #0066cc;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 100px 20px;
+            color: #999;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            display: none;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #0066cc;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .view {
+            display: none;
+        }
+
+        .view.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-content">
+            <div class="logo">📦 ProjectForce Agent Demo</div>
+            <div class="user-badge" id="user-display">Not Logged In</div>
+        </div>
+    </div>
+
+    <!-- Container -->
+    <div class="container">
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" onclick="switchView('projects')">Current Orders</button>
+            <button class="tab" onclick="switchView('chat')">Agent Chat</button>
+        </div>
+
+        <!-- Projects View -->
+        <div id="projects-view" class="view active">
+            <div id="projects-grid" class="projects-grid">
+                <div class="empty-state">
+                    <div class="spinner"></div>
+                    <p>Click "Login & Start" above to load projects...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat View -->
+        <div id="chat-view" class="view">
+            <div class="chat-panel">
+                <div class="chat-messages" id="chat-messages">
+                    <div class="empty-state">
+                        <div style="font-size: 48px; margin-bottom: 16px;">💭</div>
+                        <p>Start chatting with the agent!</p>
+                        <p style="margin-top: 12px; color: #ccc;">Try: "Show me my projects"</p>
+                    </div>
+                </div>
+
+                <div class="loading" id="loading">
+                    <div class="spinner"></div>
+                    <p>Agent is thinking...</p>
+                </div>
+
+                <div class="input-area">
+                    <input
+                        type="text"
+                        class="message-input"
+                        id="message-input"
+                        placeholder="Type your message..."
+                        onkeypress="if(event.key==='Enter') sendMessage()"
+                    >
+                    <button class="btn btn-primary" onclick="sendMessage()">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5003/api';
+        let accessToken = null;
+        let clientId = '09PF05VD';
+        let userId = '1646085';
+        let sessionId = 'session-' + Date.now();
+
+        // Switch between views
+        function switchView(view) {
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+
+            document.getElementById(`${view}-view`).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        // Auto-login on page load
+        async function autoLogin() {
+            try {
+                const response = await fetch(`${API_URL}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: 'jay@mailinator.com',
+                        password: 'U2FsdGVkX197AQMdkqthasfRGWLh41rhHVaw9Q9Q8cE=',
+                        device_type: 1
+                    })
+                });
+
+                const data = await response.json();
+                if (data.accesstoken) {
+                    accessToken = data.accesstoken;
+                    if (data.user) {
+                        clientId = data.user.client_id;
+                        userId = data.user.customer_id;
+                    }
+                    document.getElementById('user-display').textContent = `User: ${userId}`;
+                    loadProjects();
+                }
+            } catch (error) {
+                console.error('Login failed:', error);
+            }
+        }
+
+        // Load projects
+        async function loadProjects() {
+            const gridEl = document.getElementById('projects-grid');
+            gridEl.innerHTML = '<div class="empty-state"><div class="spinner"></div><p>Loading projects...</p></div>';
+
+            // Mock projects for now (you can replace with real API call)
+            const projects = [
+                {
+                    id: '7751742',
+                    title: 'Decking',
+                    number: '21083_09PF05VD_1762166550719_1',
+                    status: 'Scheduled',
+                    statusClass: 'scheduled',
+                    date: '11-12-2025',
+                    address: '401 Chicago Avenue, MN, Minneapolis-55415',
+                    technician: 'Christopher XXXX'
+                },
+                {
+                    id: '7751741',
+                    title: 'Decking',
+                    number: '21083_09PF05VD_1762166550719',
+                    status: 'New',
+                    statusClass: 'new',
+                    address: '401 Chicago Avenue, MN, Minneapolis-55415'
+                }
+            ];
+
+            displayProjects(projects);
+        }
+
+        function displayProjects(projects) {
+            const gridEl = document.getElementById('projects-grid');
+
+            if (projects.length === 0) {
+                gridEl.innerHTML = '<div class="empty-state"><p>No projects found</p></div>';
+                return;
+            }
+
+            gridEl.innerHTML = projects.map(p => `
+                <div class="project-card">
+                    <div class="project-title">${p.title}</div>
+                    <div class="project-number">Order Number: ${p.number}</div>
+                    <div class="status-badge status-${p.statusClass}">${p.status}</div>
+
+                    <div class="project-info">
+                        ${p.date ? `
+                        <div class="info-row">
+                            <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                            </svg>
+                            <span>${p.date}</span>
+                        </div>
+                        ` : ''}
+
+                        <div class="info-row">
+                            <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                            </svg>
+                            <span>${p.address}</span>
+                        </div>
+
+                        ${p.technician ? `
+                        <div class="info-row">
+                            <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                            </svg>
+                            <span>${p.technician}</span>
+                        </div>
+                        ` : ''}
+                    </div>
+
+                    <div class="project-actions">
+                        <button class="btn btn-secondary" onclick="viewDetails('${p.id}')">View Details</button>
+                        <button class="btn btn-primary" onclick="scheduleProject('${p.id}')">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                            </svg>
+                            Schedule Now
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function viewDetails(projectId) {
+            alert(`View details for project ${projectId}\n(Detail modal would open here)`);
+        }
+
+        function scheduleProject(projectId) {
+            switchView('chat');
+            document.getElementById('message-input').value = `I want to schedule project ${projectId}`;
+            document.getElementById('message-input').focus();
+        }
+
+        // Chat functions
+        async function sendMessage() {
+            const input = document.getElementById('message-input');
+            const message = input.value.trim();
+            if (!message || !accessToken) return;
+
+            addMessage('user', message);
+            input.value = '';
+            input.disabled = true;
+            document.getElementById('loading').classList.add('active');
+
+            try {
+                const response = await fetch(`${API_URL}/invoke-agent`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message,
+                        session_id: sessionId,
+                        pf_token: accessToken,
+                        pf_client_id: clientId,
+                        pf_user_id: userId
+                    })
+                });
+
+                const data = await response.json();
+                addMessage('agent', data.response || data.message);
+            } catch (error) {
+                addMessage('agent', `Error: ${error.message}`);
+            } finally {
+                input.disabled = false;
+                document.getElementById('loading').classList.remove('active');
+                input.focus();
+            }
+        }
+
+        function formatAgentMessage(content) {
+            // 1. Format project list items with cards (Pattern: "Project #7751741: New status")
+            content = content.replace(/Project #(\d+):\s*([^\n]+)/g, function(match, projectId, status) {
+                const statusColors = {
+                    'New': '#28a745',
+                    'Scheduled': '#17a2b8',
+                    'Customer Scheduled': '#6f42c1',
+                    'Completed': '#6c757d',
+                    'In Progress': '#ffc107'
+                };
+                const color = statusColors[status.trim()] || '#6f42c1';
+                return `<div style="background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%); padding: 16px; margin: 10px 0; border-radius: 10px; border-left: 4px solid #0066cc; box-shadow: 0 2px 8px rgba(0,102,204,0.1); transition: transform 0.2s, box-shadow 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 16px rgba(0,102,204,0.2)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,102,204,0.1)';">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <strong style="color: #0066cc; font-size: 16px;">Project #${projectId}</strong>
+                        <span style="background: ${color}; color: white; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; letter-spacing: 0.5px;">${status}</span>
+                    </div>
+                </div>`;
+            });
+
+            // 2. Format project details in a nice info card (Pattern: "Type: Call Back")
+            let detailsMatch = content.match(/(Type:|Category:|Status:|Address:|Order Number:)/);
+            if (detailsMatch) {
+                content = content.replace(/(Type:)\s*([^\n]+)/g,
+                    '<div style="background: #f0f7ff; padding: 14px; margin: 6px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center;"><span style="color: #0066cc; font-weight: 600; font-size: 13px;">🔧 Type</span><span style="color: #333; font-weight: 500;">$2</span></div>');
+
+                content = content.replace(/(Category:)\s*([^\n]+)/g,
+                    '<div style="background: #f0f7ff; padding: 14px; margin: 6px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center;"><span style="color: #0066cc; font-weight: 600; font-size: 13px;">📋 Category</span><span style="color: #333; font-weight: 500;">$2</span></div>');
+
+                content = content.replace(/(Status:)\s*([^\n]+)/g,
+                    '<div style="background: #f0f7ff; padding: 14px; margin: 6px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center;"><span style="color: #0066cc; font-weight: 600; font-size: 13px;">📊 Status</span><span style="color: #333; font-weight: 500;">$2</span></div>');
+
+                content = content.replace(/(Address:)\s*([^\n]+)/g,
+                    '<div style="background: #f0f7ff; padding: 14px; margin: 6px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center;"><span style="color: #0066cc; font-weight: 600; font-size: 13px;">📍 Address</span><span style="color: #333; font-weight: 500;">$2</span></div>');
+
+                content = content.replace(/(Order Number:)\s*([^\n]+)/g,
+                    '<div style="background: #f0f7ff; padding: 14px; margin: 6px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center;"><span style="color: #0066cc; font-weight: 600; font-size: 13px;">🔢 Order</span><span style="color: #333; font-family: monospace; font-size: 12px;">$2</span></div>');
+            }
+
+            // 3. Format available dates (Pattern: "Week 1: Nov 10-15")
+            content = content.replace(/Week (\d+):\s*Nov\s*(\d+)-(\d+)/g, function(match, week, start, end) {
+                let dates = [];
+                for (let i = parseInt(start); i <= parseInt(end); i++) {
+                    dates.push(i);
+                }
+                return `<div style="margin: 12px 0;">
+                    <div style="font-weight: 600; color: #555; margin-bottom: 8px; font-size: 14px;">Week ${week}</div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                        ${dates.map(d => `<button style="background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white; border: none; padding: 12px 18px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,102,204,0.3); min-width: 60px;" onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.5)';" onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 2px 6px rgba(0,102,204,0.3)';">Nov ${d}</button>`).join('')}
+                    </div>
+                </div>`;
+            });
+
+            // 4. Format time slots (Pattern: "- 8:00 AM - 8:30 AM - 1:00 PM")
+            content = content.replace(/these time slots are available:\s*-\s*(.+?)(?:Please|$)/gi, function(match, slots) {
+                const times = slots.split(/\s*-\s*/).filter(t => t.trim() && t.match(/\d+:\d+\s*[AP]M/i));
+                return `these time slots are available:
+                    <div style="display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0;">
+                        ${times.map(time => `<button style="background: white; color: #0066cc; border: 2px solid #0066cc; padding: 14px 24px; border-radius: 10px; font-weight: 600; font-size: 15px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(0,102,204,0.15);" onmouseover="this.style.background='#0066cc'; this.style.color='white'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.3)';" onmouseout="this.style.background='white'; this.style.color='#0066cc'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,102,204,0.15)';">🕐 ${time.trim()}</button>`).join('')}
+                    </div>
+                    Please`;
+            });
+
+            // 5. Format appointment confirmation (Pattern: "Date: November 14, 2025")
+            if (content.includes('successfully scheduled')) {
+                content = content.replace(/(Date:)\s*([^\n]+)/g,
+                    '<div style="background: #d4edda; padding: 12px; margin: 8px 0; border-radius: 8px; border-left: 4px solid #28a745; display: grid; grid-template-columns: 140px 1fr; gap: 12px;"><span style="color: #155724; font-weight: 600;">📅 Date</span><span style="color: #155724; font-weight: 600; font-size: 15px;">$2</span></div>');
+
+                content = content.replace(/(Time:)\s*([^\n]+)/g,
+                    '<div style="background: #d4edda; padding: 12px; margin: 8px 0; border-radius: 8px; border-left: 4px solid #28a745; display: grid; grid-template-columns: 140px 1fr; gap: 12px;"><span style="color: #155724; font-weight: 600;">⏰ Time</span><span style="color: #155724; font-weight: 600; font-size: 15px;">$2</span></div>');
+
+                content = content.replace(/(Confirmation Number:)\s*([^\n]+)/g,
+                    '<div style="background: #d4edda; padding: 12px; margin: 8px 0; border-radius: 8px; border-left: 4px solid #28a745; display: grid; grid-template-columns: 140px 1fr; gap: 12px;"><span style="color: #155724; font-weight: 600;">✅ Confirmation</span><span style="color: #155724; font-family: monospace; font-size: 14px;">$2</span></div>');
+
+                content = content.replace(/(Great! Your appointment has been successfully scheduled:)/g,
+                    '<div style="background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); padding: 20px; border-radius: 12px; margin: 10px 0; border: 2px solid #28a745; box-shadow: 0 4px 12px rgba(40,167,69,0.2);"><div style="font-size: 18px; font-weight: 700; color: #155724; margin-bottom: 12px;">✨ $1</div>');
+
+                // Close the success card div
+                content = content.replace(/(Is there anything else)/g, '</div>$1');
+            }
+
+            // 6. Format summary headers (Pattern: "You have 8 Decking...")
+            content = content.replace(/^(You have \d+.+?:)$/gm,
+                '<div style="background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white; padding: 16px 20px; border-radius: 10px; margin: 10px 0; font-weight: 600; font-size: 16px; box-shadow: 0 4px 12px rgba(0,102,204,0.3);">📦 $1</div>');
+
+            // 7. Format "Would you like..." questions
+            content = content.replace(/💡\s*(Would you like[^?]+\?)/g,
+                '<div style="background: linear-gradient(135deg, #fff9e6 0%, #fff3cd 100%); padding: 16px; border-radius: 10px; margin: 14px 0; border-left: 4px solid #ffc107; box-shadow: 0 2px 8px rgba(255,193,7,0.2);"><span style="font-size: 20px; margin-right: 8px;">💡</span><span style="color: #856404; font-weight: 500; font-size: 14px;">$1</span></div>');
+
+            // 8. Highlight Project #XXXXX mentions in text
+            content = content.replace(/#(\d{7})/g,
+                '<span style="background: #e8f4fd; padding: 4px 10px; border-radius: 6px; font-weight: 700; color: #0066cc; border: 1px solid #b3d9f2;">#$1</span>');
+
+            return content;
+        }
+
+        function addMessage(type, content) {
+            const messagesEl = document.getElementById('chat-messages');
+            const emptyState = messagesEl.querySelector('.empty-state');
+            if (emptyState) emptyState.remove();
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+
+            // Format agent messages for better readability
+            const formattedContent = type === 'agent' ? formatAgentMessage(content) : content;
+
+            messageDiv.innerHTML = `
+                <div class="message-bubble">${formattedContent}</div>
+                <div class="message-meta">${new Date().toLocaleTimeString()}</div>
+            `;
+
+            messagesEl.appendChild(messageDiv);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', autoLogin);
+    </script>
+</body>
+</html>
