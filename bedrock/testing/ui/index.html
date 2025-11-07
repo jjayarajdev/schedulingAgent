@@ -550,39 +550,311 @@
                 try {
                     const data = JSON.parse(jsonBlockMatch[1]);
 
-                    // Handle project list JSON
-                    if (data.projects && Array.isArray(data.projects)) {
-                        let html = data.message ? `<div style="background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white; padding: 18px 24px; border-radius: 12px; margin: 16px 0 20px 0; font-weight: 600; font-size: 17px; box-shadow: 0 4px 12px rgba(0,102,204,0.3);">
-                            <div style="display: flex; align-items: center; gap: 12px;">
-                                <span style="font-size: 28px;">📦</span>
-                                <span>${data.message}</span>
-                            </div>
-                        </div>` : '';
+                    // Handle single project details JSON
+                    if (data.project && typeof data.project === 'object' && data.project.id) {
+                        const proj = data.project;
+                        let html = '';
 
+                        // Message header
+                        if (data.message) {
+                            html += `<div style="background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white; padding: 18px 24px; border-radius: 12px; margin: 16px 0; font-weight: 600; font-size: 17px; box-shadow: 0 4px 12px rgba(0,102,204,0.3);">
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <span style="font-size: 28px;">📋</span>
+                                    <span>${data.message}</span>
+                                </div>
+                            </div>`;
+                        }
+
+                        // Project details card
+                        html += `<div style="background: white; border-radius: 12px; padding: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); margin: 16px 0;">
+                            <div style="display: grid; gap: 20px;">`;
+
+                        // Project Number and Status
+                        const statusColors = {
+                            'New': '#28a745',
+                            'Scheduled': '#17a2b8',
+                            'Customer Scheduled': '#ffc107',
+                            'Completed': '#6c757d',
+                            'Cancelled': '#dc3545'
+                        };
+                        const statusColor = statusColors[proj.status] || '#6c757d';
+
+                        html += `<div style="display: flex; justify-content: space-between; align-items: start; padding-bottom: 16px; border-bottom: 2px solid #e9ecef;">
+                            <div>
+                                <div style="font-size: 24px; font-weight: 700; color: #212529; margin-bottom: 6px;">Project #${proj.id}</div>
+                                <div style="font-size: 14px; color: #6c757d; font-family: monospace;">${proj.projectNumber || ''}</div>
+                            </div>
+                            <span style="background: ${statusColor}; color: white; padding: 6px 14px; border-radius: 16px; font-size: 13px; font-weight: 600; white-space: nowrap;">${proj.status}</span>
+                        </div>`;
+
+                        // Category and Type
+                        html += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+                            <div style="background: #f8f9fa; padding: 14px; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Category</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #333;">${proj.category || '-'}</div>
+                            </div>
+                            <div style="background: #f8f9fa; padding: 14px; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Project Type</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #333;">${proj.projectType || '-'}</div>
+                            </div>
+                        </div>`;
+
+                        // Scheduled Date/Time
+                        if (proj.scheduledDate) {
+                            html += `<div style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 16px; border-radius: 10px; border-left: 4px solid #2196f3;">
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <span style="font-size: 28px;">📅</span>
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 12px; color: #1976d2; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Scheduled Appointment</div>
+                                        <div style="font-size: 16px; font-weight: 700; color: #0d47a1;">${proj.scheduledDate}${proj.scheduledEndDate ? ` - ${proj.scheduledEndDate}` : ''}</div>
+                                        ${proj.estimatedDuration ? `<div style="font-size: 13px; color: #1976d2; margin-top: 4px;">Duration: ${proj.estimatedDuration}</div>` : ''}
+                                    </div>
+                                </div>
+                            </div>`;
+                        }
+
+                        // Technician Information
+                        if (proj.technician && proj.technician.name) {
+                            const tech = proj.technician;
+                            html += `<div style="background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); padding: 16px; border-radius: 10px; border-left: 4px solid #9c27b0;">
+                                <div style="display: flex; align-items: start; gap: 12px;">
+                                    <span style="font-size: 28px;">👷</span>
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 12px; color: #7b1fa2; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Assigned Technician</div>
+                                        <div style="font-size: 16px; font-weight: 700; color: #4a148c; margin-bottom: 8px;">${tech.display_name || tech.name}</div>
+                                        ${tech.email ? `<div style="font-size: 14px; color: #6a1b9a; margin-bottom: 4px;">📧 ${tech.email}</div>` : ''}
+                                        ${tech.phone ? `<div style="font-size: 14px; color: #6a1b9a; margin-bottom: 4px;">📞 ${tech.phone}</div>` : ''}
+                                        ${tech.bio ? `<div style="font-size: 13px; color: #7b1fa2; margin-top: 8px; padding-top: 8px; border-top: 1px solid #ce93d8;">${tech.bio}</div>` : ''}
+                                    </div>
+                                </div>
+                            </div>`;
+                        }
+
+                        // Address
+                        if (proj.address) {
+                            const addr = proj.address;
+                            const fullAddr = addr.fullAddress || `${addr.address1 || ''}, ${addr.city || ''}, ${addr.state || ''} ${addr.zipcode || ''}`;
+                            html += `<div style="background: #f8f9fa; padding: 16px; border-radius: 10px;">
+                                <div style="display: flex; align-items: start; gap: 12px;">
+                                    <span style="font-size: 28px;">📍</span>
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 12px; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Installation Address</div>
+                                        <div style="font-size: 16px; font-weight: 600; color: #333;">${fullAddr}</div>
+                                    </div>
+                                </div>
+                            </div>`;
+                        }
+
+                        // Store and Date Sold
+                        html += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">`;
+                        if (proj.store) {
+                            const store = proj.store;
+                            html += `<div style="background: #fff3e0; padding: 14px; border-radius: 8px; border-left: 3px solid #ff9800;">
+                                <div style="font-size: 12px; color: #e65100; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Store</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #e65100;">${store.storeName || store.storeNumber || '-'}</div>
+                            </div>`;
+                        }
+                        if (proj.dateSold) {
+                            html += `<div style="background: #e8f5e9; padding: 14px; border-radius: 8px; border-left: 3px solid #4caf50;">
+                                <div style="font-size: 12px; color: #2e7d32; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Date Sold</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #2e7d32;">${proj.dateSold}</div>
+                            </div>`;
+                        }
+                        if (proj.sourceSystem) {
+                            html += `<div style="background: #fce4ec; padding: 14px; border-radius: 8px; border-left: 3px solid #e91e63;">
+                                <div style="font-size: 12px; color: #c2185b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Source System</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #c2185b;">${proj.sourceSystem}</div>
+                            </div>`;
+                        }
+                        html += `</div>`;
+
+                        // Has Documents
+                        if (proj.hasDocuments) {
+                            html += `<div style="background: linear-gradient(135deg, #fff9c4 0%, #fff59d 100%); padding: 12px 16px; border-radius: 8px; display: flex; align-items: center; gap: 10px;">
+                                <span style="font-size: 20px;">📄</span>
+                                <span style="font-size: 14px; font-weight: 600; color: #f57f17;">This project has attached documents</span>
+                            </div>`;
+                        }
+
+                        html += `</div></div>`;
+
+                        const afterJson = content.substring(content.indexOf('```', content.indexOf('```json') + 7) + 3).trim();
+                        return html + (afterJson ? `<p style="margin-top: 16px;">${afterJson}</p>` : '');
+                    }
+
+                    // Handle dates JSON - Enhanced with formatted dates
+                    if (data.dates && Array.isArray(data.dates) && data.dates.length > 0) {
+                        let html = '';
+
+                        // Header
+                        if (data.message) {
+                            html += `<div style="font-weight: 600; color: #333; margin-bottom: 16px; font-size: 15px;">${data.message}</div>`;
+                        }
+
+                        // Check if dates are week-grouped (new format from agent)
+                        const isWeekGrouped = data.dates[0] && data.dates[0].week && data.dates[0].dates;
+
+                        if (isWeekGrouped) {
+                            // New format: [{week: 1, dates: ["Nov 10", "Nov 11", ...]}, ...]
+                            let totalDates = 0;
+                            data.dates.forEach(weekObj => totalDates += weekObj.dates.length);
+
+                            html += `<div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 20px; border-radius: 12px; margin: 16px 0;">
+                                <div style="font-weight: 600; color: #495057; margin-bottom: 14px; font-size: 16px;">📅 Available Dates (${totalDates})</div>`;
+
+                            data.dates.forEach(weekObj => {
+                                html += `<div style="margin-bottom: 16px;">
+                                    <div style="font-size: 13px; font-weight: 600; color: #6c757d; margin-bottom: 8px;">Week ${weekObj.week}</div>
+                                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px;">`;
+
+                                weekObj.dates.forEach(dateStr => {
+                                    html += `<button style="background: white; border: 2px solid #0066cc; border-radius: 10px; padding: 12px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,102,204,0.15); text-align: center; font-size: 14px; font-weight: 600; color: #0066cc;" onmouseover="this.style.background='linear-gradient(135deg, #0066cc 0%, #0052a3 100%)'; this.style.color='white'; this.style.transform='translateY(-3px)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.3)';" onmouseout="this.style.background='white'; this.style.color='#0066cc'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 6px rgba(0,102,204,0.15)';">${dateStr}</button>`;
+                                });
+
+                                html += `</div></div>`;
+                            });
+
+                            html += `</div>`;
+                        } else {
+                            // Old format: flat array of date objects or strings
+                            html += `<div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 20px; border-radius: 12px; margin: 16px 0;">
+                                <div style="font-weight: 600; color: #495057; margin-bottom: 14px; font-size: 16px;">📅 Available Dates (${data.dateCount || data.dates.length})</div>
+                                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px;">`;
+
+                            data.dates.forEach(dateObj => {
+                                // Handle both old format (string) and new format (object)
+                                const dateStr = typeof dateObj === 'string' ? dateObj : dateObj.date;
+                                const dayShort = dateObj.dayShort || '';
+                                const monthDay = dateObj.monthDay || dateStr;
+                                const dayName = dateObj.dayName || '';
+
+                                html += `<button style="background: white; border: 2px solid #0066cc; border-radius: 10px; padding: 14px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,102,204,0.15); text-align: center;" onmouseover="this.style.background='linear-gradient(135deg, #0066cc 0%, #0052a3 100%)'; this.style.color='white'; this.style.transform='translateY(-3px)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.3)';" onmouseout="this.style.background='white'; this.style.color='#333'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 6px rgba(0,102,204,0.15)';">
+                                    ${dayShort ? `<div style="font-size: 13px; font-weight: 600; color: #6c757d; margin-bottom: 6px;">${dayShort}</div>` : ''}
+                                    <div style="font-size: 16px; font-weight: 700; color: #0066cc;">${monthDay}</div>
+                                    ${dayName && !dayShort ? `<div style="font-size: 12px; color: #6c757d; margin-top: 4px;">${dayName}</div>` : ''}
+                                </button>`;
+                            });
+
+                            html += `</div></div>`;
+                        }
+
+                        const afterJson = content.substring(content.indexOf('```', content.indexOf('```json') + 7) + 3).trim();
+                        return html + (afterJson ? `<p style="margin-top: 16px;">${afterJson}</p>` : '');
+                    }
+
+                    // Handle time slots JSON - Enhanced with grouped slots
+                    if (data.timeSlots && Array.isArray(data.timeSlots) || data.timeSlotsGrouped) {
+                        let html = '';
+
+                        // Header
+                        if (data.message) {
+                            html += `<div style="font-weight: 600; color: #333; margin-bottom: 16px; font-size: 15px;">${data.message}</div>`;
+                        }
+
+                        html += `<div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 20px; border-radius: 12px; margin: 16px 0;">
+                            <div style="font-weight: 600; color: #495057; margin-bottom: 14px; font-size: 16px;">⏰ Available Time Slots${data.slotCount ? ` (${data.slotCount})` : ''}</div>`;
+
+                        // Use grouped slots if available, otherwise show flat list
+                        if (data.timeSlotsGrouped) {
+                            const groups = [
+                                { key: 'morning', icon: '🌅', color: '#ffc107' },
+                                { key: 'afternoon', icon: '☀️', color: '#ff9800' },
+                                { key: 'evening', icon: '🌙', color: '#673ab7' }
+                            ];
+
+                            groups.forEach(group => {
+                                const groupData = data.timeSlotsGrouped[group.key];
+                                if (groupData && groupData.slots && groupData.slots.length > 0) {
+                                    html += `<div style="margin-bottom: 20px;">
+                                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                                            <span style="font-size: 20px;">${group.icon}</span>
+                                            <span style="font-weight: 600; color: #495057; font-size: 15px;">${groupData.label} - ${groupData.count} slots</span>
+                                        </div>
+                                        <div style="display: flex; flex-wrap: wrap; gap: 10px;">`;
+
+                                    groupData.slots.forEach(time => {
+                                        html += `<button style="background: white; color: ${group.color}; border: 2px solid ${group.color}; padding: 12px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,0,0,0.1);" onmouseover="this.style.background='${group.color}'; this.style.color='white'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.2)';" onmouseout="this.style.background='white'; this.style.color='${group.color}'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 6px rgba(0,0,0,0.1)';">🕐 ${time}</button>`;
+                                    });
+
+                                    html += `</div></div>`;
+                                }
+                            });
+                        } else if (data.timeSlots && Array.isArray(data.timeSlots)) {
+                            // Fallback to flat list
+                            html += `<div style="display: flex; flex-wrap: wrap; gap: 12px;">`;
+                            data.timeSlots.forEach(time => {
+                                html += `<button style="background: white; color: #0066cc; border: 2px solid #0066cc; padding: 12px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,102,204,0.15);" onmouseover="this.style.background='#0066cc'; this.style.color='white'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.3)';" onmouseout="this.style.background='white'; this.style.color='#0066cc'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 6px rgba(0,102,204,0.15)';">🕐 ${time}</button>`;
+                            });
+                            html += `</div>`;
+                        }
+
+                        html += `</div>`;
+
+                        const afterJson = content.substring(content.indexOf('```', content.indexOf('```json') + 7) + 3).trim();
+                        return html + (afterJson ? `<p style="margin-top: 16px;">${afterJson}</p>` : '');
+                    }
+
+                    // Handle projects list JSON
+                    if (data.projects && Array.isArray(data.projects) && data.projects.length > 0) {
+                        let html = '';
+
+                        // Header with message and count
+                        if (data.message) {
+                            html += `<div style="background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white; padding: 18px 24px; border-radius: 12px; margin: 16px 0; font-weight: 600; font-size: 17px; box-shadow: 0 4px 12px rgba(0,102,204,0.3);">
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <span style="font-size: 28px;">📦</span>
+                                    <span>${data.message}</span>
+                                </div>
+                            </div>`;
+                        }
+
+                        // Projects table
                         html += `
-                            <div style="margin: 20px 0; overflow-x: auto;">
-                                <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                            <div style="margin: 20px 0; overflow-x: auto; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.1);">
+                                <table style="width: 100%; border-collapse: collapse; background: white;">
                                     <thead>
-                                        <tr style="background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white;">
-                                            <th style="padding: 14px 20px; text-align: left; font-weight: 600; font-size: 14px; border-right: 1px solid rgba(255,255,255,0.1);">#</th>
-                                            <th style="padding: 14px 20px; text-align: left; font-weight: 600; font-size: 14px; border-right: 1px solid rgba(255,255,255,0.1);">Project ID</th>
-                                            <th style="padding: 14px 20px; text-align: left; font-weight: 600; font-size: 14px;">Status</th>
+                                        <tr style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);">
+                                            <th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #dee2e6; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Project #</th>
+                                            <th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #dee2e6; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Status</th>
+                                            <th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #dee2e6; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Category</th>
+                                            <th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #dee2e6; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Type</th>
+                                            <th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #dee2e6; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Address</th>
+                                            <th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #dee2e6; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Date Sold</th>
                                         </tr>
                                     </thead>
                                     <tbody>`;
 
-                        data.projects.forEach((proj, idx) => {
-                            const color = statusColors[proj.status] || '#6f42c1';
-                            const rowBg = idx % 2 === 0 ? '#ffffff' : '#f8f9fa';
+                        data.projects.forEach((proj, index) => {
+                            const statusColors = {
+                                'New': '#28a745',
+                                'Scheduled': '#17a2b8',
+                                'Customer Scheduled': '#ffc107',
+                                'Completed': '#6c757d',
+                                'Cancelled': '#dc3545'
+                            };
+                            const statusColor = statusColors[proj.status] || '#6c757d';
+                            const rowBg = index % 2 === 0 ? '#ffffff' : '#f8f9fa';
+
                             html += `
-                                <tr style="background: ${rowBg}; transition: background 0.2s;" onmouseover="this.style.background='#e3f2fd'" onmouseout="this.style.background='${rowBg}'">
-                                    <td style="padding: 14px 20px; border-bottom: 1px solid #e0e0e0; color: #666; font-weight: 500;">${idx + 1}</td>
-                                    <td style="padding: 14px 20px; border-bottom: 1px solid #e0e0e0;">
-                                        <span style="background: #e8f4fd; padding: 6px 12px; border-radius: 6px; font-weight: 700; color: #0066cc; font-family: monospace; font-size: 14px;">#${proj.id}</span>
+                                <tr style="background: ${rowBg}; transition: all 0.2s;" onmouseover="this.style.background='#e7f3ff'" onmouseout="this.style.background='${rowBg}'">
+                                    <td style="padding: 14px 16px; border-bottom: 1px solid #dee2e6;">
+                                        <div style="font-weight: 600; color: #212529; font-size: 14px;">#${proj.id}</div>
+                                        <div style="font-size: 12px; color: #6c757d; font-family: monospace; margin-top: 2px;">${proj.projectNumber || ''}</div>
                                     </td>
-                                    <td style="padding: 14px 20px; border-bottom: 1px solid #e0e0e0;">
-                                        <span style="background: ${color}; color: white; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; display: inline-block;">${proj.status}</span>
+                                    <td style="padding: 14px 16px; border-bottom: 1px solid #dee2e6;">
+                                        <span style="background: ${statusColor}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; white-space: nowrap;">${proj.status}</span>
                                     </td>
+                                    <td style="padding: 14px 16px; border-bottom: 1px solid #dee2e6; font-size: 14px; color: #495057;">${proj.category || '-'}</td>
+                                    <td style="padding: 14px 16px; border-bottom: 1px solid #dee2e6; font-size: 14px; color: #495057;">${proj.projectType || '-'}</td>
+                                    <td style="padding: 14px 16px; border-bottom: 1px solid #dee2e6;">
+                                        ${proj.address ? (
+                                            typeof proj.address === 'string'
+                                            ? `<div style="font-size: 14px; color: #495057;">${proj.address}</div>`
+                                            : `<div style="font-size: 14px; color: #495057; font-weight: 500;">${proj.address.address1 || ''}</div>
+                                               <div style="font-size: 12px; color: #6c757d; margin-top: 2px;">${proj.address.city || ''}, ${proj.address.state || ''} ${proj.address.zipcode || ''}</div>`
+                                        ) : '<span style="color: #adb5bd;">-</span>'}
+                                    </td>
+                                    <td style="padding: 14px 16px; border-bottom: 1px solid #dee2e6; font-size: 14px; color: #495057;">${proj.dateSold || '-'}</td>
                                 </tr>`;
                         });
 
@@ -591,44 +863,12 @@
                                 </table>
                             </div>`;
 
-                        // Replace the JSON block with formatted HTML and keep any text after it
-                        const afterJson = content.substring(content.indexOf('```', content.indexOf('```json') + 7) + 3).trim();
-                        return html + (afterJson ? `<p style="margin-top: 16px;">${afterJson}</p>` : '');
-                    }
-
-                    // Handle dates JSON
-                    if (data.dates && Array.isArray(data.dates)) {
-                        let html = data.message ? `<div style="font-weight: 600; color: #333; margin-bottom: 16px; font-size: 15px;">${data.message}</div>` : '';
-
-                        data.dates.forEach(weekData => {
-                            html += `<div style="margin: 16px 0;">
-                                <div style="font-weight: 600; color: #555; margin-bottom: 10px; font-size: 15px;">📅 Week ${weekData.week}</div>
-                                <div style="display: flex; flex-wrap: wrap; gap: 10px;">`;
-
-                            weekData.dates.forEach(date => {
-                                html += `<button style="background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white; border: none; padding: 14px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,102,204,0.3); min-width: 80px; font-size: 14px;" onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.5)';" onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 2px 6px rgba(0,102,204,0.3)';">${date}</button>`;
-                            });
-
-                            html += `</div></div>`;
-                        });
-
-                        const afterJson = content.substring(content.indexOf('```', content.indexOf('```json') + 7) + 3).trim();
-                        return html + (afterJson ? `<p style="margin-top: 16px;">${afterJson}</p>` : '');
-                    }
-
-                    // Handle time slots JSON
-                    if (data.timeSlots && Array.isArray(data.timeSlots)) {
-                        let html = data.message ? `<div style="font-weight: 600; color: #333; margin-bottom: 16px; font-size: 15px;">${data.message}</div>` : '';
-
-                        html += `<div style="margin: 16px 0;">
-                            <div style="font-weight: 600; color: #555; margin-bottom: 10px; font-size: 15px;">⏰ Available Time Slots</div>
-                            <div style="display: flex; flex-wrap: wrap; gap: 12px;">`;
-
-                        data.timeSlots.forEach(time => {
-                            html += `<button style="background: white; color: #0066cc; border: 2px solid #0066cc; padding: 14px 24px; border-radius: 10px; font-weight: 600; font-size: 15px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(0,102,204,0.15);" onmouseover="this.style.background='#0066cc'; this.style.color='white'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.3)';" onmouseout="this.style.background='white'; this.style.color='#0066cc'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,102,204,0.15)';">🕐 ${time}</button>`;
-                        });
-
-                        html += `</div></div>`;
+                        // Location summary if available
+                        if (data.location) {
+                            html += `<div style="background: #f8f9fa; border-left: 4px solid #0066cc; padding: 12px 16px; border-radius: 8px; margin: 16px 0; font-size: 14px; color: #495057;">
+                                <strong>📍 Location:</strong> ${data.location.address || data.location}
+                            </div>`;
+                        }
 
                         const afterJson = content.substring(content.indexOf('```', content.indexOf('```json') + 7) + 3).trim();
                         return html + (afterJson ? `<p style="margin-top: 16px;">${afterJson}</p>` : '');
