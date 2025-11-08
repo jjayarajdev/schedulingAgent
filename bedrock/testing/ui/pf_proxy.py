@@ -144,7 +144,7 @@ def dashboard():
 
 @app.route('/api/invoke-agent', methods=['POST'])
 def invoke_agent():
-    """Proxy for invoking AWS Bedrock agent"""
+    """Proxy for invoking AWS Bedrock agent with streaming support"""
     try:
         import boto3
 
@@ -154,8 +154,9 @@ def invoke_agent():
         pf_token = data.get('pf_token', '')
         pf_client_id = data.get('pf_client_id', '09PF05VD')
         pf_user_id = data.get('pf_user_id', '1646085')
+        stream = data.get('stream', False)  # Support both streaming and non-streaming
 
-        logger.info(f"Invoking Bedrock agent with message: {message[:50]}...")
+        logger.info(f"Invoking Bedrock agent with message: {message[:50]}... (stream={stream})")
 
         # Initialize Bedrock client
         bedrock_client = boto3.client('bedrock-agent-runtime', region_name='us-east-1')
@@ -181,25 +182,51 @@ def invoke_agent():
             }
         )
 
-        # Process the event stream
         event_stream = response['completion']
-        full_response = []
 
-        for event in event_stream:
-            if 'chunk' in event:
-                chunk = event['chunk']
-                if 'bytes' in chunk:
-                    text = chunk['bytes'].decode('utf-8')
-                    full_response.append(text)
+        if stream:
+            # Stream response using Server-Sent Events
+            def generate():
+                try:
+                    for event in event_stream:
+                        if 'chunk' in event:
+                            chunk = event['chunk']
+                            if 'bytes' in chunk:
+                                text = chunk['bytes'].decode('utf-8')
+                                # Send as SSE format
+                                yield f"data: {json.dumps({'chunk': text})}\n\n"
+                    # Send completion event
+                    yield f"data: {json.dumps({'done': True})}\n\n"
+                except Exception as e:
+                    logger.error(f"Streaming error: {str(e)}")
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
-        response_text = ''.join(full_response)
-        logger.info(f"Agent response: {response_text[:100]}...")
+            return app.response_class(
+                generate(),
+                mimetype='text/event-stream',
+                headers={
+                    'Cache-Control': 'no-cache',
+                    'X-Accel-Buffering': 'no'
+                }
+            )
+        else:
+            # Non-streaming: collect all chunks and return
+            full_response = []
+            for event in event_stream:
+                if 'chunk' in event:
+                    chunk = event['chunk']
+                    if 'bytes' in chunk:
+                        text = chunk['bytes'].decode('utf-8')
+                        full_response.append(text)
 
-        return jsonify({
-            "response": response_text,
-            "agent_name": "Supervisor Agent",
-            "session_id": session_id
-        })
+            response_text = ''.join(full_response)
+            logger.info(f"Agent response: {response_text[:100]}...")
+
+            return jsonify({
+                "response": response_text,
+                "agent_name": "Supervisor Agent",
+                "session_id": session_id
+            })
 
     except Exception as e:
         logger.error(f"Agent invocation error: {str(e)}")
