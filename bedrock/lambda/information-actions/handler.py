@@ -23,6 +23,7 @@ from config import (
     get_auth_headers
 )
 from mock_data import (
+    get_mock_projects,
     get_mock_project_details,
     get_mock_appointment_status,
     get_mock_business_hours,
@@ -41,6 +42,7 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
     """
     Extract parameters from Bedrock Agent event
     Handles both actionGroup and requestBody formats
+    Resolves session attribute references (e.g., "session.customer_id" -> actual value from sessionAttributes)
     """
     try:
         # Bedrock Agent passes parameters in different ways
@@ -67,6 +69,27 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
             else:
                 params = body
 
+        # Resolve session attribute references
+        # Handles: "$attr_name", "session.attr", "$session.attr", "{{session.attr}}", "${session.attr}"
+        session_attrs = event.get('sessionAttributes', {})
+        for key, value in params.items():
+            if isinstance(value, str):
+                # Handle $param_name format (e.g., $customer_id)
+                if value.startswith('$') and not value.startswith('$session.'):
+                    attr_name = value[1:]  # Remove the $ prefix
+                    if attr_name in session_attrs:
+                        params[key] = session_attrs[attr_name]
+                        logger.info(f"Resolved ${attr_name} -> {params[key]}")
+                # Handle session.attr format
+                elif 'session.' in value:
+                    # Remove template markers: $, {{, }}, ${, }
+                    clean_value = value.strip('{}').strip('$').strip('{}')
+                    if clean_value.startswith('session.'):
+                        attr_name = clean_value.replace('session.', '')
+                        if attr_name in session_attrs:
+                            params[key] = session_attrs[attr_name]
+                            logger.info(f"Resolved {value} -> {params[key]}")
+
         logger.info(f"Extracted parameters: {params}")
         return params
 
@@ -75,7 +98,25 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
         return {}
 
 def format_success_response(event: Dict, action: str, result: Dict[str, Any]) -> Dict[str, Any]:
-    """Format successful response for Bedrock Agent"""
+    """Format successful response for Bedrock Agent - supports both OpenAPI and Function formats"""
+    # Check if this is function calling format (new format)
+    if 'function' in event:
+        return {
+            'messageVersion': '1.0',
+            'response': {
+                'actionGroup': event.get('actionGroup', 'information'),
+                'function': event.get('function', action),
+                'functionResponse': {
+                    'responseBody': {
+                        'TEXT': {
+                            'body': json.dumps(result)
+                        }
+                    }
+                }
+            }
+        }
+
+    # Fall back to OpenAPI format (old format)
     return {
         'messageVersion': '1.0',
         'response': {
@@ -92,7 +133,27 @@ def format_success_response(event: Dict, action: str, result: Dict[str, Any]) ->
     }
 
 def format_error_response(event: Dict, action: str, error_message: str, status_code: int = 500) -> Dict[str, Any]:
-    """Format error response for Bedrock Agent"""
+    """Format error response for Bedrock Agent - supports both OpenAPI and Function formats"""
+    error_body = {'error': error_message, 'action': action}
+
+    # Check if this is function calling format (new format)
+    if 'function' in event:
+        return {
+            'messageVersion': '1.0',
+            'response': {
+                'actionGroup': event.get('actionGroup', 'information'),
+                'function': event.get('function', action),
+                'functionResponse': {
+                    'responseBody': {
+                        'TEXT': {
+                            'body': json.dumps(error_body)
+                        }
+                    }
+                }
+            }
+        }
+
+    # Fall back to OpenAPI format (old format)
     return {
         'messageVersion': '1.0',
         'response': {
@@ -102,10 +163,7 @@ def format_error_response(event: Dict, action: str, error_message: str, status_c
             'httpStatusCode': status_code,
             'responseBody': {
                 'application/json': {
-                    'body': json.dumps({
-                        'error': error_message,
-                        'action': action
-                    })
+                    'body': json.dumps(error_body)
                 }
             }
         }
@@ -114,6 +172,60 @@ def format_error_response(event: Dict, action: str, error_message: str, status_c
 # ============================================================================
 # Action Handlers
 # ============================================================================
+
+def handle_get_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
+    """
+    Action: get_projects
+    Returns all projects for a customer
+    """
+    customer_id = params.get('customer_id')
+
+    if not customer_id:
+        raise ValueError("Missing required parameter: customer_id")
+
+    if USE_MOCK_API:
+        logger.info(f"[MOCK] Fetching all projects for customer {customer_id}")
+        response = get_mock_projects(customer_id)
+    else:
+        logger.info(f"[REAL] Fetching all projects for customer {customer_id}")
+        url = f"{config['dashboard_url']}/{customer_id}"
+        res = requests.get(url, headers=auth_headers, timeout=30)
+        res.raise_for_status()
+        dashboard_response = res.json()
+
+        # Extract and format projects list
+        projects_list = []
+        for item in dashboard_response.get("data", []):
+            projects_list.append({
+                "project_id": item.get("project_project_id"),
+                "order_number": item.get("project_project_number"),
+                "project_type": item.get("project_type_project_type"),
+                "category": item.get("project_category_category"),
+                "status": item.get("status_info_status"),
+                "address": item.get("installation_address_full_address"),
+                "scheduled_date": item.get("project_date_scheduled_date"),
+                "scheduled_time": f"{item.get('convertedProjectStartScheduledDate')} - {item.get('convertedProjectEndScheduledDate')}" if item.get('convertedProjectStartScheduledDate') else None,
+                "technician": f"{item.get('user_idata_first_name')} {item.get('user_idata_last_name')}" if item.get('user_idata_first_name') else None,
+                "store": item.get("project_store_store_number")
+            })
+
+        response = {
+            "status": "success",
+            "data": {
+                "customer_id": customer_id,
+                "projects": projects_list,
+                "total_projects": len(projects_list)
+            }
+        }
+
+    data = response.get("data", {})
+    return {
+        "action": "get_projects",
+        "customer_id": customer_id,
+        "projects": data.get("projects", []),
+        "total_projects": data.get("total_projects", 0),
+        "mock_mode": USE_MOCK_API
+    }
 
 def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
     """
@@ -378,7 +490,8 @@ def lambda_handler(event, context):
 
     try:
         # Extract action from event
-        action = event.get('apiPath', '').lstrip('/')
+        # Function calling format uses 'function', OpenAPI format uses 'apiPath'
+        action = event.get('function', event.get('apiPath', '')).lstrip('/')
         if not action:
             # Fallback: check for action in parameters
             params = extract_parameters(event)
@@ -392,23 +505,53 @@ def lambda_handler(event, context):
                 400
             )
 
+        # Convert underscores to hyphens for consistency
+        action = action.replace('_', '-')
+
         logger.info(f"Processing action: {action}")
 
         # Extract parameters
         params = extract_parameters(event)
 
+        # Extract session attributes (passed from Bedrock Agent)
+        session_attributes = event.get('sessionAttributes', {})
+        logger.info(f"Session attributes: {session_attributes}")
+
+        # Get ProjectForce token from session attributes
+        pf_bearer_token = session_attributes.get('pf_bearer_token', '')
+        pf_api_base = session_attributes.get('pf_api_base', '')
+        customer_id = session_attributes.get('customer_id', params.get('customer_id', ''))
+        client_id = session_attributes.get('client_id', params.get('client_id', 'default'))
+
+        # Add customer_id to params if not already present
+        if customer_id and 'customer_id' not in params:
+            params['customer_id'] = customer_id
+
         # Get configuration
-        client_id = params.get('client_id', 'default')
         config = get_api_config(client_id)
+
+        # Override base URL if provided in session attributes
+        if pf_api_base:
+            config['base_url'] = pf_api_base
+            config['dashboard_url'] = f"{pf_api_base}/cx-scheduled/projects"
+            config['business_hours_url'] = f"{pf_api_base}/system/client-details"
+            logger.info(f"Using ProjectForce API base: {pf_api_base}")
 
         # Get auth headers (if not using mock)
         auth_headers = {}
         if not USE_MOCK_API:
-            authorization = params.get('authorization', event.get('authorization', ''))
+            # Use token from session attributes if available, otherwise fallback to env var
+            authorization = pf_bearer_token if pf_bearer_token else params.get('authorization', event.get('authorization', ''))
             auth_headers = get_auth_headers(authorization, client_id)
+
+            if pf_bearer_token:
+                logger.info("Using ProjectForce Bearer token from session attributes")
+            else:
+                logger.warning("No ProjectForce Bearer token in session attributes, using environment variable")
 
         # Route to appropriate handler
         handlers = {
+            'get-projects': handle_get_projects,
             'get-project-details': handle_get_project_details,
             'get-appointment-status': handle_get_appointment_status,
             'get-working-hours': handle_get_working_hours,

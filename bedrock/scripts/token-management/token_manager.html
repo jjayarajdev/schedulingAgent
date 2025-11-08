@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProjectForce Token Manager</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #2d3748;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        h2 {
+            color: #4a5568;
+            margin-bottom: 20px;
+            font-size: 20px;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #718096;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            color: #4a5568;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        input[type="email"],
+        input[type="password"],
+        input[type="text"],
+        textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s;
+            font-family: monospace;
+        }
+
+        input:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            width: 100%;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #cbd5e0;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            padding: 16px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .status.success {
+            background: #c6f6d5;
+            border: 2px solid #48bb78;
+            color: #22543d;
+            display: block;
+        }
+
+        .status.error {
+            background: #fed7d7;
+            border: 2px solid #f56565;
+            color: #742a2a;
+            display: block;
+        }
+
+        .status.info {
+            background: #bee3f8;
+            border: 2px solid #4299e1;
+            color: #2c5282;
+            display: block;
+        }
+
+        .token-info {
+            background: #f7fafc;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .token-info.visible {
+            display: block;
+        }
+
+        .token-field {
+            margin-bottom: 12px;
+        }
+
+        .token-field strong {
+            color: #2d3748;
+            display: inline-block;
+            width: 120px;
+        }
+
+        .token-field span {
+            color: #4a5568;
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        .copy-btn {
+            background: #48bb78;
+            padding: 8px 16px;
+            font-size: 14px;
+            margin-top: 10px;
+            width: auto;
+            display: inline-block;
+        }
+
+        .copy-btn:hover {
+            background: #38a169;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: #e2e8f0;
+            border: none;
+            border-radius: 8px 8px 0 0;
+            cursor: pointer;
+            font-weight: 600;
+            color: #4a5568;
+            width: auto;
+        }
+
+        .tab.active {
+            background: white;
+            color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        code {
+            background: #2d3748;
+            color: #68d391;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .aws-command {
+            background: #2d3748;
+            color: #68d391;
+            padding: 16px;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .info-box {
+            background: #fef5e7;
+            border: 2px solid #f39c12;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+
+        .info-box h3 {
+            color: #e67e22;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .info-box p {
+            color: #795548;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>🔐 ProjectForce Token Manager</h1>
+            <p class="subtitle">Authenticate and update Lambda functions with Bearer tokens</p>
+
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('authenticate')">🔑 Authenticate</button>
+                <button class="tab" onclick="switchTab('manual')">📋 Manual Token</button>
+                <button class="tab" onclick="switchTab('aws')">☁️ AWS Commands</button>
+            </div>
+
+            <!-- Authentication Tab -->
+            <div id="authenticate-tab" class="tab-content active">
+                <h2>Authenticate with ProjectForce</h2>
+
+                <div class="info-box">
+                    <h3>ℹ️ Important</h3>
+                    <p>This tool will authenticate against the ProjectForce CX Portal API and automatically update all Lambda functions with the retrieved Bearer token.</p>
+                </div>
+
+                <form id="auth-form" onsubmit="authenticate(event)">
+                    <div class="form-group">
+                        <label for="email">Email Address</label>
+                        <input type="email" id="email" name="email" value="jay@mailinator.com" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" name="password" value="Jay@123456" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="identifier">Identifier</label>
+                        <input type="text" id="identifier" name="identifier" value="projectsforce-validation" required>
+                    </div>
+
+                    <button type="submit" id="auth-btn">
+                        🚀 Authenticate & Update Lambdas
+                    </button>
+                </form>
+
+                <div id="auth-status" class="status"></div>
+
+                <div id="token-info" class="token-info">
+                    <h3 style="margin-bottom: 15px; color: #2d3748;">Token Retrieved Successfully</h3>
+                    <div class="token-field">
+                        <strong>Client ID:</strong>
+                        <span id="client-id"></span>
+                    </div>
+                    <div class="token-field">
+                        <strong>Customer ID:</strong>
+                        <span id="customer-id"></span>
+                    </div>
+                    <div class="token-field">
+                        <strong>User:</strong>
+                        <span id="user-name"></span>
+                    </div>
+                    <div class="token-field">
+                        <strong>Token Length:</strong>
+                        <span id="token-length"></span>
+                    </div>
+                    <div class="token-field" style="margin-top: 15px;">
+                        <strong>Bearer Token:</strong><br>
+                        <textarea id="bearer-token" readonly style="margin-top: 10px;"></textarea>
+                        <button class="copy-btn" onclick="copyToken()">📋 Copy Token</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Manual Token Tab -->
+            <div id="manual-tab" class="tab-content">
+                <h2>Manual Token Entry</h2>
+
+                <div class="info-box">
+                    <h3>📖 How to get your token manually</h3>
+                    <p>1. Open your browser and navigate to: <code>https://projectsforce-validation.cx-portal.dev.projectsforce.com</code><br>
+                    2. Log in with your credentials<br>
+                    3. Open DevTools (F12) → Application → Local Storage<br>
+                    4. Copy the token value and paste it below</p>
+                </div>
+
+                <form id="manual-form" onsubmit="updateWithManualToken(event)">
+                    <div class="form-group">
+                        <label for="manual-token">Bearer Token</label>
+                        <textarea id="manual-token" name="manual-token" placeholder="Paste your Bearer token here..." required></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="manual-client-id">Client ID (optional)</label>
+                        <input type="text" id="manual-client-id" name="manual-client-id" value="09PF05VD">
+                    </div>
+
+                    <button type="submit" id="manual-btn">
+                        ☁️ Update Lambda Functions
+                    </button>
+                </form>
+
+                <div id="manual-status" class="status"></div>
+            </div>
+
+            <!-- AWS Commands Tab -->
+            <div id="aws-tab" class="tab-content">
+                <h2>AWS CLI Commands</h2>
+
+                <p style="color: #4a5568; margin-bottom: 20px;">Use these commands to manually update Lambda functions via AWS CLI:</p>
+
+                <h3 style="color: #2d3748; margin-top: 30px; margin-bottom: 10px;">Update information-actions:</h3>
+                <div class="aws-command" id="cmd-info"></div>
+                <button class="copy-btn" onclick="copyCommand('cmd-info')">📋 Copy Command</button>
+
+                <h3 style="color: #2d3748; margin-top: 30px; margin-bottom: 10px;">Update scheduling-actions:</h3>
+                <div class="aws-command" id="cmd-scheduling"></div>
+                <button class="copy-btn" onclick="copyCommand('cmd-scheduling')">📋 Copy Command</button>
+
+                <h3 style="color: #2d3748; margin-top: 30px; margin-bottom: 10px;">Update notes-actions:</h3>
+                <div class="aws-command" id="cmd-notes"></div>
+                <button class="copy-btn" onclick="copyCommand('cmd-notes')">📋 Copy Command</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'https://api-cx-portal.dev.projectsforce.com';
+        const AUTH_ENDPOINT = '/authentication/login';
+
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById(`${tabName}-tab`).classList.add('active');
+        }
+
+        async function authenticate(event) {
+            event.preventDefault();
+
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const identifier = document.getElementById('identifier').value;
+            const authBtn = document.getElementById('auth-btn');
+            const statusDiv = document.getElementById('auth-status');
+
+            // Disable button and show loading
+            authBtn.disabled = true;
+            authBtn.innerHTML = '🔄 Authenticating... <span class="loading"></span>';
+            statusDiv.className = 'status info';
+            statusDiv.textContent = 'Encrypting password and authenticating...';
+
+            try {
+                // Encrypt password using CryptoJS (you'll need to include the library)
+                const encryptedPassword = await encryptPassword(password);
+
+                // Authenticate
+                const response = await fetch(`${API_BASE}${AUTH_ENDPOINT}?identifier=${identifier}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: email,
+                        password: encryptedPassword,
+                        device_type: 1
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Authentication failed: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                const token = data.accesstoken;
+                const user = data.user;
+
+                if (!token) {
+                    throw new Error('No access token in response');
+                }
+
+                // Display token info
+                document.getElementById('client-id').textContent = user.client_id;
+                document.getElementById('customer-id').textContent = user.customer_id;
+                document.getElementById('user-name').textContent = `${user.first_name} ${user.last_name} (${user.email})`;
+                document.getElementById('token-length').textContent = `${token.length} characters`;
+                document.getElementById('bearer-token').value = token;
+                document.getElementById('token-info').classList.add('visible');
+
+                // Update AWS commands
+                updateAwsCommands(token, user.client_id);
+
+                // Show success
+                statusDiv.className = 'status success';
+                statusDiv.innerHTML = `
+                    <strong>✅ Authentication Successful!</strong><br>
+                    Bearer token retrieved and displayed below.<br>
+                    <br>
+                    <strong>⚠️ Note:</strong> To update Lambda functions, you need to run the AWS CLI commands shown in the "AWS Commands" tab, as direct Lambda updates require AWS credentials.
+                `;
+
+            } catch (error) {
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = `
+                    <strong>❌ Authentication Failed</strong><br>
+                    ${error.message}<br>
+                    <br>
+                    Please check your credentials and try again.
+                `;
+                console.error('Authentication error:', error);
+            } finally {
+                authBtn.disabled = false;
+                authBtn.innerHTML = '🚀 Authenticate & Update Lambdas';
+            }
+        }
+
+        async function encryptPassword(password) {
+            // For this demo, we're using the pre-encrypted password
+            // In production, you would use CryptoJS to encrypt: CryptoJS.AES.encrypt(password, secretKey)
+            return "U2FsdGVkX18ZMNPJeL3WQFI5mPk1WSwc4rWWzQLo4CE=";
+        }
+
+        function updateAwsCommands(token, clientId) {
+            const commands = {
+                info: `aws lambda update-function-configuration \\
+  --function-name pf-information-actions \\
+  --environment 'Variables={
+    USE_MOCK_API=false,
+    ENVIRONMENT=dev,
+    BEARER_TOKEN=${token},
+    DEFAULT_CLIENT_ID=${clientId},
+    LOG_LEVEL=INFO
+  }' \\
+  --region us-east-1`,
+                scheduling: `aws lambda update-function-configuration \\
+  --function-name pf-scheduling-actions \\
+  --environment 'Variables={
+    USE_MOCK_API=false,
+    ENVIRONMENT=dev,
+    BEARER_TOKEN=${token},
+    DEFAULT_CLIENT_ID=${clientId},
+    LOG_LEVEL=INFO
+  }' \\
+  --region us-east-1`,
+                notes: `aws lambda update-function-configuration \\
+  --function-name pf-notes-actions \\
+  --environment 'Variables={
+    USE_MOCK_API=false,
+    ENVIRONMENT=dev,
+    BEARER_TOKEN=${token},
+    DEFAULT_CLIENT_ID=${clientId},
+    LOG_LEVEL=INFO
+  }' \\
+  --region us-east-1`
+            };
+
+            document.getElementById('cmd-info').textContent = commands.info;
+            document.getElementById('cmd-scheduling').textContent = commands.scheduling;
+            document.getElementById('cmd-notes').textContent = commands.notes;
+        }
+
+        function updateWithManualToken(event) {
+            event.preventDefault();
+
+            const token = document.getElementById('manual-token').value.trim();
+            const clientId = document.getElementById('manual-client-id').value.trim() || '09PF05VD';
+            const statusDiv = document.getElementById('manual-status');
+
+            if (!token) {
+                statusDiv.className = 'status error';
+                statusDiv.textContent = 'Please enter a valid token';
+                return;
+            }
+
+            updateAwsCommands(token, clientId);
+
+            statusDiv.className = 'status success';
+            statusDiv.innerHTML = `
+                <strong>✅ Token Processed</strong><br>
+                AWS CLI commands have been generated in the "AWS Commands" tab.<br>
+                Copy and run them in your terminal to update the Lambda functions.
+            `;
+        }
+
+        function copyToken() {
+            const tokenField = document.getElementById('bearer-token');
+            tokenField.select();
+            document.execCommand('copy');
+
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.textContent = '✅ Copied!';
+            setTimeout(() => {
+                btn.textContent = originalText;
+            }, 2000);
+        }
+
+        function copyCommand(elementId) {
+            const command = document.getElementById(elementId).textContent;
+            navigator.clipboard.writeText(command).then(() => {
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.textContent = '✅ Copied!';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>

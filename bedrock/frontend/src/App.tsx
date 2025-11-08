@@ -30,10 +30,11 @@ interface Message {
 
 const SAMPLE_QUERIES = [
   "Show me all my projects",
-  "What dates are available for project 12347?",
-  "Tell me about project 12345",
+  "What dates are available for project PRJ-78946?",
+  "Tell me about project PRJ-78945",
+  "Schedule project PRJ-78947 for next Monday at 10 AM",
   "What are your business hours?",
-  "Add a note to project 12345: Customer prefers morning appointments"
+  "Add a note to PRJ-78946: Customer confirmed morning slot"
 ];
 
 function App() {
@@ -262,10 +263,10 @@ function App() {
         {/* Footer */}
         <div className="mt-6 text-center text-sm text-gray-600">
           <p>
-            Using mock data (CUST001) • Projects: 12345 (Flooring), 12347 (Windows), 12350 (Deck Repair)
+            Mock Data • Projects: PRJ-78945 (Flooring-Scheduled), PRJ-78946 (Windows-Pending), PRJ-78947 (Deck Repair), PRJ-78948 (Kitchen), PRJ-78949 (Bathroom)
           </p>
           <p className="text-xs mt-1">
-            Backend: AWS Bedrock • Model: Claude Sonnet 4.5 • Architecture: Supervisor + 4 Specialists
+            AWS Bedrock • Claude 3.5 Sonnet V2 • Architecture: Supervisor + 4 Collaborator Agents
           </p>
         </div>
       </div>

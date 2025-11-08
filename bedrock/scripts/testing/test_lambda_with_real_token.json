@@ -1,0 +1,29 @@
+{
+  "messageVersion": "1.0",
+  "agent": {
+    "name": "SchedulingAgent",
+    "id": "TIGRBGSXCS",
+    "alias": "PNDF9AQVHW",
+    "version": "DRAFT"
+  },
+  "inputText": "Show me all my projects",
+  "sessionId": "test-session-direct-invoke-real",
+  "actionGroup": "scheduling-actions",
+  "apiPath": "/list-projects",
+  "httpMethod": "POST",
+  "parameters": [],
+  "requestBody": {
+    "content": {
+      "application/json": {
+        "properties": []
+      }
+    }
+  },
+  "sessionAttributes": {
+    "pf_bearer_token": "TaDWx6r5O0WE2tb5/Lb7vMvON5H06g6TQ9/FhN1+K/x+sQV8jklKg64fD6EwRrfMiB3F+RN5Z6s8CLIR8d/Cqb3iC/Hkdz2lLV0VnJfHQx1YIJZh8bgpkBpPqc0++pHfX6XaS6FaVKNY5EsV7dqiHYkKs/qsF8s4S0M3p6qoFtb8J7vGk/FU5dXBN6iP9I+sW0zVx5cHJ8rQfT/Vn4L1p3sM9K2bE",
+    "pf_api_base": "https://api.dev.projectsforce.com",
+    "customer_id": "6f72bffa-c323-4058-a01c-9d495d696364",
+    "client_id": "09PF05VD",
+    "customer_type": "B2C"
+  }
+}

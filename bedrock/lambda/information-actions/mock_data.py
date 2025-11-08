@@ -5,6 +5,83 @@ Based on real API responses from core/tools.py analysis
 from datetime import datetime, timedelta
 from typing import Dict, List, Any
 
+def get_mock_projects(customer_id: str) -> Dict[str, Any]:
+    """
+    Mock response for getting all projects for a customer
+    Returns list of all projects with basic information
+    """
+    projects_list = [
+        {
+            "project_id": "PRJ-78945",
+            "order_number": "ORD-2025-001",
+            "project_type": "Installation",
+            "category": "Flooring",
+            "status": "Scheduled",
+            "address": "123 Main St, Tampa, FL 33601",
+            "scheduled_date": "2025-11-15",
+            "scheduled_time": "08:00 AM - 12:00 PM",
+            "technician": "John Smith",
+            "store": "ST-101"
+        },
+        {
+            "project_id": "PRJ-78946",
+            "order_number": "ORD-2025-002",
+            "project_type": "Installation",
+            "category": "Windows",
+            "status": "Pending",
+            "address": "456 Oak Ave, Tampa, FL 33602",
+            "scheduled_date": None,
+            "scheduled_time": None,
+            "technician": "Jane Doe",
+            "store": "ST-102"
+        },
+        {
+            "project_id": "PRJ-78947",
+            "order_number": "ORD-2025-003",
+            "project_type": "Repair",
+            "category": "Deck Repair",
+            "status": "Pending",
+            "address": "789 Pine Dr, Clearwater, FL 33755",
+            "scheduled_date": None,
+            "scheduled_time": None,
+            "technician": "Mike Johnson",
+            "store": "ST-103"
+        },
+        {
+            "project_id": "PRJ-78948",
+            "order_number": "ORD-2025-004",
+            "project_type": "Installation",
+            "category": "Kitchen Cabinets",
+            "status": "In Progress",
+            "address": "321 Maple Ln, St Petersburg, FL 33710",
+            "scheduled_date": "2025-10-25",
+            "scheduled_time": "01:00 PM - 06:00 PM",
+            "technician": "Sarah Williams",
+            "store": "ST-101"
+        },
+        {
+            "project_id": "PRJ-78949",
+            "order_number": "ORD-2025-005",
+            "project_type": "Measurement",
+            "category": "Bathroom Remodel",
+            "status": "Pending",
+            "address": "555 Beach Blvd, Clearwater Beach, FL 33767",
+            "scheduled_date": None,
+            "scheduled_time": None,
+            "technician": "Robert Chen",
+            "store": "ST-104"
+        }
+    ]
+
+    return {
+        "status": "success",
+        "data": {
+            "customer_id": customer_id,
+            "projects": projects_list,
+            "total_projects": len(projects_list)
+        }
+    }
+
 def get_mock_project_details(project_id: str, customer_id: str) -> Dict[str, Any]:
     """
     Mock response for Dashboard API (project details)

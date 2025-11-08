@@ -5,6 +5,12 @@
     "description": "API for scheduling-related actions including listing projects, checking availability, and managing appointments",
     "version": "1.0.0"
   },
+  "servers": [
+    {
+      "url": "https://api-cx-portal.dev.projectsforce.com",
+      "description": "Lambda function endpoint"
+    }
+  ],
   "paths": {
     "/list-projects": {
       "post": {
@@ -59,6 +65,96 @@
                     },
                     "mock_mode": {
                       "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get-project-details": {
+      "post": {
+        "summary": "Get Project Details",
+        "description": "Get detailed information about a specific project including customer details, installation address, scheduling information, and status",
+        "operationId": "get_project_details",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "description": "Project ID to get details for"
+                  },
+                  "client_id": {
+                    "type": "string",
+                    "description": "Client identifier (e.g., 09PF05VD)"
+                  }
+                },
+                "required": [
+                  "project_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Project details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "type": "integer"
+                    },
+                    "project_number": {
+                      "type": "string"
+                    },
+                    "client_id": {
+                      "type": "string"
+                    },
+                    "customer_id": {
+                      "type": "integer"
+                    },
+                    "category": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "scheduled_start": {
+                      "type": "string"
+                    },
+                    "scheduled_end": {
+                      "type": "string"
+                    },
+                    "customer": {
+                      "type": "object"
+                    },
+                    "installation_address": {
+                      "type": "object"
+                    },
+                    "store_info": {
+                      "type": "object"
+                    },
+                    "service_time": {
+                      "type": "string"
+                    },
+                    "full_data": {
+                      "type": "object",
+                      "description": "Complete API response with all project details"
                     }
                   }
                 }

@@ -82,3 +82,14 @@ lambda/*/package/
 # Temporary files
 response.json
 output*.json
+
+# Claude Code / AI Assistant files
+.claude/
+.claude-code/
+.cursor/
+.copilot/
+**/claude-context.txt
+**/context.md
+**/.claude*
+claude_history/
+.ai/

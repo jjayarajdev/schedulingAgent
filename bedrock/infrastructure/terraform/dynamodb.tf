@@ -140,24 +140,6 @@ resource "aws_iam_role_policy" "information_lambda_dynamodb" {
   policy = data.aws_iam_policy_document.lambda_dynamodb_access.json
 }
 
-# IAM role for notes Lambda
-resource "aws_iam_role" "notes_lambda" {
-  name               = "${var.project_name}-notes-lambda-role-${var.environment}"
-  assume_role_policy = data.aws_iam_policy_document.lambda_trust.json
-
-  tags = {
-    Name        = "${var.project_name}-notes-lambda-role"
-    Environment = var.environment
-  }
-}
-
-# Attach DynamoDB access policy to notes Lambda
-resource "aws_iam_role_policy" "notes_lambda_dynamodb" {
-  name   = "${var.project_name}-notes-lambda-dynamodb-policy"
-  role   = aws_iam_role.notes_lambda.id
-  policy = data.aws_iam_policy_document.lambda_dynamodb_access.json
-}
-
 # ==============================================================================
 # Outputs
 # ==============================================================================
@@ -180,9 +162,4 @@ output "scheduling_lambda_role_arn" {
 output "information_lambda_role_arn" {
   description = "ARN of the information Lambda IAM role"
   value       = aws_iam_role.information_lambda.arn
-}
-
-output "notes_lambda_role_arn" {
-  description = "ARN of the notes Lambda IAM role"
-  value       = aws_iam_role.notes_lambda.arn
 }

@@ -20,8 +20,15 @@ CORS(app)  # Enable CORS for frontend
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Bedrock configuration (load from agent_config.json)
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'agent_config.json')
+# Bedrock configuration (load from environment-specific agent_config file)
+# Priority: agent_config.{ENVIRONMENT}.json > agent_config.json
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
+CONFIG_DIR = os.path.dirname(__file__)
+ENV_CONFIG_PATH = os.path.join(CONFIG_DIR, f'agent_config.{ENVIRONMENT}.json')
+DEFAULT_CONFIG_PATH = os.path.join(CONFIG_DIR, 'agent_config.json')
+
+# Try environment-specific config first, fall back to default
+CONFIG_PATH = ENV_CONFIG_PATH if os.path.exists(ENV_CONFIG_PATH) else DEFAULT_CONFIG_PATH
 
 try:
     with open(CONFIG_PATH, 'r') as f:
@@ -31,6 +38,7 @@ try:
         AGENTS = config.get('agents', {})
         ROUTING_CONFIG = config.get('routing', {'enabled': True, 'use_supervisor': False})
         REGION = config.get('region', 'us-east-1')
+        logger.info(f"✅ Loaded config from: {CONFIG_PATH} (environment: {ENVIRONMENT})")
 except FileNotFoundError:
     logger.error(f"Config file not found at {CONFIG_PATH}")
     # Fallback to hardcoded values
@@ -39,33 +47,33 @@ except FileNotFoundError:
     AGENTS = {
         'scheduling': {'agent_id': 'YDCJTJBSLO', 'alias_id': 'VB7IU4DNIZ'},
         'information': {'agent_id': 'I4UC076CNX', 'alias_id': '7VLJCIYKM5'},
-        'notes': {'agent_id': 'H2GHYHEDS7', 'alias_id': 'XBAYBM3ID9'},
         'chitchat': {'agent_id': '0HRRAJHJOA', 'alias_id': '9M3HS9XRDD'}
     }
     ROUTING_CONFIG = {'enabled': True, 'use_supervisor': False}
     REGION = 'us-east-1'
 
-# Sample user data (from mock data)
+# Sample user data (matches mock_data.py)
 SAMPLE_USER = {
     'customer_id': 'CUST001',
+    'client_id': 'CLIENT001',
     'customer_type': 'B2C',
     'name': 'John Doe',
     'email': 'john.doe@example.com',
     'projects': [
         {
-            'id': '12345',
+            'id': 'PRJ-78945',
             'number': 'ORD-2025-001',
             'type': 'Installation',
             'category': 'Flooring',
             'status': 'Scheduled',
             'address': '123 Main St, Tampa, FL 33601',
-            'scheduled_date': '2025-10-15',
+            'scheduled_date': '2025-11-15',
             'scheduled_time': '08:00 AM - 12:00 PM',
             'technician': 'John Smith',
             'store': 'ST-101'
         },
         {
-            'id': '12347',
+            'id': 'PRJ-78946',
             'number': 'ORD-2025-002',
             'type': 'Installation',
             'category': 'Windows',
@@ -75,7 +83,7 @@ SAMPLE_USER = {
             'store': 'ST-102'
         },
         {
-            'id': '12350',
+            'id': 'PRJ-78947',
             'number': 'ORD-2025-003',
             'type': 'Repair',
             'category': 'Deck Repair',
@@ -83,6 +91,28 @@ SAMPLE_USER = {
             'address': '789 Pine Dr, Clearwater, FL 33755',
             'technician': 'Mike Johnson',
             'store': 'ST-103'
+        },
+        {
+            'id': 'PRJ-78948',
+            'number': 'ORD-2025-004',
+            'type': 'Installation',
+            'category': 'Kitchen Cabinets',
+            'status': 'In Progress',
+            'address': '321 Maple Ln, St Petersburg, FL 33710',
+            'scheduled_date': '2025-10-25',
+            'scheduled_time': '01:00 PM - 06:00 PM',
+            'technician': 'Sarah Williams',
+            'store': 'ST-101'
+        },
+        {
+            'id': 'PRJ-78949',
+            'number': 'ORD-2025-005',
+            'type': 'Measurement',
+            'category': 'Bathroom Remodel',
+            'status': 'Pending',
+            'address': '555 Beach Blvd, Clearwater Beach, FL 33767',
+            'technician': 'Robert Chen',
+            'store': 'ST-104'
         }
     ]
 }
@@ -90,6 +120,162 @@ SAMPLE_USER = {
 # Initialize Bedrock clients
 bedrock_agent_runtime = boto3.client('bedrock-agent-runtime', region_name=REGION)
 bedrock_runtime = boto3.client('bedrock-runtime', region_name=REGION)
+
+
+# ==============================================================================
+# Session Management for Conversation Memory
+# ==============================================================================
+
+class SessionManager:
+    """
+    Manages Bedrock agent sessions to enable conversation memory.
+
+    Features:
+    - Reuses session IDs for the same customer (maintains conversation context)
+    - Automatic session timeout (default 30 minutes)
+    - Session cleanup to prevent memory leaks
+    - Thread-safe operations
+
+    Usage:
+        session_id, is_new = session_manager.get_or_create_session(customer_id)
+    """
+
+    def __init__(self, timeout_minutes=30):
+        """
+        Initialize session manager
+
+        Args:
+            timeout_minutes: Session timeout in minutes (default 30)
+        """
+        self.sessions = {}  # {customer_id: (session_id, last_used_time)}
+        self.timeout = timeout_minutes * 60  # Convert to seconds
+        self.timeout_minutes = timeout_minutes
+        logger.info(f"SessionManager initialized with {timeout_minutes}-minute timeout")
+
+    def get_or_create_session(self, customer_id: str) -> tuple:
+        """
+        Get existing session or create a new one
+
+        Args:
+            customer_id: Unique customer identifier
+
+        Returns:
+            tuple: (session_id, is_new_session)
+        """
+        now = time.time()
+
+        # Check if session exists and is still valid
+        if customer_id in self.sessions:
+            session_id, last_used = self.sessions[customer_id]
+            session_age = now - last_used
+
+            if session_age < self.timeout:
+                # Reuse existing session (update last_used time)
+                self.sessions[customer_id] = (session_id, now)
+                logger.info(f"♻️  Reusing session for {customer_id}: {session_id} (age: {int(session_age)}s)")
+                return session_id, False  # Not a new session
+            else:
+                # Session expired
+                logger.info(f"⏰ Session expired for {customer_id} (age: {int(session_age)}s > timeout: {self.timeout}s)")
+
+        # Create new session
+        session_id = f"session-{customer_id}-{int(now)}"
+        self.sessions[customer_id] = (session_id, now)
+        logger.info(f"🆕 Created NEW session for {customer_id}: {session_id}")
+        return session_id, True  # New session
+
+    def clear_session(self, customer_id: str) -> bool:
+        """
+        Clear session for a specific customer (forces new session on next request)
+
+        Args:
+            customer_id: Customer ID to clear
+
+        Returns:
+            bool: True if session was cleared, False if no session existed
+        """
+        if customer_id in self.sessions:
+            session_id, _ = self.sessions[customer_id]
+            del self.sessions[customer_id]
+            logger.info(f"🗑️  Cleared session for {customer_id}: {session_id}")
+            return True
+        return False
+
+    def get_session_info(self, customer_id: str) -> dict:
+        """
+        Get information about a customer's session
+
+        Args:
+            customer_id: Customer ID to query
+
+        Returns:
+            dict: Session information (session_id, age, is_active)
+        """
+        if customer_id not in self.sessions:
+            return {
+                'has_session': False,
+                'session_id': None,
+                'age_seconds': 0,
+                'is_active': False
+            }
+
+        session_id, last_used = self.sessions[customer_id]
+        age = time.time() - last_used
+        is_active = age < self.timeout
+
+        return {
+            'has_session': True,
+            'session_id': session_id,
+            'age_seconds': int(age),
+            'age_minutes': round(age / 60, 1),
+            'is_active': is_active,
+            'timeout_minutes': self.timeout_minutes
+        }
+
+    def cleanup_expired_sessions(self) -> int:
+        """
+        Remove expired sessions to prevent memory bloat
+        Should be called periodically (e.g., every hour)
+
+        Returns:
+            int: Number of sessions cleaned up
+        """
+        now = time.time()
+        expired = []
+
+        for customer_id, (session_id, last_used) in self.sessions.items():
+            if now - last_used >= self.timeout:
+                expired.append(customer_id)
+
+        for customer_id in expired:
+            del self.sessions[customer_id]
+
+        if expired:
+            logger.info(f"🧹 Cleaned up {len(expired)} expired sessions")
+
+        return len(expired)
+
+    def get_stats(self) -> dict:
+        """
+        Get statistics about active sessions
+
+        Returns:
+            dict: Session statistics
+        """
+        now = time.time()
+        active_count = sum(1 for _, (_, last_used) in self.sessions.items()
+                          if now - last_used < self.timeout)
+
+        return {
+            'total_sessions': len(self.sessions),
+            'active_sessions': active_count,
+            'expired_sessions': len(self.sessions) - active_count,
+            'timeout_minutes': self.timeout_minutes
+        }
+
+
+# Global session manager instance
+session_manager = SessionManager(timeout_minutes=30)
 
 
 # ==============================================================================
@@ -113,7 +299,7 @@ def log_classification_decision(message: str, intent: str, classification_time: 
             'message_length': len(message),
             'classified_intent': intent,
             'classification_time_ms': round(classification_time * 1000, 2),
-            'model': 'haiku',
+            'model': 'claude-3.5-sonnet-v2',
             'status': 'success'
         }
 
@@ -195,10 +381,9 @@ def get_routing_metrics():
     return {
         'total_requests': 0,
         'intents': {
-            'chitchat': 0,
             'scheduling': 0,
             'information': 0,
-            'notes': 0
+            'chitchat': 0
         },
         'avg_classification_time_ms': 0,
         'avg_invocation_time_ms': 0,
@@ -212,17 +397,18 @@ def get_routing_metrics():
 
 def classify_intent(message):
     """
-    Classify user intent using Claude Haiku for fast, cheap classification.
-    Returns: 'scheduling', 'information', 'notes', or 'chitchat'
+    Classify user intent using Claude 3.5 Sonnet V2 for accurate classification.
+    Returns: 'scheduling', 'information', or 'chitchat'
 
-    Version: 2.0 - Improved edge case handling
+    Version: 3.0 - Updated to 3-agent system with Claude 3.5 Sonnet V2
     """
     prompt = f"""You are an intent classifier for a property management scheduling system.
 
 Given a user message, classify it into ONE of these categories:
 
 1. **scheduling**:
-   - Listing/showing projects ("show me my projects", "what projects do I have", "list projects")
+   - **ALWAYS classify requests to list, show, or view projects as scheduling**
+   - Examples: "show me my projects", "list my projects", "what projects do I have", "show projects", "my projects", "list all projects"
    - Booking appointments ("schedule an appointment", "book a time")
    - Checking availability ("what dates are available", "when can I schedule")
    - Getting dates/times ("available times", "open slots")
@@ -235,16 +421,8 @@ Given a user message, classify it into ONE of these categories:
    - Working hours ("what time do you open")
    - Weather forecasts, general knowledge queries
    - Factual information lookups ("population of", "exchange rate")
-   - EXCLUDE: Personal reminders and lists (those are notes)
 
-3. **notes**:
-   - Adding notes ("add a note", "write a note", "remember this", "save a note")
-   - Creating lists ("shopping list", "to-do list", "add to my list")
-   - Viewing notes ("show notes", "what notes do I have", "find my note")
-   - Deleting notes ("delete note", "remove note")
-   - Personal reminders and memory aids
-
-4. **chitchat**:
+3. **chitchat**:
    - Greetings ("hi", "hello", "good morning", "thanks", "goodbye")
    - Small talk, jokes, casual conversation
    - Emotional expressions ("I'm feeling stressed", "need to talk", "how are you")
@@ -253,13 +431,13 @@ Given a user message, classify it into ONE of these categories:
 
 User message: "{message}"
 
-Respond with ONLY the category name (scheduling/information/notes/chitchat), nothing else."""
+Respond with ONLY the category name (scheduling/information/chitchat), nothing else."""
 
     classification_start_time = time.time()
 
     try:
         response = bedrock_runtime.invoke_model(
-            modelId='anthropic.claude-3-haiku-20240307-v1:0',
+            modelId='anthropic.claude-3-5-sonnet-20241022-v2:0',  # Claude 3.5 Sonnet V2
             body=json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
                 "max_tokens": 10,
@@ -272,7 +450,7 @@ Respond with ONLY the category name (scheduling/information/notes/chitchat), not
         intent = response_body['content'][0]['text'].strip().lower()
 
         # Validate intent
-        valid_intents = ['scheduling', 'information', 'notes', 'chitchat']
+        valid_intents = ['scheduling', 'information', 'chitchat']
         if intent not in valid_intents:
             logger.warning(f"Invalid intent '{intent}' returned, defaulting to chitchat")
             intent = 'chitchat'
@@ -304,19 +482,22 @@ def invoke_agent_with_context(message, customer_id, customer_type='B2C'):
     1. If use_supervisor=True: use supervisor agent (for when AWS fixes the bug)
     2. If use_supervisor=False: classify intent and route to appropriate agent
 
-    Version: 2.0 - With monitoring and logging
+    Version: 3.0 - With session memory for conversation continuity
     """
 
     # CRITICAL: Inject customer context into prompt
     augmented_prompt = f"""Session Context:
 - Customer ID: {customer_id}
+- Client ID: {SAMPLE_USER.get('client_id', 'CLIENT001')}
+- Client Name: {SAMPLE_USER.get('name', 'John Doe')}
 - Customer Type: {customer_type}
 
 User Request: {message}
 
-Please help the customer with their request using their customer ID for any actions."""
+Please help the customer with their request using their customer ID and client ID for any actions."""
 
-    session_id = f"session-{customer_id}-{int(time.time())}"
+    # Use session manager for conversation memory
+    session_id, is_new_session = session_manager.get_or_create_session(customer_id)
     invocation_start_time = time.time()
     intent = 'unknown'
     agent_id = None
@@ -346,6 +527,8 @@ Please help the customer with their request using their customer ID for any acti
             sessionState={
                 'sessionAttributes': {
                     'customer_id': customer_id,
+                    'client_id': SAMPLE_USER.get('client_id', 'CLIENT001'),
+                    'client_name': SAMPLE_USER.get('name', 'John Doe'),
                     'customer_type': customer_type
                 }
             }
@@ -474,8 +657,8 @@ def get_metrics():
 @app.route('/api/classify', methods=['POST'])
 def classify_only():
     """
-    Classification-only endpoint for testing UI
-    Returns just the intent classification without invoking the full agent
+    Route requests to the Supervisor agent with multi-agent collaboration
+    The Supervisor will automatically route to the appropriate collaborator agent
     """
     data = request.json
     message = data.get('message')
@@ -483,32 +666,229 @@ def classify_only():
     if not message:
         return jsonify({'error': 'Message is required'}), 400
 
+    # Get ProjectForce credentials from request
+    pf_token = data.get('pf_token')
+    pf_client_id = data.get('pf_client_id', '09PF05VD')
+    pf_user_id = data.get('pf_user_id', '6f72bffa-c323-4058-a01c-9d495d696364')
+
+    logger.info(f"Received request with PF token: {'Yes' if pf_token else 'No'}, Client ID: {pf_client_id}")
+    if pf_token:
+        logger.info(f"Token preview (first 20 chars): {pf_token[:20]}...")
+
     start_time = time.time()
 
     try:
-        # Classify the intent
-        intent = classify_intent(message)
+        # Route directly to Supervisor - it will handle classification and routing
+        agent_id = SUPERVISOR_ID
+        alias_id = SUPERVISOR_ALIAS
 
-        # Get agent info
-        agent_config = AGENTS.get(intent, AGENTS['chitchat'])
+        logger.info(f"Routing to Supervisor agent: {agent_id} with alias: {alias_id}")
 
-        classification_time = time.time() - start_time
+        # Use real ProjectForce data if token is available
+        if pf_token:
+            customer_id = pf_user_id
+            customer_type = 'B2C'
+            client_id = pf_client_id
+            client_name = 'ProjectForce User'
+        else:
+            # Fallback to sample data
+            customer_id = SAMPLE_USER['customer_id']
+            customer_type = SAMPLE_USER['customer_type']
+            client_id = SAMPLE_USER.get('client_id', 'CLIENT001')
+            client_name = SAMPLE_USER.get('name', 'John Doe')
+
+        # Use session manager for conversation memory
+        session_id, is_new_session = session_manager.get_or_create_session(customer_id)
+        logger.info(f"Session: {'NEW' if is_new_session else 'REUSED'} - {session_id}")
+
+        # Create augmented prompt with context
+        augmented_prompt = f"""Session Context:
+- Customer ID: {customer_id}
+- Client ID: {client_id}
+- Client Name: {client_name}
+- Customer Type: {customer_type}
+
+User Request: {message}
+
+Please help the customer with their request using their customer ID and client ID for any actions."""
+
+        # Invoke agent with ProjectForce token in session attributes
+        invocation_start = time.time()
+
+        session_attributes = {
+            'customer_id': customer_id,
+            'client_id': client_id,
+            'client_name': client_name,
+            'customer_type': customer_type
+        }
+
+        # Add ProjectForce token if available
+        if pf_token:
+            session_attributes['pf_bearer_token'] = pf_token
+            session_attributes['pf_api_base'] = 'https://api-cx-portal.dev.projectsforce.com'
+            logger.info(f"Session attributes being sent to Bedrock: {list(session_attributes.keys())}")
+
+        response = bedrock_agent_runtime.invoke_agent(
+            agentId=agent_id,
+            agentAliasId=alias_id,
+            sessionId=session_id,
+            inputText=augmented_prompt,
+            enableTrace=True,
+            sessionState={
+                'sessionAttributes': session_attributes
+            }
+        )
+
+        # Collect full response and trace
+        full_response = ""
+        chunk_count = 0
+        trace_count = 0
+        for event in response['completion']:
+            if 'chunk' in event:
+                chunk = event['chunk']
+                if 'bytes' in chunk:
+                    decoded = chunk['bytes'].decode('utf-8')
+                    full_response += decoded
+                    chunk_count += 1
+            elif 'trace' in event:
+                trace = event['trace']
+                trace_count += 1
+                # Log full trace for debugging
+                logger.info(f"Full trace event: {json.dumps(trace, indent=2, default=str)}")
+                if 'failureTrace' in trace:
+                    logger.error(f"Failure trace: {trace['failureTrace']}")
+                if 'orchestrationTrace' in trace:
+                    orch = trace['orchestrationTrace']
+                    if 'invocationInput' in orch:
+                        logger.info(f"Action invocation: {orch['invocationInput']}")
+                    if 'observation' in orch:
+                        logger.info(f"Action observation: {orch['observation']}")
+
+        logger.info(f"Received {chunk_count} chunks, {trace_count} trace events, total length: {len(full_response)} chars")
+        logger.info(f"Response preview: {full_response[:200]}...")
+
+        invocation_time = time.time() - invocation_start
+        total_time = time.time() - start_time
 
         return jsonify({
-            'intent': intent,
-            'agent_id': agent_config['agent_id'],
-            'agent_alias_id': agent_config['alias_id'],
-            'classification_time_ms': round(classification_time * 1000, 2),
-            'timestamp': datetime.now().isoformat()
+            'intent': 'supervisor',  # All requests go through supervisor
+            'agent_id': agent_id,
+            'agent_alias_id': alias_id,
+            'invocation_time_ms': round(invocation_time * 1000, 2),
+            'total_time_ms': round(total_time * 1000, 2),
+            'response': full_response,
+            'customer_id': customer_id,
+            'session_id': session_id,
+            'timestamp': datetime.now().isoformat(),
+            'request_parameters': {
+                'agentId': agent_id,
+                'agentAliasId': alias_id,
+                'sessionId': session_id,
+                'inputText': augmented_prompt,
+                'sessionState': {
+                    'sessionAttributes': {
+                        'customer_id': customer_id,
+                        'customer_type': customer_type
+                    }
+                },
+                'original_message': message
+            }
         })
 
     except Exception as e:
-        logger.error(f"Classification endpoint error: {e}")
+        logger.error(f"Supervisor routing error: {e}")
         return jsonify({
             'error': str(e),
-            'intent': 'chitchat',  # Fallback
-            'classification_time_ms': round((time.time() - start_time) * 1000, 2)
+            'intent': 'supervisor',
+            'total_time_ms': round((time.time() - start_time) * 1000, 2)
         }), 500
+
+
+@app.route('/api/test-queries', methods=['GET'])
+def get_test_queries():
+    """
+    Get test queries for the Testing UI
+    Returns all predefined test queries organized by category
+    """
+    try:
+        test_queries_path = os.path.join(os.path.dirname(__file__), 'test_queries.json')
+
+        with open(test_queries_path, 'r') as f:
+            test_queries = json.load(f)
+
+        return jsonify(test_queries)
+    except FileNotFoundError:
+        logger.error("test_queries.json file not found")
+        return jsonify({'error': 'Test queries file not found'}), 404
+    except Exception as e:
+        logger.error(f"Error loading test queries: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/session/info', methods=['GET'])
+def get_session_info():
+    """
+    Get session information for a customer
+    Query params: customer_id (optional, defaults to sample user)
+    """
+    customer_id = request.args.get('customer_id', SAMPLE_USER['customer_id'])
+    info = session_manager.get_session_info(customer_id)
+    return jsonify({
+        'customer_id': customer_id,
+        **info
+    })
+
+
+@app.route('/api/session/reset', methods=['POST'])
+def reset_session():
+    """
+    Reset (clear) session for a customer to start a fresh conversation
+    Body: { "customer_id": "..." } (optional, defaults to sample user)
+    """
+    data = request.json or {}
+    customer_id = data.get('customer_id', SAMPLE_USER['customer_id'])
+
+    cleared = session_manager.clear_session(customer_id)
+
+    if cleared:
+        return jsonify({
+            'status': 'success',
+            'message': f'Session reset for customer {customer_id}',
+            'customer_id': customer_id
+        })
+    else:
+        return jsonify({
+            'status': 'info',
+            'message': f'No active session found for customer {customer_id}',
+            'customer_id': customer_id
+        })
+
+
+@app.route('/api/session/stats', methods=['GET'])
+def get_session_stats():
+    """
+    Get statistics about all active sessions
+    """
+    stats = session_manager.get_stats()
+    return jsonify({
+        'status': 'success',
+        **stats,
+        'timestamp': datetime.now().isoformat()
+    })
+
+
+@app.route('/api/session/cleanup', methods=['POST'])
+def cleanup_sessions():
+    """
+    Manually trigger cleanup of expired sessions
+    """
+    cleaned = session_manager.cleanup_expired_sessions()
+    return jsonify({
+        'status': 'success',
+        'message': f'Cleaned up {cleaned} expired sessions',
+        'cleaned_count': cleaned,
+        'timestamp': datetime.now().isoformat()
+    })
 
 
 if __name__ == '__main__':
@@ -525,7 +905,6 @@ Region: {REGION}
 Available Agents:
   • Scheduling:   {AGENTS['scheduling']['agent_id']}
   • Information:  {AGENTS['information']['agent_id']}
-  • Notes:        {AGENTS['notes']['agent_id']}
   • Chitchat:     {AGENTS['chitchat']['agent_id']}
 
 Supervisor (for future use): {SUPERVISOR_ID}

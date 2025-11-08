@@ -1,0 +1,296 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "Entry",
+  "Metadata": {
+    "entryPointPosition": {"x": 40, "y": 40},
+    "snapToGrid": false,
+    "ActionMetadata": {
+      "Entry": {"position": {"x": 40, "y": 40}},
+      "WelcomeMessage": {"position": {"x": 250, "y": 40}},
+      "SetContactAttributes": {"position": {"x": 460, "y": 40}},
+      "CheckCustomer": {"position": {"x": 670, "y": 40}},
+      "BranchCustomerFound": {"position": {"x": 880, "y": 40}},
+      "GetLexIntent": {"position": {"x": 1090, "y": 40}},
+      "CheckIntentType": {"position": {"x": 1300, "y": 40}},
+      "SimpleFulfillment": {"position": {"x": 1300, "y": 200}},
+      "BedrockBridge": {"position": {"x": 1300, "y": 360}},
+      "ReadResponse": {"position": {"x": 1510, "y": 200}},
+      "AskMoreHelp": {"position": {"x": 1720, "y": 200}},
+      "GoodbyeMessage": {"position": {"x": 1930, "y": 200}},
+      "Disconnect": {"position": {"x": 2140, "y": 200}}
+    }
+  },
+  "Actions": [
+    {
+      "Identifier": "Entry",
+      "Type": "Entry",
+      "Transitions": {
+        "NextAction": "WelcomeMessage"
+      }
+    },
+    {
+      "Identifier": "WelcomeMessage",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Thank you for calling ProjectForce. Please wait while we connect you to your AI scheduling assistant."
+      },
+      "Transitions": {
+        "NextAction": "SetContactAttributes",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "SetContactAttributes"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "SetContactAttributes",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "customer_phone": "$.CustomerEndpoint.Address",
+          "call_start_time": "$.InitiationTimestamp",
+          "channel": "voice"
+        }
+      },
+      "Transitions": {
+        "NextAction": "CheckCustomer",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "CheckCustomer"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "CheckCustomer",
+      "Type": "InvokeLambdaFunction",
+      "Parameters": {
+        "LambdaFunctionARN": "arn:aws:lambda:REGION:ACCOUNT_ID:function:pf-voice-bedrock-bridge-dev",
+        "InvocationTimeLimitSeconds": "8",
+        "LambdaInvocationAttributes": {
+          "action": "lookup_customer",
+          "phone_number": "$.Attributes.customer_phone"
+        },
+        "ResponseValidation": {
+          "ResponseType": "JSON"
+        }
+      },
+      "Transitions": {
+        "NextAction": "BranchCustomerFound",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "GetLexIntent"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "BranchCustomerFound",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.External.customer_id"
+      },
+      "Transitions": {
+        "NextAction": "GetLexIntent",
+        "Conditions": [
+          {
+            "NextAction": "GetLexIntent",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [""]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "GetLexIntent"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "GetLexIntent",
+      "Type": "ConnectParticipantWithLexBot",
+      "Parameters": {
+        "LexBot": {
+          "Name": "pf-scheduling-assistant-dev",
+          "Region": "REGION",
+          "Alias": "prod"
+        },
+        "LexV2Bot": {
+          "AliasArn": "arn:aws:lex:REGION:ACCOUNT_ID:bot-alias/BOT_ID/ALIAS_ID"
+        },
+        "Text": "$.Attributes.greeting_message",
+        "SessionAttributes": {
+          "customer_id": "$.Attributes.customer_id",
+          "customer_phone": "$.Attributes.customer_phone",
+          "channel": "voice"
+        }
+      },
+      "Transitions": {
+        "NextAction": "CheckIntentType",
+        "Conditions": [
+          {
+            "NextAction": "AskMoreHelp",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["EndCall"]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "GoodbyeMessage"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "CheckIntentType",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.Lex.IntentName"
+      },
+      "Transitions": {
+        "NextAction": "SimpleFulfillment",
+        "Conditions": [
+          {
+            "NextAction": "SimpleFulfillment",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["ProjectInquiry"]
+            }
+          },
+          {
+            "NextAction": "BedrockBridge",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["ScheduleAppointment", "UrgentRequest", "FallbackIntent"]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "BedrockBridge"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "SimpleFulfillment",
+      "Type": "InvokeLambdaFunction",
+      "Parameters": {
+        "LambdaFunctionARN": "arn:aws:lambda:REGION:ACCOUNT_ID:function:pf-lex-fulfillment-dev",
+        "InvocationTimeLimitSeconds": "8"
+      },
+      "Transitions": {
+        "NextAction": "ReadResponse",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "BedrockBridge"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "BedrockBridge",
+      "Type": "InvokeLambdaFunction",
+      "Parameters": {
+        "LambdaFunctionARN": "arn:aws:lambda:REGION:ACCOUNT_ID:function:pf-voice-bedrock-bridge-dev",
+        "InvocationTimeLimitSeconds": "15",
+        "LambdaInvocationAttributes": {
+          "session_id": "$.ContactId",
+          "customer_id": "$.Attributes.customer_id",
+          "input_text": "$.Lex.InputTranscript",
+          "channel": "voice"
+        }
+      },
+      "Transitions": {
+        "NextAction": "ReadResponse",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "GoodbyeMessage"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "ReadResponse",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "$.External.response"
+      },
+      "Transitions": {
+        "NextAction": "AskMoreHelp",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "AskMoreHelp"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "AskMoreHelp",
+      "Type": "GetParticipantInput",
+      "Parameters": {
+        "Text": "Is there anything else I can help you with today?",
+        "Dtmf": {
+          "Timeout": "5",
+          "MaxDigits": "1",
+          "TerminatorDigits": "#"
+        },
+        "Speech": {
+          "Timeout": "5",
+          "Type": "Text"
+        }
+      },
+      "Transitions": {
+        "NextAction": "GetLexIntent",
+        "Conditions": [
+          {
+            "NextAction": "GoodbyeMessage",
+            "Condition": {
+              "Operator": "TextContains",
+              "Operands": ["no", "No", "NO", "goodbye", "bye", "that's all"]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "GetLexIntent"
+          },
+          {
+            "ErrorType": "InputTimeLimitExceeded",
+            "NextAction": "GoodbyeMessage"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "GoodbyeMessage",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Thank you for calling ProjectForce. Have a great day!"
+      },
+      "Transitions": {
+        "NextAction": "Disconnect"
+      }
+    },
+    {
+      "Identifier": "Disconnect",
+      "Type": "DisconnectParticipant",
+      "Parameters": {}
+    }
+  ]
+}
