@@ -265,27 +265,31 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
         res.raise_for_status()
         response = res.json()
 
-    # Extract and simplify project data
+    # Extract and enrich project data with all available information
     projects = []
     for i, item in enumerate(response.get("data", [])):
-        projects.append({
-            "project_number": i + 1,
-            "project_id": item.get("project_project_id"),
-            "order_number": item.get("project_project_number"),
-            "project_type": item.get("project_type_project_type"),
-            "category": item.get("project_category_category"),
+        project = {
+            "id": item.get("project_project_id"),
+            "projectNumber": item.get("project_project_number"),
             "status": item.get("status_info_status"),
-            "store": item.get("project_store_store_number"),
+            "category": item.get("project_category_category"),
+            "projectType": item.get("project_type_project_type"),
+            "scheduledDate": item.get("project_date_scheduled_date"),
             "address": item.get("installation_address_full_address"),
-            "scheduled_date": item.get("project_date_scheduled_date")
-        })
+            "store": item.get("project_store_store_number"),
+            "dateSold": item.get("project_date_sold")
+        }
+
+        # Remove None values to keep response clean
+        project = {k: v for k, v in project.items() if v is not None}
+        projects.append(project)
 
     return {
         "action": "list_projects",
         "customer_id": customer_id,
-        "project_count": len(projects),
+        "projectCount": len(projects),
         "projects": projects,
-        "mock_mode": USE_MOCK_API
+        "mockMode": USE_MOCK_API
     }
 
 def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
@@ -305,31 +309,23 @@ def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -
     if not customer_id:
         logger.warning("customer_id not provided in parameters, this may cause issues")
 
-    logger.info(f"[REAL] Fetching project details for project {project_id}, client {client_id}, customer {customer_id}")
+    logger.info(f"[REAL] Fetching project details for project {project_id}, client {client_id}")
 
     try:
-        # Use the same endpoint as list_projects, then filter for the specific project
-        # This approach is more reliable since we know /dashboard/get works
-        url = f"{config['base_url']}/dashboard/get/{client_id}/{customer_id}"
+        # Use the dedicated getdata endpoint for single project details
+        url = f"{config['base_url']}/dashboard/getdata/{client_id}/{project_id}"
         logger.info(f"Making API request to: {url}")
 
         res = requests.get(url, headers=auth_headers, timeout=30)
         res.raise_for_status()
         response = res.json()
 
-        # Extract the projects array
-        projects = response.get("data", {}).get("records", [])
+        # Extract the project data
+        data = response.get("data")
 
-        # Find the specific project by project_id
-        data = None
-        for project in projects:
-            if str(project.get("project_id")) == str(project_id):
-                data = project
-                break
-
-        # Validate we found the project
+        # Validate we got project data
         if not data:
-            raise ValueError(f"Project {project_id} not found in the customer's project list")
+            raise ValueError(f"Project {project_id} not found or no data returned from API")
 
         # Helper function to safely get nested values
         def safe_get(obj, *keys, default=None):
@@ -396,6 +392,27 @@ def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -
         service_unit = safe_get(data, "service_time", "duration_type", default="hours")
         service_time_display = f"{service_duration} {service_unit}" if service_duration else safe_get(data, "default_service_time", default="Not specified")
 
+        # Extract technician/installer information
+        technician_info = safe_get(data, "technician", default={})
+        installer_info = safe_get(data, "installer", default={})
+
+        # Try both "technician" and "installer" keys (API may use either)
+        tech_data = technician_info if technician_info else installer_info
+
+        technician_id = safe_get(tech_data, "technician_id") or safe_get(tech_data, "installer_id")
+        technician_name = safe_get(tech_data, "name") or safe_get(tech_data, "technician_name") or safe_get(tech_data, "installer_name")
+        technician_email = safe_get(tech_data, "email")
+        technician_phone = safe_get(tech_data, "phone")
+        technician_bio = safe_get(tech_data, "bio") or safe_get(tech_data, "description")
+
+        # Format technician display
+        if technician_name:
+            technician_display = f"{technician_name}"
+            if technician_id:
+                technician_display += f" (ID: {technician_id})"
+        else:
+            technician_display = "Not assigned"
+
         # Create a human-readable summary for the agent
         summary = f"""Project #{safe_get(data, 'project_number', default='Unknown')} - {project_category} ({project_type})
 Status: {status}
@@ -405,26 +422,74 @@ Store: {store_display}
 {scheduling_status}
 Service Time: {service_time_display}"""
 
+        if technician_name:
+            summary += f"\nTechnician: {technician_display}"
+
         if date_sold:
             summary += f"\nSold Date: {date_sold}"
 
-        # Return enhanced response
+        # Build camelCase project object for UI compatibility
+        project = {
+            "id": safe_get(data, "project_id"),
+            "projectNumber": safe_get(data, "project_number"),
+            "status": status,
+            "category": project_category,
+            "projectType": project_type,
+            "scheduledDate": scheduled_start,
+            "scheduledEndDate": scheduled_end,
+            "address": {
+                "address1": address1,
+                "address2": address2,
+                "city": city,
+                "state": state,
+                "zipcode": zipcode,
+                "fullAddress": full_address
+            },
+            "store": {
+                "storeName": store_name,
+                "storeNumber": store_number
+            },
+            "sourceSystem": safe_get(data, "source_system"),
+            "dateSold": date_sold,
+            "hasDocuments": safe_get(data, "has_documents", default=False),
+            "estimatedDuration": service_time_display
+        }
+
+        # Add technician only if assigned
+        if technician_name:
+            project["technician"] = {
+                "technician_id": technician_id,
+                "name": technician_name,
+                "email": technician_email,
+                "phone": technician_phone,
+                "bio": technician_bio,
+                "display_name": technician_display
+            }
+
+        # Remove None values
+        project = {k: v for k, v in project.items() if v is not None}
+        if "address" in project:
+            project["address"] = {k: v for k, v in project["address"].items() if v is not None}
+        if "store" in project:
+            project["store"] = {k: v for k, v in project["store"].items() if v is not None}
+
+        # Return enhanced response with both legacy and new format
         return {
             "action": "get_project_details",
+            "project": project,
+
+            # Legacy fields for backward compatibility
             "project_id": safe_get(data, "project_id"),
             "project_number": safe_get(data, "project_number"),
             "client_id": safe_get(data, "client_id"),
             "customer_id": safe_get(data, "customer_id"),
-
-            # Enhanced fields for better agent responses
             "summary": summary,
             "customer_name": customer_name,
             "full_address": full_address,
             "scheduling_status": scheduling_status,
             "store_display": store_display,
             "service_time_display": service_time_display,
-
-            # Original detailed fields
+            "technician_display": technician_display,
             "category": project_category,
             "type": project_type,
             "status": status,
@@ -432,8 +497,6 @@ Service Time: {service_time_display}"""
             "scheduled_start": scheduled_start,
             "scheduled_end": scheduled_end,
             "date_sold": date_sold,
-
-            # Nested objects with validation
             "customer": {
                 "customer_id": safe_get(customer_info, "customerId"),
                 "first_name": customer_first,
@@ -457,12 +520,18 @@ Service Time: {service_time_display}"""
                 "store_name": store_name,
                 "display_name": store_display
             },
+            "technician": {
+                "technician_id": technician_id,
+                "name": technician_name,
+                "email": technician_email,
+                "phone": technician_phone,
+                "bio": technician_bio,
+                "display_name": technician_display
+            } if technician_name else None,
             "service_time": service_duration,
             "service_time_unit": service_unit,
             "default_service_time": safe_get(data, "default_service_time"),
             "client_timezone": safe_get(data, "client_timezone"),
-
-            # Complete API response for complex queries
             "full_data": data
         }
 
@@ -539,10 +608,36 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
             raise ValueError(f"Unable to connect to scheduling API: {str(e)}")
 
     data = response.get("data", {})
+    raw_dates = data.get("dates", [])
+
+    # Format dates with day names and group by week for better UI rendering
+    formatted_dates = []
+    for date_str in raw_dates:
+        try:
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+            formatted_dates.append({
+                "date": date_str,
+                "dayName": date_obj.strftime("%A"),  # Monday, Tuesday, etc.
+                "dayShort": date_obj.strftime("%a"),  # Mon, Tue, etc.
+                "monthDay": date_obj.strftime("%b %d"),  # Jan 15
+                "formatted": date_obj.strftime("%A, %B %d, %Y")  # Monday, January 15, 2024
+            })
+        except:
+            # Fallback if date parsing fails
+            formatted_dates.append({
+                "date": date_str,
+                "dayName": "",
+                "dayShort": "",
+                "monthDay": date_str,
+                "formatted": date_str
+            })
+
     return {
         "action": "get_available_dates",
         "project_id": project_id,
-        "available_dates": data.get("dates", []),
+        "available_dates": raw_dates,  # Keep original for compatibility
+        "dates": formatted_dates,  # Enhanced format for UI
+        "dateCount": len(raw_dates),
         "request_id": data.get("request_id"),
         "mock_mode": USE_MOCK_API
     }
@@ -601,11 +696,56 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
             raise ValueError(f"Unable to connect to scheduling API: {str(e)}")
 
     data = response.get("data", {})
+    raw_slots = data.get("slots", [])
+
+    # Group time slots by time of day for better UI rendering
+    morning_slots = []  # 6 AM - 11:59 AM
+    afternoon_slots = []  # 12 PM - 4:59 PM
+    evening_slots = []  # 5 PM - 8:59 PM
+
+    for slot in raw_slots:
+        try:
+            # Parse time (format: "HH:MM" or "HH:MM:SS")
+            time_parts = slot.split(":")
+            hour = int(time_parts[0])
+
+            if 6 <= hour < 12:
+                morning_slots.append(slot)
+            elif 12 <= hour < 17:
+                afternoon_slots.append(slot)
+            elif 17 <= hour < 21:
+                evening_slots.append(slot)
+        except:
+            # Fallback: add to afternoon if parsing fails
+            afternoon_slots.append(slot)
+
+    # Format time slots for display
+    time_slots_grouped = {
+        "morning": {
+            "label": "Morning (6 AM - 12 PM)",
+            "slots": morning_slots,
+            "count": len(morning_slots)
+        },
+        "afternoon": {
+            "label": "Afternoon (12 PM - 5 PM)",
+            "slots": afternoon_slots,
+            "count": len(afternoon_slots)
+        },
+        "evening": {
+            "label": "Evening (5 PM - 9 PM)",
+            "slots": evening_slots,
+            "count": len(evening_slots)
+        }
+    }
+
     return {
         "action": "get_time_slots",
         "project_id": project_id,
         "date": date,
-        "available_slots": data.get("slots", []),
+        "available_slots": raw_slots,  # Keep original for compatibility
+        "timeSlots": raw_slots,  # Alias for UI compatibility
+        "timeSlotsGrouped": time_slots_grouped,  # Grouped format for enhanced UI
+        "slotCount": len(raw_slots),
         "mock_mode": USE_MOCK_API
     }
 
@@ -685,13 +825,51 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
             logger.error(f"Request error confirming appointment: {str(e)}")
             raise ValueError(f"Unable to connect to scheduling API: {str(e)}")
 
+    # Format date and time for better UI display
+    try:
+        date_obj = datetime.strptime(date, "%Y-%m-%d")
+        formatted_date = date_obj.strftime("%A, %B %d, %Y")  # Monday, January 15, 2024
+        day_of_week = date_obj.strftime("%A")
+    except:
+        formatted_date = date
+        day_of_week = ""
+
+    # Format time (convert 24h to 12h with AM/PM)
+    try:
+        time_parts = time.split(":")
+        hour = int(time_parts[0])
+        minute = int(time_parts[1])
+        am_pm = "AM" if hour < 12 else "PM"
+        display_hour = hour if hour <= 12 else hour - 12
+        display_hour = 12 if display_hour == 0 else display_hour
+        formatted_time = f"{display_hour}:{minute:02d} {am_pm}"
+    except:
+        formatted_time = time
+
+    # Extract additional data from API response
+    confirmation_details = response.get("data", {})
+
+    # Build enhanced appointment object
+    appointment = {
+        "projectId": project_id,
+        "date": date,
+        "time": time,
+        "formattedDate": formatted_date,
+        "formattedTime": formatted_time,
+        "dayOfWeek": day_of_week,
+        "confirmationNumber": confirmation_details.get("confirmation_number", f"CONF-{project_id}-{date.replace('-', '')}"),
+        "status": "confirmed"
+    }
+
     return {
         "action": "confirm_appointment",
+        "status": "confirmed",
         "project_id": project_id,
         "scheduled_date": date,
         "scheduled_time": time,
         "message": response.get("message", "Appointment confirmed successfully"),
-        "confirmation_data": response.get("data", {}),
+        "appointment": appointment,  # Enhanced appointment object for UI
+        "confirmation_data": confirmation_details,
         "mock_mode": use_mock
     }
 

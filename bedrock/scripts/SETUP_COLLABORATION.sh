@@ -221,7 +221,7 @@ aws bedrock-agent associate-agent-collaborator \
     --agent-version "DRAFT" \
     --collaborator-name "InformationAgent" \
     --agent-descriptor aliasArn="${INFORMATION_ARN}" \
-    --collaboration-instruction "Route queries about weather, project details, appointment status, and general information lookup to this agent. Examples: 'What's the weather in New York?', 'Get project details', 'Check appointment status'." \
+    --collaboration-instruction "Route queries about weather, appointment status, and general information lookup to this agent. Examples: 'What's the weather in New York?', 'Check appointment status'." \
     --relay-conversation-history "TO_COLLABORATOR" \
     --region "$REGION" \
     2>/dev/null && echo -e "    ${GREEN}✅ InformationAgent collaboration configured${NC}" || echo -e "    ${YELLOW}⚠️  InformationAgent already configured or error occurred${NC}"

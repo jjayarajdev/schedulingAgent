@@ -285,7 +285,7 @@ deploy_lambda() {
     local HANDLER=$2
     local RUNTIME="python3.11"
     local TIMEOUT=30
-    local MEMORY=512
+    local MEMORY=1769
     local ROLE_NAME="${FUNCTION_NAME}-role-${ENV}"
 
     echo ""
@@ -795,26 +795,38 @@ EOF
     fi
 }
 
+# Read agent instructions from files
+INSTRUCTIONS_DIR="$BEDROCK_DIR/infrastructure/agent_instructions"
+
+echo ""
+echo "Reading agent instructions from: $INSTRUCTIONS_DIR"
+
+# Read instruction files
+SCHEDULING_INSTRUCTION=$(cat "$INSTRUCTIONS_DIR/scheduling_collaborator.txt")
+INFORMATION_INSTRUCTION=$(cat "$INSTRUCTIONS_DIR/information_collaborator.txt")
+CHITCHAT_INSTRUCTION=$(cat "$INSTRUCTIONS_DIR/chitchat_collaborator.txt")
+SUPERVISOR_INSTRUCTION=$(cat "$INSTRUCTIONS_DIR/supervisor.txt")
+
 # Create agents
 SCHEDULING_AGENT_ID=$(create_bedrock_agent \
     "SchedulingAgent" \
     "Primary agent for scheduling and project management" \
-    "You are the SchedulingAgent for ProjectForce. You handle scheduling operations, project management, and business information. When users ask about weather, let them know the information agent will help with that.")
+    "$SCHEDULING_INSTRUCTION")
 
 INFORMATION_AGENT_ID=$(create_bedrock_agent \
     "pf-information" \
     "Weather information specialist using external API" \
-    "You are the Weather Information Specialist. You provide weather forecasts, current conditions, and temperature information. Use external weather APIs for accurate data.")
+    "$INFORMATION_INSTRUCTION")
 
 CHITCHAT_AGENT_ID=$(create_bedrock_agent \
     "pf-chitchat" \
     "Conversational agent for greetings and general queries" \
-    "You are a friendly conversational assistant. Handle greetings, thank you messages, and general questions. Be warm and helpful. If the user needs specific scheduling or weather help, guide them to ask specific questions.")
+    "$CHITCHAT_INSTRUCTION")
 
 SUPERVISOR_AGENT_ID=$(create_bedrock_agent \
     "Supervisor" \
     "Orchestrator agent that routes queries to specialized agents" \
-    "You are the Supervisor agent. Route user queries to the appropriate specialist: SchedulingAgent for scheduling/projects, pf-information for weather, pf-chitchat for conversational queries.")
+    "$SUPERVISOR_INSTRUCTION")
 
 # Prepare all agents
 echo ""

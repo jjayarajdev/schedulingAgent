@@ -61,7 +61,7 @@ sleep 2
 
 # Open the browser
 echo "🌐 Opening UI in browser..."
-open "http://localhost:8000/pf_auth_demo.html"
+open "http://localhost:8000/index.html"
 
 echo ""
 echo "════════════════════════════════════════════════════════════════════════════"

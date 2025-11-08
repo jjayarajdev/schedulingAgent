@@ -10,6 +10,7 @@ import requests
 import logging
 import json
 import os
+import time
 from pathlib import Path
 
 app = Flask(__name__)
@@ -148,6 +149,10 @@ def invoke_agent():
     try:
         import boto3
 
+        # START PERFORMANCE TRACKING
+        request_start = time.time()
+        timing = {}
+
         data = request.json
         message = data.get('message', '')
         session_id = data.get('session_id', 'session-default')
@@ -156,10 +161,12 @@ def invoke_agent():
         pf_user_id = data.get('pf_user_id', '1646085')
         stream = data.get('stream', False)  # Support both streaming and non-streaming
 
-        logger.info(f"Invoking Bedrock agent with message: {message[:50]}... (stream={stream})")
+        logger.info(f"🚀 Invoking Bedrock agent with message: {message[:50]}... (stream={stream})")
 
         # Initialize Bedrock client
+        init_start = time.time()
         bedrock_client = boto3.client('bedrock-agent-runtime', region_name='us-east-1')
+        timing['boto3_init'] = time.time() - init_start
 
         # Get Supervisor agent ID and alias from config
         SUPERVISOR_AGENT_ID = AGENT_CONFIG.get('supervisor_id')
@@ -168,6 +175,7 @@ def invoke_agent():
         logger.info(f"Using Supervisor Agent: {SUPERVISOR_AGENT_ID} (Alias: {SUPERVISOR_ALIAS_ID})")
 
         # Invoke the Supervisor agent
+        invoke_start = time.time()
         response = bedrock_client.invoke_agent(
             agentId=SUPERVISOR_AGENT_ID,
             agentAliasId=SUPERVISOR_ALIAS_ID,
@@ -181,8 +189,10 @@ def invoke_agent():
                 }
             }
         )
+        timing['bedrock_invoke'] = time.time() - invoke_start
 
         event_stream = response['completion']
+        stream_start = time.time()
 
         if stream:
             # Stream response using Server-Sent Events
@@ -219,13 +229,20 @@ def invoke_agent():
                         text = chunk['bytes'].decode('utf-8')
                         full_response.append(text)
 
+            timing['stream_processing'] = time.time() - stream_start
+            timing['total_request'] = time.time() - request_start
+
             response_text = ''.join(full_response)
-            logger.info(f"Agent response: {response_text[:100]}...")
+
+            # Log performance metrics
+            logger.info(f"⏱️  PERFORMANCE: Total={timing['total_request']:.2f}s | Invoke={timing['bedrock_invoke']:.2f}s | Stream={timing['stream_processing']:.2f}s | Init={timing['boto3_init']:.3f}s")
+            logger.info(f"📝 Agent response: {response_text[:100]}...")
 
             return jsonify({
                 "response": response_text,
                 "agent_name": "Supervisor Agent",
-                "session_id": session_id
+                "session_id": session_id,
+                "performance": timing
             })
 
     except Exception as e:
