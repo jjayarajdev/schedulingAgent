@@ -195,6 +195,46 @@ WEATHER_CODES = {
 # Helper Functions for Weather
 # ============================================================================
 
+def format_day_name(date_str: str) -> str:
+    """Format date string to friendly day name"""
+    from datetime import datetime
+    try:
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+        today = datetime.now().date()
+        date = date_obj.date()
+
+        if date == today:
+            return "Today"
+        elif (date - today).days == 1:
+            return "Tomorrow"
+        else:
+            return date_obj.strftime("%A")  # Full day name (e.g., "Wednesday")
+    except:
+        return date_str
+
+def generate_installation_recommendation(temp_f: float, condition: str, precip_prob: int) -> str:
+    """Generate installation recommendation based on weather conditions"""
+    condition_lower = condition.lower()
+
+    # Check for rain/snow
+    if precip_prob > 60 or "rain" in condition_lower or "snow" in condition_lower or "storm" in condition_lower:
+        return "Weather may affect installation. Consider rescheduling for better conditions."
+
+    # Check for extreme cold
+    if temp_f < 32:
+        return "Freezing temperatures - installation materials may require special handling."
+
+    # Check for extreme heat
+    if temp_f > 95:
+        return "Very hot conditions - crew will need heat precautions."
+
+    # Check for moderate precip probability
+    if precip_prob > 30:
+        return "Some chance of precipitation - monitor weather closely."
+
+    # Good conditions
+    return "Great weather for outdoor installation work!"
+
 def geocode_location(location: str) -> Dict[str, Any]:
     """
     Geocode a city name to get coordinates using Open-Meteo Geocoding API
@@ -337,96 +377,82 @@ def handle_get_weather(params: Dict, config: Dict, auth_headers: Dict) -> Dict[s
         current = response.get("current", {})
         daily = response.get("daily", {})
 
-        weather_info = {
-            "location": {
-                "latitude": response.get("latitude"),
-                "longitude": response.get("longitude"),
-                "name": location_info.get("name", ""),
-                "admin1": location_info.get("admin1", ""),
-                "country": location_info.get("country", ""),
-                "timezone": response.get("timezone", ""),
-                "elevation_meters": response.get("elevation", 0)
-            },
+        # Format weather data for UI consumption (pre-formatted, agent just passes through)
+        temp_f = current.get("temperature_2m")
+        feels_like_f = current.get("apparent_temperature")
+        condition = WEATHER_CODES.get(current.get("weather_code", 0), "Unknown")
+        humidity = current.get("relative_humidity_2m")
+        wind_mph = current.get("wind_speed_10m")
+
+        # Generate installation recommendation based on conditions
+        recommendation = generate_installation_recommendation(
+            temp_f, condition, daily["precipitation_probability_max"][0] if daily.get("precipitation_probability_max") else 0
+        )
+
+        # UI-ready format (agent will pass this through as JSON)
+        ui_format = {
+            "location": location_info.get("name", location),
+            "address": address if address else None,
             "current": {
-                "time": current.get("time"),
-                "temp_f": current.get("temperature_2m"),
-                "feels_like_f": current.get("apparent_temperature"),
-                "condition": WEATHER_CODES.get(current.get("weather_code", 0), "Unknown"),
-                "weather_code": current.get("weather_code"),
-                "humidity": current.get("relative_humidity_2m"),
-                "wind_mph": current.get("wind_speed_10m"),
-                "wind_direction": current.get("wind_direction_10m"),
-                "precipitation_inch": current.get("precipitation", 0)
+                "temperature": round(temp_f, 1) if temp_f else None,
+                "condition": condition,
+                "humidity": humidity,
+                "windSpeed": round(wind_mph, 1) if wind_mph else None
             },
             "forecast": [
                 {
-                    "date": daily["time"][i],
-                    "max_temp_f": daily["temperature_2m_max"][i],
-                    "min_temp_f": daily["temperature_2m_min"][i],
+                    "day": format_day_name(daily["time"][i]) if i == 0 else format_day_name(daily["time"][i]),
+                    "high": round(daily["temperature_2m_max"][i]),
+                    "low": round(daily["temperature_2m_min"][i]),
                     "condition": WEATHER_CODES.get(daily["weather_code"][i], "Unknown"),
-                    "weather_code": daily["weather_code"][i],
-                    "precipitation_probability": daily["precipitation_probability_max"][i]
+                    "precipitation": daily["precipitation_probability_max"][i]
                 }
                 for i in range(min(3, len(daily.get("time", []))))
             ],
-            "context": {
-                "project_id": project_id,
-                "address": address
-            }
+            "recommendation": recommendation
         }
 
-        return {
-            "action": "get_weather",
-            "location": location_info.get("name", location),
-            "coordinates": {
-                "latitude": lat,
-                "longitude": lon
-            },
-            "weather": weather_info,
-            "mock_mode": False,
-            "api_provider": "open-meteo"
-        }
+        # Remove null address field if not provided
+        if ui_format["address"] is None:
+            del ui_format["address"]
 
-    # Mock mode response formatting (for testing)
+        return ui_format
+
+    # Mock mode response formatting (for testing) - same UI format
     current = response.get("current_condition", [{}])[0]
     forecast = response.get("weather", [])
-    area = response.get("nearest_area", [{}])[0]
 
-    weather_info = {
-        "location": {
-            "area": area.get("areaName", [{}])[0].get("value"),
-            "region": area.get("region", [{}])[0].get("value"),
-            "country": area.get("country", [{}])[0].get("value")
-        },
+    temp_f = int(current.get("temp_F", 75))
+    condition_desc = current.get("weatherDesc", [{}])[0].get("value", "Partly Cloudy")
+
+    # UI-ready format (same as real API)
+    ui_format = {
+        "location": location,
+        "address": address if address else None,
         "current": {
-            "temp_f": current.get("temp_F"),
-            "temp_c": current.get("temp_C"),
-            "condition": current.get("weatherDesc", [{}])[0].get("value"),
-            "humidity": current.get("humidity"),
-            "wind_mph": current.get("windspeedMiles"),
-            "wind_dir": current.get("winddir16Point"),
-            "feels_like_f": current.get("FeelsLikeF"),
-            "uv_index": current.get("uvIndex")
+            "temperature": temp_f,
+            "condition": condition_desc,
+            "humidity": int(current.get("humidity", 65)),
+            "windSpeed": int(current.get("windspeedMiles", 8))
         },
         "forecast": [
             {
-                "date": day.get("date"),
-                "max_temp_f": day.get("maxtempF"),
-                "min_temp_f": day.get("mintempF"),
-                "avg_temp_f": day.get("avgtempF"),
-                "uv_index": day.get("uvIndex"),
-                "sun_hours": day.get("sunHour")
+                "day": "Today" if i == 0 else ("Tomorrow" if i == 1 else "Day 3"),
+                "high": int(day.get("maxtempF", 78)),
+                "low": int(day.get("mintempF", 68)),
+                "condition": day.get("weatherDesc", [{}])[0].get("value", "Sunny") if day.get("weatherDesc") else "Sunny",
+                "precipitation": 10 if i == 0 else (0 if i == 1 else 5)
             }
-            for day in forecast[:3]
-        ]
+            for i, day in enumerate(forecast[:3])
+        ],
+        "recommendation": generate_installation_recommendation(temp_f, condition_desc, 10)
     }
 
-    return {
-        "action": "get_weather",
-        "location": location,
-        "weather": weather_info,
-        "mock_mode": True
-    }
+    # Remove null address field if not provided
+    if ui_format["address"] is None:
+        del ui_format["address"]
+
+    return ui_format
 
 # ============================================================================
 # Lambda Handler
