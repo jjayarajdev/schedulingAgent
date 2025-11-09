@@ -1,328 +1,15 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "Information Actions API",
-    "version": "1.0.0",
-    "description": "API for retrieving information about projects, appointments, working hours, and weather"
+    "title": "Information Actions API - Weather Only",
+    "version": "2.0.0",
+    "description": "API for retrieving weather information. All project-related actions have been moved to scheduling-actions."
   },
   "paths": {
-    "/get_projects": {
-      "post": {
-        "summary": "Get all projects for a customer",
-        "description": "Retrieves a list of all projects associated with a customer, including their status, category, and basic details",
-        "operationId": "get_projects",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "customer_id": {
-                    "type": "string",
-                    "description": "Unique identifier for the customer"
-                  }
-                },
-                "required": ["customer_id"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "List of customer projects",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "customer_id": {
-                      "type": "string"
-                    },
-                    "projects": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "project_id": {
-                            "type": "string"
-                          },
-                          "order_number": {
-                            "type": "string"
-                          },
-                          "project_type": {
-                            "type": "string"
-                          },
-                          "category": {
-                            "type": "string"
-                          },
-                          "status": {
-                            "type": "string"
-                          },
-                          "address": {
-                            "type": "string"
-                          },
-                          "scheduled_date": {
-                            "type": "string",
-                            "format": "date"
-                          },
-                          "scheduled_time": {
-                            "type": "string"
-                          },
-                          "technician": {
-                            "type": "string"
-                          },
-                          "store": {
-                            "type": "string"
-                          }
-                        }
-                      }
-                    },
-                    "total_projects": {
-                      "type": "integer"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/get_project_details": {
-      "post": {
-        "summary": "Get detailed information about a project",
-        "description": "Retrieves comprehensive details about a specific project including description, location, requirements, and duration",
-        "operationId": "get_project_details",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project_id": {
-                    "type": "string",
-                    "description": "Unique identifier for the project"
-                  }
-                },
-                "required": ["project_id"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Project details",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "project_id": {
-                      "type": "string"
-                    },
-                    "project_name": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "type": "string"
-                    },
-                    "location": {
-                      "type": "string",
-                      "description": "Project location or meeting type (e.g., 'Remote', 'On-site')"
-                    },
-                    "duration_minutes": {
-                      "type": "integer",
-                      "description": "Estimated duration in minutes"
-                    },
-                    "requirements": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "List of things customer should bring or prepare"
-                    },
-                    "project_manager": {
-                      "type": "string",
-                      "description": "Name of the project manager"
-                    },
-                    "contact_email": {
-                      "type": "string",
-                      "format": "email"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/get_appointment_status": {
-      "post": {
-        "summary": "Get status and details of an appointment",
-        "description": "Retrieves current status and full details of an existing appointment",
-        "operationId": "get_appointment_status",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "appointment_id": {
-                    "type": "string",
-                    "description": "Unique identifier for the appointment"
-                  },
-                  "customer_id": {
-                    "type": "string",
-                    "description": "Unique identifier for the customer"
-                  }
-                },
-                "required": ["appointment_id", "customer_id"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Appointment status and details",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "appointment_id": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": ["confirmed", "rescheduled", "cancelled", "completed"],
-                      "description": "Current status of the appointment"
-                    },
-                    "project_id": {
-                      "type": "string"
-                    },
-                    "project_name": {
-                      "type": "string"
-                    },
-                    "date": {
-                      "type": "string",
-                      "format": "date"
-                    },
-                    "start_time": {
-                      "type": "string",
-                      "format": "time"
-                    },
-                    "end_time": {
-                      "type": "string",
-                      "format": "time"
-                    },
-                    "location": {
-                      "type": "string"
-                    },
-                    "notes_count": {
-                      "type": "integer",
-                      "description": "Number of notes attached to this appointment"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/get_working_hours": {
-      "post": {
-        "summary": "Get company working hours and availability",
-        "description": "Retrieves business hours, days of operation, and holiday information",
-        "operationId": "get_working_hours",
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "date": {
-                    "type": "string",
-                    "format": "date",
-                    "description": "Optional: Check hours for a specific date"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Working hours information",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "regular_hours": {
-                      "type": "object",
-                      "properties": {
-                        "monday": {
-                          "type": "string",
-                          "description": "e.g., '9:00 AM - 6:00 PM'"
-                        },
-                        "tuesday": {
-                          "type": "string"
-                        },
-                        "wednesday": {
-                          "type": "string"
-                        },
-                        "thursday": {
-                          "type": "string"
-                        },
-                        "friday": {
-                          "type": "string"
-                        },
-                        "saturday": {
-                          "type": "string"
-                        },
-                        "sunday": {
-                          "type": "string"
-                        }
-                      }
-                    },
-                    "timezone": {
-                      "type": "string",
-                      "description": "e.g., 'America/New_York'"
-                    },
-                    "holidays": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "date": {
-                            "type": "string",
-                            "format": "date"
-                          },
-                          "name": {
-                            "type": "string"
-                          }
-                        }
-                      },
-                      "description": "Upcoming holidays when business is closed"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/get_weather": {
       "post": {
-        "summary": "Get weather forecast for a specific date and location",
-        "description": "Retrieves weather forecast to help customers plan for appointments",
+        "summary": "Get weather forecast for a specific location",
+        "description": "Retrieves weather forecast to help customers plan for appointments. Uses external weather API.",
         "operationId": "get_weather",
         "requestBody": {
           "required": true,
@@ -331,64 +18,155 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "date": {
-                    "type": "string",
-                    "format": "date",
-                    "description": "Date to get weather forecast for"
+                  "latitude": {
+                    "type": "number",
+                    "description": "Latitude coordinate (decimal format). Preferred method for accurate weather data. Example: 27.9506"
+                  },
+                  "longitude": {
+                    "type": "number",
+                    "description": "Longitude coordinate (decimal format). Must be provided with latitude. Example: -82.4572"
                   },
                   "location": {
                     "type": "string",
-                    "description": "Location (city, zip code, or coordinates)"
+                    "description": "Location name (city, zip code, or 'City, State' format). Fallback if coordinates not available. Examples: 'Tampa', 'Tampa, FL', '33601'"
+                  },
+                  "project_id": {
+                    "type": "string",
+                    "description": "Project ID for context and logging (optional)"
+                  },
+                  "address": {
+                    "type": "string",
+                    "description": "Full address for reference and logging (optional)"
                   }
                 },
-                "required": ["date", "location"]
+                "required": []
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Weather forecast",
+            "description": "Weather forecast for the location",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "date": {
+                    "action": {
                       "type": "string",
-                      "format": "date"
+                      "example": "get_weather"
                     },
                     "location": {
-                      "type": "string"
-                    },
-                    "temperature_high": {
-                      "type": "number",
-                      "description": "High temperature in Fahrenheit"
-                    },
-                    "temperature_low": {
-                      "type": "number",
-                      "description": "Low temperature in Fahrenheit"
-                    },
-                    "conditions": {
                       "type": "string",
-                      "description": "e.g., 'Partly Cloudy', 'Rain', 'Sunny'"
+                      "description": "The requested location"
                     },
-                    "precipitation_chance": {
-                      "type": "integer",
-                      "description": "Chance of precipitation as percentage (0-100)"
+                    "weather": {
+                      "type": "object",
+                      "properties": {
+                        "location": {
+                          "type": "object",
+                          "properties": {
+                            "area": {
+                              "type": "string",
+                              "description": "City name"
+                            },
+                            "region": {
+                              "type": "string",
+                              "description": "State/Region name"
+                            },
+                            "country": {
+                              "type": "string",
+                              "description": "Country name"
+                            }
+                          }
+                        },
+                        "current": {
+                          "type": "object",
+                          "properties": {
+                            "temp_f": {
+                              "type": "string",
+                              "description": "Current temperature in Fahrenheit"
+                            },
+                            "temp_c": {
+                              "type": "string",
+                              "description": "Current temperature in Celsius"
+                            },
+                            "condition": {
+                              "type": "string",
+                              "description": "Weather condition (e.g., 'Partly Cloudy', 'Rain', 'Sunny')"
+                            },
+                            "humidity": {
+                              "type": "string",
+                              "description": "Humidity percentage"
+                            },
+                            "wind_mph": {
+                              "type": "string",
+                              "description": "Wind speed in miles per hour"
+                            },
+                            "wind_dir": {
+                              "type": "string",
+                              "description": "Wind direction (e.g., 'NE', 'SW')"
+                            },
+                            "feels_like_f": {
+                              "type": "string",
+                              "description": "Feels like temperature in Fahrenheit"
+                            },
+                            "uv_index": {
+                              "type": "string",
+                              "description": "UV index"
+                            }
+                          }
+                        },
+                        "forecast": {
+                          "type": "array",
+                          "description": "3-day weather forecast",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "date": {
+                                "type": "string",
+                                "format": "date",
+                                "description": "Forecast date (YYYY-MM-DD)"
+                              },
+                              "max_temp_f": {
+                                "type": "string",
+                                "description": "Maximum temperature in Fahrenheit"
+                              },
+                              "min_temp_f": {
+                                "type": "string",
+                                "description": "Minimum temperature in Fahrenheit"
+                              },
+                              "avg_temp_f": {
+                                "type": "string",
+                                "description": "Average temperature in Fahrenheit"
+                              },
+                              "uv_index": {
+                                "type": "string",
+                                "description": "UV index for the day"
+                              },
+                              "sun_hours": {
+                                "type": "string",
+                                "description": "Hours of sunshine"
+                              }
+                            }
+                          }
+                        }
+                      }
                     },
-                    "wind_speed": {
-                      "type": "string",
-                      "description": "e.g., '5-10 mph'"
-                    },
-                    "advisory": {
-                      "type": "string",
-                      "description": "Optional weather advisory or warning"
+                    "mock_mode": {
+                      "type": "boolean",
+                      "description": "Whether mock data was used"
                     }
                   }
                 }
               }
             }
+          },
+          "400": {
+            "description": "Bad request - missing or invalid location parameter"
+          },
+          "502": {
+            "description": "External weather API error"
           }
         }
       }

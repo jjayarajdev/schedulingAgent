@@ -2,19 +2,6 @@
 # AWS Connect Instance for Voice Integration (Phase 3)
 # ============================================================================
 
-# Variables for configuration
-variable "connect_phone_number" {
-  description = "Phone number to associate with AWS Connect (format: +1XXXXXXXXXX)"
-  type        = string
-  default     = "+18005551234"  # Placeholder - will be replaced with actual number
-}
-
-variable "connect_instance_alias" {
-  description = "Unique alias for AWS Connect instance"
-  type        = string
-  default     = "pf-voice-dev"
-}
-
 # ============================================================================
 # AWS Connect Instance
 # ============================================================================

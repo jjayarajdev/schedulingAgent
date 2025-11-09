@@ -1,366 +1,325 @@
-# Production Deployment Guide
+# AWS Deployment Guide for ProjectForce Bedrock Agent UI
 
-## Quick Start
+## Architecture Overview
 
-```bash
-# Deploy to development
-./DEPLOY.sh dev us-east-1
-
-# Deploy to production
-./DEPLOY.sh prod us-east-1
+```
+┌─────────────┐      HTTPS      ┌──────────────┐
+│   Browser   │ ───────────────> │  CloudFront  │
+│             │                  │     (CDN)    │
+└─────────────┘                  └──────┬───────┘
+                                        │
+                                        v
+                                 ┌──────────────┐
+                                 │   S3 Bucket  │
+                                 │  (HTML/CSS)  │
+                                 └──────────────┘
+                                        │
+                                        │ API Calls
+                                        v
+                                 ┌──────────────┐
+                                 │ API Gateway  │
+                                 │  (HTTP API)  │
+                                 └──────┬───────┘
+                                        │
+                                        v
+                                 ┌──────────────┐
+                                 │    Lambda    │
+                                 │ (Flask App)  │
+                                 └──────┬───────┘
+                                        │
+                                        v
+                                 ┌──────────────┐
+                                 │   Bedrock    │
+                                 │    Agents    │
+                                 └──────────────┘
 ```
 
-## Prerequisites
+## Deployment Steps
 
-Before running the deployment script, ensure you have:
+### Prerequisites
 
-1. **AWS CLI** configured with appropriate credentials
-   ```bash
-   aws configure
-   # Verify: aws sts get-caller-identity
-   ```
+1. AWS CLI configured with appropriate credentials
+2. IAM permissions for:
+   - S3 (CreateBucket, PutObject, PutBucketPolicy)
+   - Lambda (CreateFunction, UpdateFunctionCode)
+   - API Gateway (CreateApi, CreateStage)
+   - IAM (CreateRole, AttachRolePolicy)
+   - CloudFront (optional, for HTTPS)
 
-2. **Terraform** installed (v1.0+)
-   ```bash
-   terraform version
-   ```
+### Step 1: Deploy Updated Lambda Functions
 
-3. **Python 3.11+** installed
-   ```bash
-   python3 --version
-   ```
-
-4. **Required IAM Permissions:**
-   - IAM: Create roles, attach policies
-   - Lambda: Create functions, manage permissions
-   - Bedrock: Create agents, manage aliases
-   - DynamoDB: Create tables
-   - S3: Create buckets
-   - CloudWatch Logs: Create log groups
-
-## Deployment Script
-
-The master deployment script (`DEPLOY.sh`) is **idempotent** - you can run it multiple times safely.
-
-### Features
-
-- ✅ **Automatic Retries** - Handles AWS service issues
-- ✅ **State Management** - Resumes from failures
-- ✅ **Validation** - Checks each step
-- ✅ **Detailed Logging** - Complete audit trail
-- ✅ **Rollback Support** - Can undo changes
-- ✅ **Multi-Environment** - Dev, staging, prod
-
-### Usage
+First, fix the scheduling API bug by deploying the updated Lambda code:
 
 ```bash
-./DEPLOY.sh [environment] [region] [--skip-terraform]
+cd /Users/jjayaraj/workspaces/studios/projectsforce/schedulingAgent-bb/bedrock
+
+# Deploy information-actions Lambda (contains the scheduling bug fix)
+cd lambda/information-actions
+zip -r function.zip handler.py requirements.txt
+aws lambda update-function-code \
+    --function-name pf-bedrock-information-actions \
+    --zip-file fileb://function.zip \
+    --region us-east-1
+
+# Deploy scheduling-actions Lambda (contains endpoint fixes)
+cd ../scheduling-actions
+zip -r function.zip handler.py requirements.txt
+aws lambda update-function-code \
+    --function-name pf-bedrock-scheduling-actions \
+    --zip-file fileb://function.zip \
+    --region us-east-1
+
+cd ../..
 ```
 
-**Parameters:**
-- `environment`: `dev`, `staging`, or `prod` (default: `dev`)
-- `region`: AWS region (default: `us-east-1`)
-- `--skip-terraform`: Skip Terraform steps (optional)
+### Step 2: Deploy API Gateway
 
-**Examples:**
+This creates an HTTP API that proxies requests from the UI to your Bedrock agents:
 
 ```bash
-# Development deployment
-./DEPLOY.sh dev us-east-1
-
-# Production deployment
-./DEPLOY.sh prod us-east-1
-
-# Skip Terraform (if already deployed)
-./DEPLOY.sh dev us-east-1 --skip-terraform
-
-# Different region
-./DEPLOY.sh dev us-west-2
+cd scripts
+chmod +x deploy_api_gateway.sh
+./deploy_api_gateway.sh dev
 ```
 
-### Deployment Steps
+**What this does:**
+- Creates a Lambda function from your Flask backend (`backend/app.py`)
+- Wraps it in an API Gateway-compatible handler
+- Creates HTTP API with CORS enabled
+- Configures Lambda integration
+- Deploys to production stage
+- Outputs API endpoint URL
 
-The script performs these steps in order:
+**Expected output:**
+```
+================================================
+  ✅ API Gateway Deployment Complete!
+================================================
 
-1. **Prerequisites Check**
-   - Validates AWS CLI, Terraform, Python
-   - Checks AWS credentials
-   - Verifies required tools
+API Endpoint:
+  https://abc123xyz.execute-api.us-east-1.amazonaws.com/prod
 
-2. **IAM Roles & Policies**
-   - Creates Lambda execution roles
-   - Attaches required policies
-   - Waits for IAM propagation
+Test the API:
+  curl https://abc123xyz.execute-api.us-east-1.amazonaws.com/prod/api/health
+```
 
-3. **Terraform Infrastructure**
-   - Initializes Terraform
-   - Imports existing resources
-   - Creates DynamoDB, S3, IAM resources
+### Step 3: Deploy UI to S3
 
-4. **Lambda Functions**
-   - Packages Lambda code
-   - Creates/updates functions
-   - Adds Bedrock permissions
-   - Validates function state
-
-5. **Bedrock Agents**
-   - Creates 5 agents (Supervisor + 4 specialists)
-   - Prepares agents
-   - Validates status
-
-6. **Aliases & Collaborators**
-   - Creates agent aliases
-   - Associates collaborators
-   - Configures routing
-
-7. **Action Groups**
-   - Connects Lambda to agents
-   - Configures OpenAPI schemas
-   - Validates connections
-
-8. **Validation & Output**
-   - Tests all components
-   - Generates configuration
-   - Displays summary
-
-### Monitoring Deployment
-
-The script creates a detailed log file:
+Deploy the HTML/CSS/JS files to S3 for static hosting:
 
 ```bash
-# View real-time logs
-tail -f deployment_dev_*.log
+# Update API endpoint in deploy_ui.sh first
+API_GATEWAY_URL="https://YOUR-API-ID.execute-api.us-east-1.amazonaws.com/prod"
+sed -i.bak "s|API_GATEWAY_URL=\"\"|API_GATEWAY_URL=\"$API_GATEWAY_URL\"|g" deploy_ui.sh
 
-# Search for errors
-grep "ERROR\|FAILED" deployment_dev_*.log
-
-# Check deployment state
-cat .deployment_state_dev.json
+# Deploy UI
+chmod +x deploy_ui.sh
+./deploy_ui.sh dev
 ```
 
-### Resume from Failure
+**What this does:**
+- Creates S3 bucket for static website hosting
+- Configures bucket for public read access
+- Updates `index.html` with API Gateway endpoint
+- Uploads all UI files to S3
+- Outputs website URL
 
-The deployment script tracks completed steps in `.deployment_state_*.json`.
+**Expected output:**
+```
+================================================
+  ✅ Deployment Complete!
+================================================
 
-If deployment fails, simply run the script again - it will skip completed steps and resume from the failure point.
+S3 Website URL:
+  http://pf-agent-ui-dev.s3-website-us-east-1.amazonaws.com
 
-**To start fresh:**
+Next Steps:
+  1. Test the UI at the URL above
+  2. (Optional) Set up CloudFront for HTTPS
+```
+
+### Step 4: (Optional) Add CloudFront CDN
+
+For production, add CloudFront for HTTPS and global distribution:
 
 ```bash
-# Remove state file
-rm .deployment_state_dev.json
-
-# Run deployment again
-./DEPLOY.sh dev us-east-1
+# Create CloudFront distribution
+aws cloudfront create-distribution \
+    --origin-domain-name pf-agent-ui-dev.s3-website-us-east-1.amazonaws.com \
+    --default-root-object index.html \
+    --query 'Distribution.DomainName' \
+    --output text
 ```
 
-## Rollback
+This takes 15-20 minutes to deploy globally. You'll get a URL like:
+```
+https://d111111abcdef8.cloudfront.net
+```
 
-To rollback a deployment:
+### Step 5: (Optional) Custom Domain
+
+If you have a custom domain in Route 53:
 
 ```bash
-./ROLLBACK.sh dev us-east-1
+# 1. Request ACM certificate (must be in us-east-1 for CloudFront)
+aws acm request-certificate \
+    --domain-name chat.projectsforce.com \
+    --validation-method DNS \
+    --region us-east-1
+
+# 2. Validate certificate via DNS (follow email/console instructions)
+
+# 3. Update CloudFront distribution with custom domain and certificate
+
+# 4. Create Route 53 alias record pointing to CloudFront
 ```
 
-This will:
-- Delete all Lambda functions
-- Remove Bedrock agents
-- Clean up IAM roles
-- Remove DynamoDB tables
-- Delete S3 buckets
+## Architecture Options
 
-**WARNING:** This is destructive. Make sure you have backups!
+### Option A: S3 + CloudFront (Current)
+**Pros:**
+- Full control over infrastructure
+- Cost-effective for static sites
+- Easy to integrate with existing AWS services
+- CloudFront provides global CDN
+
+**Cons:**
+- Manual configuration required
+- Separate API Gateway setup
+- More moving parts to manage
+
+**Cost:** ~$1-5/month for low traffic
+
+### Option B: AWS Amplify
+**Pros:**
+- Simplified deployment (one command)
+- Built-in CI/CD from Git
+- Automatic HTTPS
+- Integrated backend (AppSync/Lambda)
+
+**Cons:**
+- Less control over infrastructure
+- Higher cost for advanced features
+- Locked into Amplify ecosystem
+
+**Cost:** ~$0.01/build + $0.15/GB served
+
+## Environment Variables
+
+The deployment scripts use these environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENVIRONMENT` | `dev` | Deployment environment (dev/staging/prod) |
+| `AWS_REGION` | `us-east-1` | AWS region for resources |
+| `API_NAME` | `pf-agent-api-${ENVIRONMENT}` | API Gateway name |
+| `S3_BUCKET` | `pf-agent-ui-${ENVIRONMENT}` | S3 bucket name |
+
+## Testing the Deployment
+
+### Test API Gateway
+```bash
+# Health check
+curl https://YOUR-API-ID.execute-api.us-east-1.amazonaws.com/prod/api/health
+
+# Chat endpoint
+curl -X POST https://YOUR-API-ID.execute-api.us-east-1.amazonaws.com/prod/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Show me my projects", "sessionId": "test-123"}'
+```
+
+### Test UI
+1. Open S3 website URL in browser
+2. Type "Show me my projects"
+3. Verify projects load with formatted cards
+4. Select project and test date/time selection
+5. Verify appointment scheduling works
+
+## Monitoring and Logs
+
+### CloudWatch Logs
+```bash
+# View Lambda logs
+aws logs tail /aws/lambda/pf-bedrock-agent-proxy-dev --follow
+
+# View API Gateway logs (if enabled)
+aws logs tail /aws/apigateway/pf-agent-api-dev --follow
+```
+
+### Metrics
+- Lambda invocations: CloudWatch → Lambda → Metrics
+- API Gateway requests: CloudWatch → API Gateway → Metrics
+- S3 bandwidth: CloudWatch → S3 → Metrics
+
+## Cleanup
+
+To remove all deployed resources:
+
+```bash
+# Delete CloudFront distribution (if created)
+aws cloudfront delete-distribution --id YOUR-DISTRIBUTION-ID
+
+# Delete API Gateway
+aws apigatewayv2 delete-api --api-id YOUR-API-ID
+
+# Delete Lambda function
+aws lambda delete-function --function-name pf-bedrock-agent-proxy-dev
+
+# Delete S3 bucket
+aws s3 rb s3://pf-agent-ui-dev --force
+
+# Delete IAM roles
+aws iam delete-role --role-name pf-api-lambda-role-dev
+```
 
 ## Troubleshooting
 
-### Lambda Functions Stuck in "Pending"
-
-**Symptom:** Lambda stays in Pending state for >5 minutes
-
-**Cause:** AWS Lambda service issue (common in us-east-1 during high load)
-
-**Solution:**
-
-1. Check AWS Service Health: https://health.aws.amazon.com
-2. Wait 10-15 minutes and rerun script
-3. Or deploy to different region temporarily:
-   ```bash
-   ./DEPLOY.sh dev us-west-2
-   ```
-
-### IAM Role Permission Errors
-
-**Symptom:** "Access Denied" or "Unauthorized" errors
-
-**Solution:**
-
-1. Verify AWS credentials:
-   ```bash
-   aws sts get-caller-identity
-   ```
-
-2. Check IAM permissions:
-   ```bash
-   aws iam get-user
-   ```
-
-3. Ensure you have required permissions (see Prerequisites)
-
-### Terraform State Lock
-
-**Symptom:** "Error acquiring the state lock"
-
-**Solution:**
-
+### Issue: API Gateway returns 403 Forbidden
+**Fix:** Check Lambda permissions allow API Gateway to invoke:
 ```bash
-cd infrastructure/terraform
-terraform force-unlock <LOCK_ID>
+aws lambda get-policy --function-name pf-bedrock-agent-proxy-dev
 ```
 
-### Bedrock Agent Not Preparing
-
-**Symptom:** Agent stuck in "NOT_PREPARED" state
-
-**Solution:**
-
-1. Check agent has all required components:
-   - IAM role
-   - Foundation model access
-   - For collaborators: parent agent must be prepared first
-
-2. Manually prepare:
-   ```bash
-   aws bedrock-agent prepare-agent \
-     --agent-id <AGENT_ID> \
-     --region us-east-1
-   ```
-
-## Multi-Environment Setup
-
-### Development
-
+### Issue: S3 website returns 404
+**Fix:** Verify bucket policy allows public read:
 ```bash
-./DEPLOY.sh dev us-east-1
+aws s3api get-bucket-policy --bucket pf-agent-ui-dev
 ```
 
-- Uses mock data
-- Lower costs
-- Faster iteration
-
-### Staging
-
+### Issue: CORS errors in browser
+**Fix:** Update API Gateway CORS configuration:
 ```bash
-./DEPLOY.sh staging us-east-1
+aws apigatewayv2 update-api \
+    --api-id YOUR-API-ID \
+    --cors-configuration AllowOrigins='*',AllowMethods='GET,POST,OPTIONS',AllowHeaders='Content-Type'
 ```
 
-- Uses real API (test environment)
-- Production-like setup
-- Testing before prod
-
-### Production
-
+### Issue: Lambda timeout errors
+**Fix:** Increase timeout (current: 30s, max: 900s):
 ```bash
-./DEPLOY.sh prod us-east-1
+aws lambda update-function-configuration \
+    --function-name pf-bedrock-agent-proxy-dev \
+    --timeout 60
 ```
 
-- Uses real API (production)
-- Full monitoring
-- High availability setup
+## Security Considerations
 
-## Cost Optimization
+1. **API Authentication**: Add API Gateway authorizer for production
+2. **S3 Bucket**: Consider CloudFront-only access (disable direct S3 access)
+3. **HTTPS**: Always use CloudFront with ACM certificate for production
+4. **Secrets**: Never commit AWS credentials or API keys to Git
+5. **IAM Roles**: Follow least-privilege principle for Lambda execution role
+6. **CORS**: Restrict allowed origins to your domain in production
 
-### Development Environment
+## Production Checklist
 
-- On-demand Lambda
-- On-demand DynamoDB
-- No reserved capacity
-- **Estimated cost:** $10-20/month
-
-### Production Environment
-
-- Provisioned concurrency for Lambda
-- DynamoDB auto-scaling
-- CloudWatch detailed monitoring
-- **Estimated cost:** $100-300/month
-
-## CI/CD Integration
-
-### GitHub Actions
-
-```yaml
-name: Deploy to AWS
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      - name: Deploy
-        run: |
-          cd bedrock
-          ./DEPLOY.sh prod us-east-1
-```
-
-## Post-Deployment
-
-After deployment completes:
-
-1. **Test the system:**
-   ```bash
-   cd tests
-   ./run_tests.sh
-   ```
-
-2. **Start the UI:**
-   ```bash
-   cd frontend
-   ./start.sh
-   ```
-
-3. **Test via CLI:**
-   ```bash
-   aws bedrock-agent-runtime invoke-agent \
-     --agent-id <SUPERVISOR_ID> \
-     --agent-alias-id <ALIAS_ID> \
-     --session-id test-$(date +%s) \
-     --input-text "Show me my projects" \
-     --region us-east-1 \
-     output.txt
-
-   cat output.txt
-   ```
-
-4. **Monitor:**
-   - CloudWatch Logs: Lambda execution logs
-   - CloudWatch Metrics: Invocation counts, errors
-   - AWS Cost Explorer: Daily costs
-
-## Support
-
-For issues or questions:
-
-1. Check deployment log file
-2. Review troubleshooting section
-3. Check AWS Service Health
-4. Open GitHub issue with logs
-
-## Security Best Practices
-
-1. **Credentials:** Never commit AWS credentials
-2. **IAM Roles:** Use least-privilege principle
-3. **Secrets:** Store API keys in Secrets Manager
-4. **Encryption:** Enable at rest and in transit
-5. **Audit:** Enable CloudTrail logging
-6. **MFA:** Require for production deployments
+- [ ] Lambda functions deployed with latest code
+- [ ] API Gateway deployed with correct endpoints
+- [ ] S3 bucket created and configured
+- [ ] CloudFront distribution created (for HTTPS)
+- [ ] Custom domain configured (optional)
+- [ ] API Gateway authorizer added (for auth)
+- [ ] CloudWatch alarms configured
+- [ ] Backup/disaster recovery plan
+- [ ] Cost alerts configured
+- [ ] Security review completed

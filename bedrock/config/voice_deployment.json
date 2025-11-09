@@ -1,0 +1,30 @@
+{
+  "deployed_at": "2025-11-09T08:02:30Z",
+  "region": "us-east-1",
+  "account_id": "618048437522",
+  "deployment_type": "minimal",
+  "lambda": {
+    "lex_fulfillment": "pf-lex-fulfillment-dev",
+    "lex_fulfillment_arn": "arn:aws:lambda:us-east-1:618048437522:function:pf-lex-fulfillment-dev",
+    "voice_bridge": "pf-voice-bedrock-bridge-dev",
+    "voice_bridge_arn": "arn:aws:lambda:us-east-1:618048437522:function:pf-voice-bedrock-bridge-dev"
+  },
+  "storage": {
+    "dynamodb_table": "pf-session-data-dev",
+    "call_recordings_bucket": "pf-call-recordings-dev-618048437522"
+  },
+  "bedrock_agents": {
+    "supervisor_id": "P9VCJXPIZS",
+    "supervisor_alias_id": "TSTALIASID"
+  },
+  "testing": {
+    "lex_fulfillment_tested": true,
+    "voice_bridge_tested": true,
+    "both_lambdas_operational": true
+  },
+  "next_steps": {
+    "create_connect_instance": "See docs/AWS_CONSOLE_SETUP_GUIDE.md - Part 1",
+    "create_lex_bot": "See docs/AWS_CONSOLE_SETUP_GUIDE.md - Part 2",
+    "integrate_everything": "See docs/AWS_CONSOLE_SETUP_GUIDE.md - Parts 4-5"
+  }
+}
