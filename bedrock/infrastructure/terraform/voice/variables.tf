@@ -48,3 +48,30 @@ variable "connect_instance_alias" {
   type        = string
   default     = "voice-dev"
 }
+
+variable "scheduling_agent_id" {
+  description = "Bedrock Scheduling Agent ID"
+  type        = string
+}
+
+variable "information_agent_id" {
+  description = "Bedrock Information Agent ID"
+  type        = string
+}
+
+variable "chitchat_agent_id" {
+  description = "Bedrock ChitChat Agent ID"
+  type        = string
+}
+
+variable "lex_bot_name" {
+  description = "Name for the Lex bot"
+  type        = string
+  default     = "pf-scheduling-assistant-dev"
+}
+
+variable "lex_voice_id" {
+  description = "Amazon Polly voice ID for Lex bot"
+  type        = string
+  default     = "Joanna"
+}

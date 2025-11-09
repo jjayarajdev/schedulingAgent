@@ -23,7 +23,6 @@ resource "aws_lambda_function" "lex_fulfillment" {
       DYNAMODB_TABLE       = var.dynamodb_table_name
       INFORMATION_LAMBDA   = "${var.prefix}-information-actions"
       VOICE_BRIDGE_LAMBDA  = "${var.prefix}-voice-bedrock-bridge-${var.environment}"
-      AWS_REGION           = var.region
     }
   }
 
@@ -127,7 +126,6 @@ resource "aws_lambda_function" "voice_bedrock_bridge" {
       SUPERVISOR_AGENT_ID       = var.supervisor_agent_id
       SUPERVISOR_AGENT_ALIAS_ID = var.supervisor_agent_alias_id
       DYNAMODB_TABLE            = var.dynamodb_table_name
-      AWS_REGION                = var.region
     }
   }
 
