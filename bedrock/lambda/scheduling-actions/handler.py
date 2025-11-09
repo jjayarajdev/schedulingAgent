@@ -460,7 +460,12 @@ def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -
         url = f"{config['base_url']}/dashboard/getdata/{client_id}/{project_id}"
         logger.info(f"Making API request to: {url}")
 
-        res = requests.get(url, headers=auth_headers, timeout=30)
+        # OPTIMIZATION: Use session with connection pooling and compression
+        res = session.get(
+            url,
+            headers={**auth_headers, 'Accept-Encoding': 'gzip, deflate'},
+            timeout=30
+        )
         res.raise_for_status()
         response = res.json()
 
@@ -482,20 +487,7 @@ def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -
         if not data:
             raise ValueError(f"Project {project_id} not found or no data returned from API")
 
-        # Helper function to safely get nested values
-        def safe_get(obj, *keys, default=None):
-            """Safely navigate nested dictionaries"""
-            result = obj
-            for key in keys:
-                if isinstance(result, dict):
-                    result = result.get(key)
-                else:
-                    return default
-                if result is None:
-                    return default
-            return result if result is not None else default
-
-        # Extract customer information
+        # Extract customer information (using module-level safe_get helper)
         customer_info = safe_get(data, "customer", default={})
         customer_first = safe_get(customer_info, "firstName", default="")
         customer_last = safe_get(customer_info, "lastName", default="")
