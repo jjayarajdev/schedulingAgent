@@ -2,19 +2,6 @@
 # AWS Connect Instance for Voice Integration (Phase 3)
 # ============================================================================
 
-# Variables for configuration
-variable "connect_phone_number" {
-  description = "Phone number to associate with AWS Connect (format: +1XXXXXXXXXX)"
-  type        = string
-  default     = "+18005551234"  # Placeholder - will be replaced with actual number
-}
-
-variable "connect_instance_alias" {
-  description = "Unique alias for AWS Connect instance"
-  type        = string
-  default     = "pf-voice-dev"
-}
-
 # ============================================================================
 # AWS Connect Instance
 # ============================================================================
@@ -34,14 +21,6 @@ resource "aws_connect_instance" "main" {
 
   # Auto resolve best practice warnings
   auto_resolve_best_voices_enabled = true
-
-  tags = {
-    Name        = "${var.prefix}-connect-instance-${var.environment}"
-    Environment = var.environment
-    Project     = "ProjectForce"
-    Phase       = "3"
-    ManagedBy   = "Terraform"
-  }
 }
 
 # ============================================================================
@@ -83,6 +62,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "call_recordings" {
   rule {
     id     = "delete-old-recordings"
     status = "Enabled"
+
+    filter {}
 
     expiration {
       days = 90
@@ -126,23 +107,25 @@ resource "aws_connect_instance_storage_config" "call_recordings" {
   }
 }
 
-resource "aws_connect_instance_storage_config" "contact_trace_records" {
-  instance_id   = aws_connect_instance.main.id
-  resource_type = "CONTACT_TRACE_RECORDS"
-
-  storage_config {
-    s3_config {
-      bucket_name   = aws_s3_bucket.call_recordings.id
-      bucket_prefix = "contact-trace-records"
-
-      encryption_config {
-        encryption_type = "KMS"
-        key_id          = aws_kms_key.connect_recordings.arn
-      }
-    }
-    storage_type = "S3"
-  }
-}
+# Note: CONTACT_TRACE_RECORDS storage type is not supported in some AWS regions
+# Contact trace records can be enabled manually via AWS Console if needed
+# resource "aws_connect_instance_storage_config" "contact_trace_records" {
+#   instance_id   = aws_connect_instance.main.id
+#   resource_type = "CONTACT_TRACE_RECORDS"
+#
+#   storage_config {
+#     s3_config {
+#       bucket_name   = aws_s3_bucket.call_recordings.id
+#       bucket_prefix = "contact-trace-records"
+#
+#       encryption_config {
+#         encryption_type = "KMS"
+#         key_id          = aws_kms_key.connect_recordings.arn
+#       }
+#     }
+#     storage_type = "S3"
+#   }
+# }
 
 # KMS key for encryption
 resource "aws_kms_key" "connect_recordings" {

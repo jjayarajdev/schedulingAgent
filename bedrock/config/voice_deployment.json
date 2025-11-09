@@ -1,0 +1,38 @@
+{
+  "deployed_at": "2025-11-09T14:34:45Z",
+  "region": "us-east-1",
+  "account_id": "772634497954",
+  "deployment_type": "full",
+  "phone_number": "+18338771422",
+  "connect": {
+    "instance_id": "3edd99db-14e2-4628-836e-478b574e4b90",
+    "instance_arn": "arn:aws:connect:us-east-1:772634497954:instance/3edd99db-14e2-4628-836e-478b574e4b90",
+    "phone_number": "+18338771422"
+  },
+  "lex": {
+    "bot_id": "WXFDD1TVEQ",
+    "bot_alias_id": "TSTALIASID",
+    "bot_name": "pf-scheduling-assistant-dev"
+  },
+  "lambda": {
+    "lex_fulfillment": "pf-lex-fulfillment-dev",
+    "lex_fulfillment_arn": "arn:aws:lambda:us-east-1:772634497954:function:pf-lex-fulfillment-dev",
+    "voice_bridge": "pf-voice-bedrock-bridge-dev",
+    "voice_bridge_arn": "arn:aws:lambda:us-east-1:772634497954:function:pf-voice-bedrock-bridge-dev"
+  },
+  "storage": {
+    "dynamodb_table": "",
+    "call_recordings_bucket": "pf-call-recordings-dev-772634497954"
+  },
+  "bedrock_agents": {
+    "supervisor_id": "P9VCJXPIZS",
+    "supervisor_alias_id": "TSTALIASID",
+    "scheduling_id": "OHJRRIOVDN",
+    "information_id": "M0NRSM01QE",
+    "chitchat_id": "WB5OPLGKMF"
+  },
+  "testing": {
+    "test_phone_number": "+18338771422",
+    "test_instructions": "Call +18338771422 to test the voice assistant"
+  }
+}

@@ -109,12 +109,6 @@ resource "aws_lexv2models_intent" "project_inquiry" {
     utterance = "list scheduled projects"
   }
 
-  # Slot for optional project ID
-  slot_priority {
-    priority  = 1
-    slot_name = "ProjectID"
-  }
-
   fulfillment_code_hook {
     enabled = true
   }
@@ -146,19 +140,6 @@ resource "aws_lexv2models_intent" "schedule_appointment" {
   }
   sample_utterance {
     utterance = "schedule for {AppointmentDate} at {AppointmentTime}"
-  }
-
-  slot_priority {
-    priority  = 1
-    slot_name = "ProjectID"
-  }
-  slot_priority {
-    priority  = 2
-    slot_name = "AppointmentDate"
-  }
-  slot_priority {
-    priority  = 3
-    slot_name = "AppointmentTime"
   }
 
   fulfillment_code_hook {
@@ -199,21 +180,9 @@ resource "aws_lexv2models_intent" "urgent_request" {
   }
 }
 
-# 5. Fallback Intent (hand off to Bedrock)
-resource "aws_lexv2models_intent" "fallback" {
-  bot_id      = aws_lexv2models_bot.scheduling_assistant.id
-  bot_version = "DRAFT"
-  locale_id   = aws_lexv2models_bot_locale.en_us.locale_id
-
-  name        = "FallbackIntent"
-  description = "Fallback to Bedrock for complex queries"
-
-  parent_intent_signature = "AMAZON.FallbackIntent"
-
-  fulfillment_code_hook {
-    enabled = true
-  }
-}
+# 5. Fallback Intent - Use built-in AMAZON.FallbackIntent
+# Note: FallbackIntent is automatically created by Lex and cannot be managed via Terraform
+# The built-in AMAZON.FallbackIntent will automatically invoke the Lambda fulfillment function
 
 # ============================================================================
 # Slot Types
@@ -228,7 +197,7 @@ resource "aws_lexv2models_slot_type" "project_id" {
   description = "Project identifier"
 
   value_selection_setting {
-    resolution_strategy = "ORIGINAL_VALUE"
+    resolution_strategy = "OriginalValue"
   }
 
   slot_type_values {
@@ -257,7 +226,7 @@ resource "aws_lexv2models_slot_type" "project_category" {
   description = "Type of project"
 
   value_selection_setting {
-    resolution_strategy = "TOP_RESOLUTION"
+    resolution_strategy = "TopResolution"
   }
 
   slot_type_values {
@@ -322,48 +291,9 @@ resource "aws_lexv2models_slot_type" "project_category" {
 # Bot Alias
 # ============================================================================
 
-resource "aws_lexv2models_bot_version" "v1" {
-  bot_id = aws_lexv2models_bot.scheduling_assistant.id
-
-  locale_specification = {
-    (aws_lexv2models_bot_locale.en_us.locale_id) = {
-      source_bot_version = "DRAFT"
-    }
-  }
-
-  depends_on = [
-    aws_lexv2models_intent.welcome,
-    aws_lexv2models_intent.project_inquiry,
-    aws_lexv2models_intent.schedule_appointment,
-    aws_lexv2models_intent.urgent_request,
-    aws_lexv2models_intent.fallback
-  ]
-}
-
-resource "aws_lexv2models_bot_alias" "prod" {
-  bot_id  = aws_lexv2models_bot.scheduling_assistant.id
-  name    = "prod"
-  bot_version = aws_lexv2models_bot_version.v1.bot_version
-
-  bot_alias_locale_settings {
-    locale_id = aws_lexv2models_bot_locale.en_us.locale_id
-
-    bot_alias_locale_setting {
-      enabled = true
-      code_hook_specification {
-        lambda_code_hook {
-          lambda_arn                = aws_lambda_function.lex_fulfillment.arn
-          code_hook_interface_version = "1.0"
-        }
-      }
-    }
-  }
-
-  tags = {
-    Name        = "${var.prefix}-lex-alias-prod-${var.environment}"
-    Environment = var.environment
-  }
-}
+# Note: Bot alias creation via Terraform is not supported in current AWS provider
+# Use TSTALIASID (test alias) which is automatically available for all bots
+# Or create alias manually via AWS Console after deployment
 
 # ============================================================================
 # IAM Role for Lex Bot
@@ -444,11 +374,11 @@ output "lex_bot_arn" {
 }
 
 output "lex_bot_alias_id" {
-  description = "Lex Bot Alias ID"
-  value       = aws_lexv2models_bot_alias.prod.id
+  description = "Lex Bot Alias ID (using TSTALIASID - test alias)"
+  value       = "TSTALIASID"
 }
 
 output "lex_bot_alias_arn" {
   description = "Lex Bot Alias ARN"
-  value       = aws_lexv2models_bot_alias.prod.bot_alias_arn
+  value       = "${aws_lexv2models_bot.scheduling_assistant.arn}/alias/TSTALIASID"
 }

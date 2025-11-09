@@ -1000,23 +1000,14 @@ SCHEDULING_SCHEMA='{
 INFORMATION_SCHEMA='{
   "functions": [
     {
-      "name": "get_appointment_status",
-      "description": "Check the status of an appointment",
-      "parameters": {
-        "project_id": {"description": "Project ID", "required": true, "type": "string"}
-      }
-    },
-    {
-      "name": "get_working_hours",
-      "description": "Get business working hours and availability",
-      "parameters": {}
-    },
-    {
       "name": "get_weather",
-      "description": "Get weather forecast for project location",
+      "description": "Get weather forecast for a specific location using Open-Meteo API. Provides current conditions and 3-day forecast.",
       "parameters": {
-        "location": {"description": "Location (city or zip code)", "required": true, "type": "string"},
-        "date": {"description": "Optional date in YYYY-MM-DD format", "required": false, "type": "string"}
+        "latitude": {"description": "Latitude coordinate (decimal format). Preferred method for accurate weather data. Example: 27.9506", "required": false, "type": "number"},
+        "longitude": {"description": "Longitude coordinate (decimal format). Must be provided with latitude. Example: -82.4572", "required": false, "type": "number"},
+        "location": {"description": "Location name (city, zip code, or City, State format). Fallback if coordinates not available. Examples: Tampa, Tampa FL, 33601", "required": false, "type": "string"},
+        "project_id": {"description": "Project ID for context and logging (optional)", "required": false, "type": "string"},
+        "address": {"description": "Full address for reference and logging (optional)", "required": false, "type": "string"}
       }
     }
   ]
@@ -1226,6 +1217,22 @@ echo "  ────────────────────────
 echo ""
 echo "  View agent IDs:"
 echo "     cat config/agent_ids.json"
+echo ""
+echo "  ────────────────────────────────────────────────────"
+echo ""
+echo "  STEP 3: Deploy Voice Integration (OPTIONAL)"
+echo "  ────────────────────────────────────────────────────"
+echo "  To add phone call support via AWS Connect:"
+echo ""
+echo "  Option A - Full Deployment (Recommended):"
+echo "     ./scripts/DEPLOY_VOICE_FULL.sh"
+echo "     Deploys: Connect instance, Lex bot, Lambda functions, phone config"
+echo "     Phone: +1-833-877-1422"
+echo ""
+echo "  Option B - Minimal Deployment (Lambda + Storage only):"
+echo "     ./scripts/DEPLOY_VOICE_MINIMAL.sh"
+echo "     Then manually create: Connect instance, Lex bot, contact flows"
+echo "     See: docs/AWS_CONSOLE_SETUP_GUIDE.md"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""

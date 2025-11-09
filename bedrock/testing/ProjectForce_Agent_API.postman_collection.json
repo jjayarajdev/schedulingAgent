@@ -1,8 +1,8 @@
 {
 	"info": {
-		"_postman_id": "scheduling-agent-api-v1",
+		"_postman_id": "scheduling-agent-api-v2",
 		"name": "ProjectForce Scheduling Agent API",
-		"description": "Complete API testing collection for ProjectForce Scheduling Agent with AWS Bedrock",
+		"description": "Complete API testing collection for ProjectForce Scheduling Agent with AWS Bedrock - Updated with Weather-Only Information Agent",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"item": [
@@ -249,7 +249,7 @@
 					"response": []
 				},
 				{
-					"name": "Invoke Agent - Information Query",
+					"name": "Weather - City Name (Tampa)",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -260,7 +260,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"message\": \"What services do you offer?\",\n    \"session_id\": \"test-session-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+							"raw": "{\n    \"message\": \"What's the weather in Tampa?\",\n    \"session_id\": \"test-weather-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
 						},
 						"url": {
 							"raw": "{{proxy_url}}/api/invoke-agent",
@@ -272,12 +272,152 @@
 								"invoke-agent"
 							]
 						},
-						"description": "Query the Information agent"
+						"description": "Test weather query with city name - Information agent uses Open-Meteo geocoding to get coordinates"
+					},
+					"response": []
+				},
+				{
+					"name": "Weather - City with State",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Check weather for Minneapolis, MN\",\n    \"session_id\": \"test-weather-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test weather query with city and state format"
+					},
+					"response": []
+				},
+				{
+					"name": "Weather - Zip Code",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"What's the weather in 33601?\",\n    \"session_id\": \"test-weather-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test weather query with zip code"
+					},
+					"response": []
+				},
+				{
+					"name": "Weather - Project Location Context",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Show me project 7751743 details and then tell me what's the weather there\",\n    \"session_id\": \"test-weather-context-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test weather query with project context - should use coordinates from project address"
+					},
+					"response": []
+				},
+				{
+					"name": "Weather - Rain Forecast",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Is it going to rain in Miami tomorrow?\",\n    \"session_id\": \"test-weather-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test specific weather condition query (rain forecast)"
+					},
+					"response": []
+				},
+				{
+					"name": "Weather - Out of Scope (Should Defer)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"What are your business hours?\",\n    \"session_id\": \"test-weather-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test out-of-scope query - information agent should defer to scheduling agent"
 					},
 					"response": []
 				}
 			],
-			"description": "Bedrock Agent invocations without streaming"
+			"description": "Bedrock Agent invocations without streaming - includes weather-only information agent tests"
 		},
 		{
 			"name": "4. Bedrock Agent - Streaming",
@@ -335,6 +475,34 @@
 							]
 						},
 						"description": "Test streaming with chitchat agent"
+					},
+					"response": []
+				},
+				{
+					"name": "Weather - City Name (Streaming)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"What's the weather like in New York?\",\n    \"session_id\": \"test-weather-stream-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": true\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test weather query with streaming enabled"
 					},
 					"response": []
 				}

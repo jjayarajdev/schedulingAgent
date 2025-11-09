@@ -399,8 +399,6 @@ Internal project for ProjectForce
 
 - ProjectForce Team
 - AWS Bedrock Agents
-- Claude Code Assistant
-
 ---
 
 **Last Updated**: 2025-11-04
