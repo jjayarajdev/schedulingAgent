@@ -7,6 +7,7 @@ Handles Bedrock agent invocations with custom intent-based routing
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 import boto3
+from botocore.config import Config
 import json
 import time
 import os
@@ -117,9 +118,25 @@ SAMPLE_USER = {
     ]
 }
 
-# Initialize Bedrock clients
-bedrock_agent_runtime = boto3.client('bedrock-agent-runtime', region_name=REGION)
-bedrock_runtime = boto3.client('bedrock-runtime', region_name=REGION)
+# ==============================================================================
+# OPTIMIZATION: Initialize Bedrock clients with connection pooling
+# ==============================================================================
+
+# Optimized configuration for connection pooling and performance
+bedrock_config = Config(
+    region_name=REGION,
+    retries={'max_attempts': 2, 'mode': 'adaptive'},
+    max_pool_connections=50,  # Connection pooling for reuse
+    tcp_keepalive=True,       # Keep TCP connections alive
+    connect_timeout=5,        # Fast connection establishment
+    read_timeout=60           # Long enough for streaming
+)
+
+# Initialize Bedrock clients with optimized config
+bedrock_agent_runtime = boto3.client('bedrock-agent-runtime', config=bedrock_config)
+bedrock_runtime = boto3.client('bedrock-runtime', config=bedrock_config)
+
+logger.info("✅ Bedrock clients initialized with connection pooling")
 
 
 # ==============================================================================
@@ -534,14 +551,30 @@ Please help the customer with their request using their customer ID and client I
             }
         )
 
-        # Stream response
+        # Stream response with buffering for improved performance
         chunk_count = 0
+        buffer = []
+        buffer_size = 0
+        BATCH_SIZE = 500  # bytes - send every 500 bytes or when event stream ends
+
         for event in response['completion']:
             if 'chunk' in event:
                 chunk = event['chunk']
                 if 'bytes' in chunk:
                     chunk_count += 1
-                    yield chunk['bytes'].decode('utf-8')
+                    chunk_text = chunk['bytes'].decode('utf-8')
+                    buffer.append(chunk_text)
+                    buffer_size += len(chunk_text)
+
+                    # Send batch when threshold reached
+                    if buffer_size >= BATCH_SIZE:
+                        yield ''.join(buffer)
+                        buffer = []
+                        buffer_size = 0
+
+        # Send remaining buffered chunks
+        if buffer:
+            yield ''.join(buffer)
 
         # Log successful invocation
         invocation_time = time.time() - invocation_start_time
