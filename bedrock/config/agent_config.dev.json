@@ -5,22 +5,23 @@
   "agents": {
     "scheduling": {
       "agent_id": "OHJRRIOVDN",
-      "alias_id": "TSTALIASID"
+      "alias_id": "UHA4SFG5VQ"
     },
     "information": {
       "agent_id": "M0NRSM01QE",
-      "alias_id": "TSTALIASID"
+      "alias_id": "PQWDUTVNMU"
     },
     "chitchat": {
       "agent_id": "WB5OPLGKMF",
-      "alias_id": "TSTALIASID"
+      "alias_id": "XYZZ4KHA9Z"
     }
   },
   "routing": {
     "enabled": true,
-    "method": "supervisor",
-    "use_supervisor": true,
-    "classifier_model": "anthropic.claude-3-haiku-20240307-v1:0"
+    "method": "direct",
+    "use_supervisor": false,
+    "allow_direct_lambda": true,
+    "classifier_model": "anthropic.claude-3-5-sonnet-20241022-v2:0"
   },
   "region": "us-east-1",
   "prefix": "pf_",
