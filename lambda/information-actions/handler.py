@@ -208,14 +208,27 @@ def geocode_location(location: str) -> Dict[str, Any]:
     Raises:
         ValueError: If location not found
     """
+    from urllib.parse import quote
+
     logger.info(f"Geocoding location: {location}")
 
-    url = f"https://geocoding-api.open-meteo.com/v1/search?name={location}&count=1&language=en&format=json"
+    # Extract city name from "City, State" format
+    # Open-Meteo geocoding API works better with just the city name
+    city_name = location.split(',')[0].strip()
+    logger.info(f"Using city name for geocoding: {city_name}")
+
+    # URL encode the city name parameter
+    encoded_location = quote(city_name)
+    url = f"https://geocoding-api.open-meteo.com/v1/search?name={encoded_location}&count=1&language=en&format=json"
+
+    logger.info(f"Geocoding URL: {url}")
 
     try:
         res = requests.get(url, timeout=10)
         res.raise_for_status()
         data = res.json()
+
+        logger.info(f"Geocoding response: {data}")
 
         if not data.get("results"):
             raise ValueError(f"Location '{location}' not found")

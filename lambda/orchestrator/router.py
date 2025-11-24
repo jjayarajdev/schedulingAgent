@@ -67,79 +67,100 @@ def format_lambda_response(action: str, response_body: Dict[str, Any]) -> str:
             if not projects:
                 return "You have no projects matching your criteria."
 
-            lines = [f"Found {len(projects)} project(s):\n"]
-            for i, project in enumerate(projects, 1):
-                status = project.get('status', 'Unknown')
-                category = project.get('category', 'Not specified')
-                project_type = project.get('projectType', 'Not specified')
-                scheduled_date = project.get('scheduledDate', 'Not scheduled')
-                address = project.get('address', {})
-                full_address = address.get('fullAddress', 'No address')
-
-                lines.append(f"{i}. Project {project.get('id', 'Unknown')}")
-                lines.append(f"   Status: {status}")
-                lines.append(f"   Category: {category}")
-                lines.append(f"   Type: {project_type}")
-                lines.append(f"   Scheduled: {scheduled_date}")
-                lines.append(f"   Address: {full_address}")
-
-                tech = project.get('technician', {})
-                if tech and tech.get('name'):
-                    lines.append(f"   Technician: {tech.get('name')} (#{tech.get('id', 'N/A')})")
-                lines.append("")  # Empty line between projects
-
-            return "\n".join(lines)
+            # Return JSON for UI to render as a table
+            result = {
+                "message": f"Found {len(projects)} project(s):",
+                "projects": projects
+            }
+            return f"```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action == 'get_project_details':
             project = response_body.get('project', {})
             if not project:
                 return "Project details not found."
 
-            lines = [f"Details for Project {project.get('id', 'Unknown')}:\n"]
-            lines.append(f"Status: {project.get('status', 'Unknown')}")
-            lines.append(f"Category: {project.get('category', 'Not specified')}")
-            lines.append(f"Project Type: {project.get('projectType', 'Not specified')}")
-            lines.append(f"Scheduled Date: {project.get('scheduledDate', 'Not scheduled')}")
-
-            address = project.get('address', {})
-            if address.get('fullAddress'):
-                lines.append(f"Address: {address['fullAddress']}")
-
-            tech = project.get('technician', {})
-            if tech and tech.get('name'):
-                lines.append(f"Technician: {tech.get('name')} (#{tech.get('id', 'N/A')})")
-
-            customer = project.get('customer', {})
-            if customer and customer.get('name'):
-                lines.append(f"Customer: {customer.get('name')}")
-                if customer.get('email'):
-                    lines.append(f"Email: {customer.get('email')}")
-                if customer.get('phone'):
-                    lines.append(f"Phone: {customer.get('phone')}")
-
-            return "\n".join(lines)
+            # Return JSON for UI to render as a detailed card
+            result = {
+                "message": f"Project #{project.get('id', 'Unknown')} Details",
+                "project": project
+            }
+            return f"```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action == 'get_available_dates':
             dates = response_body.get('available_dates', [])
             if not dates:
                 return "No available dates found for this project."
 
-            lines = ["Available dates:\n"]
-            for date in dates:
-                lines.append(f"- {date}")
+            # Format dates for UI rendering
+            from datetime import datetime
+            formatted_dates = []
+            for date_str in dates:
+                try:
+                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                    formatted_dates.append({
+                        "date": date_str,
+                        "dayShort": date_obj.strftime("%a"),  # Mon, Tue
+                        "monthDay": date_obj.strftime("%b %d"),  # Nov 25
+                        "dayName": date_obj.strftime("%A")  # Monday
+                    })
+                except:
+                    formatted_dates.append({"date": date_str, "monthDay": date_str})
 
-            return "\n".join(lines)
+            # Return JSON for UI to render as date cards
+            result = {
+                "message": "Available dates for scheduling:",
+                "dates": formatted_dates,
+                "dateCount": len(formatted_dates)
+            }
+            return f"```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action in ['get_time_slots', 'get_available_timeslots']:
-            slots = response_body.get('time_slots', [])
+            # Try multiple field names for compatibility
+            slots = response_body.get('available_slots') or response_body.get('timeSlots') or response_body.get('time_slots', [])
             if not slots:
                 return "No available time slots found for this date."
 
-            lines = ["Available time slots:\n"]
-            for slot in slots:
-                lines.append(f"- {slot}")
+            # Format times nicely (convert 24h to 12h with AM/PM)
+            formatted_slots = []
+            grouped_slots = {"morning": [], "afternoon": [], "evening": []}
 
-            return "\n".join(lines)
+            for slot in slots:
+                try:
+                    # Parse time (format: "HH:MM" or "HH:MM:SS")
+                    time_parts = slot.split(":")
+                    hour = int(time_parts[0])
+                    minute = int(time_parts[1])
+
+                    # Convert to 12h format
+                    am_pm = "AM" if hour < 12 else "PM"
+                    display_hour = hour if hour <= 12 else hour - 12
+                    display_hour = 12 if display_hour == 0 else display_hour
+
+                    formatted_time = f"{display_hour}:{minute:02d} {am_pm}"
+                    formatted_slots.append(formatted_time)
+
+                    # Group by time of day
+                    if hour < 12:
+                        grouped_slots["morning"].append(formatted_time)
+                    elif hour < 17:
+                        grouped_slots["afternoon"].append(formatted_time)
+                    else:
+                        grouped_slots["evening"].append(formatted_time)
+                except:
+                    formatted_slots.append(slot)
+
+            # Return JSON for UI to render as time slot cards
+            result = {
+                "message": "Available time slots for this date:",
+                "timeSlots": formatted_slots,
+                "timeSlotsGrouped": {
+                    "morning": {"label": "Morning", "slots": grouped_slots["morning"], "count": len(grouped_slots["morning"])},
+                    "afternoon": {"label": "Afternoon", "slots": grouped_slots["afternoon"], "count": len(grouped_slots["afternoon"])},
+                    "evening": {"label": "Evening", "slots": grouped_slots["evening"], "count": len(grouped_slots["evening"])}
+                },
+                "slotCount": len(formatted_slots)
+            }
+            return f"```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action == 'get_business_hours':
             working_days = response_body.get('working_days', [])
@@ -156,6 +177,60 @@ def format_lambda_response(action: str, response_body: Dict[str, Any]) -> str:
                 lines.append(f"\nClosed: {', '.join(non_working_days)}")
 
             return "\n".join(lines)
+
+        elif action in ['greet', 'help', 'general']:
+            # Chitchat actions - return message directly
+            return response_body.get('message', "Hello! How can I help you today?")
+
+        elif action == 'get_weather':
+            # Format weather data for UI rendering
+            weather_data = response_body.get('weather', {})
+            location_data = weather_data.get('location', {})
+            current_data = weather_data.get('current', {})
+            forecast_data = weather_data.get('forecast', [])
+
+            # Build location string
+            location_name = location_data.get('name', response_body.get('location', 'Unknown'))
+            admin1 = location_data.get('admin1', '')
+            country = location_data.get('country', '')
+
+            if admin1 and country:
+                location_str = f"{location_name}, {admin1}, {country}"
+            elif admin1:
+                location_str = f"{location_name}, {admin1}"
+            else:
+                location_str = location_name
+
+            # Format forecast with day names
+            from datetime import datetime
+            formatted_forecast = []
+            for day in forecast_data:
+                try:
+                    date_obj = datetime.strptime(day.get('date', ''), "%Y-%m-%d")
+                    day_name = date_obj.strftime("%A")
+                except:
+                    day_name = day.get('date', 'Unknown')
+
+                formatted_forecast.append({
+                    "day": day_name,
+                    "condition": day.get('condition', 'Unknown'),
+                    "high": day.get('max_temp_f', 0),
+                    "low": day.get('min_temp_f', 0),
+                    "precipitation": day.get('precipitation_probability', 0)
+                })
+
+            # Return JSON for UI to render as weather card
+            result = {
+                "location": location_str,
+                "current": {
+                    "temperature": current_data.get('temp_f', current_data.get('temp_F', 0)),
+                    "condition": current_data.get('condition', 'Unknown'),
+                    "humidity": current_data.get('humidity', 0),
+                    "windSpeed": current_data.get('wind_mph', current_data.get('windspeedMiles', 0))
+                },
+                "forecast": formatted_forecast
+            }
+            return f"```json\n{json.dumps(result, indent=2)}\n```"
 
         else:
             # Fallback: return JSON for unknown actions
@@ -187,6 +262,13 @@ def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
 
     # Map action to Lambda function
     lambda_functions = {
+        # Chitchat actions
+        'greet': 'pf-chitchat-actions',
+        'help': 'pf-chitchat-actions',
+        'general': 'pf-chitchat-actions',
+        # Information actions
+        'get_weather': 'pf-information-actions',
+        # Scheduling query actions
         'list_projects': config.scheduling_lambda,
         'get_project_details': config.scheduling_lambda,
         'get_available_dates': config.scheduling_lambda,
@@ -267,172 +349,9 @@ def build_conversation_context(conversation_history: Optional[list], max_message
     return ""
 
 
-def invoke_bedrock_agent(
-    message: str,
-    session_id: str,
-    session_attributes: Dict[str, str],
-    conversation_history: Optional[list] = None
-) -> Dict[str, Any]:
-    """
-    Invoke Bedrock agent (Supervisor or direct agent routing)
-
-    Args:
-        message: User message
-        session_id: Session identifier
-        session_attributes: Session attributes (customer_id, client_id, tokens, etc.)
-        conversation_history: Previous conversation for context
-
-    Returns:
-        Dictionary with:
-        - response: Agent response text
-        - agent_name: Name of agent invoked
-        - intent: Classified intent
-        - timing: Performance metrics
-    """
-    config = get_config()
-    bedrock_client = get_bedrock_agent_client()
-
-    timing = {}
-    start_time = time.time()
-
-    # Classify intent
-    classification = classify_intent_and_action(message, conversation_history)
-    intent = classification.get('intent', 'chitchat')
-    timing['classification'] = time.time() - start_time
-
-    logger.info(f"Intent classified as: {intent}")
-
-    # Determine which agent to invoke
-    if config.use_supervisor:
-        # Use Supervisor agent
-        agent_id = config.supervisor_agent_id
-        alias_id = config.supervisor_alias_id
-        agent_name = "Supervisor Agent"
-        logger.info(f"Routing via SUPERVISOR: {agent_id} (Alias: {alias_id})")
-    else:
-        # Direct routing to intent-specific agent
-        agents = config.agents
-        agent_config = agents.get(intent, agents.get('chitchat'))
-        agent_id = agent_config['agent_id']
-        alias_id = agent_config['alias_id']
-        agent_name = f"{intent.capitalize()} Agent"
-        logger.info(f"Routing to {intent.upper()} agent: {agent_id} (bypassing Supervisor)")
-
-    # Enhance session attributes with context
-    enhanced_attributes = dict(session_attributes)
-
-    # For Information Agent: Extract location from conversation history if available
-    if intent == 'information' and 'weather' in message.lower():
-        location = extract_location_from_history(conversation_history or [])
-        if location:
-            logger.info(f"📍 Extracted location from history: {location}")
-            enhanced_attributes['inferred_location'] = location
-
-    # Build conversation context and enhance the message
-    context_summary = build_conversation_context(conversation_history)
-    enhanced_message = message
-
-    if context_summary:
-        # Prepend conversation context to help agent understand references
-        enhanced_message = f"""<conversation_history>
-{context_summary}
-</conversation_history>
-
-<current_message>
-{message}
-</current_message>"""
-        logger.info(f"📝 Added conversation context ({len(conversation_history or [])} messages) to agent prompt")
-
-    # PRONOUN RESOLUTION: Detect and resolve pronouns like "it", "that", "this"
-    pronoun_ref = extract_pronoun_reference(message, conversation_history or [])
-    if pronoun_ref:
-        project_id = pronoun_ref.get('project_id')
-        project_info = pronoun_ref.get('project_info', {})
-
-        # Add explicit pronoun resolution to the message
-        resolution_context = f"\n\n<pronoun_resolution>\nThe user's pronoun refers to Project {project_id}"
-
-        if project_info:
-            # Add key project details to help agent understand context
-            status = project_info.get('status', 'Unknown')
-            category = project_info.get('category', '')
-            scheduled_date = project_info.get('scheduledDate', '')
-
-            resolution_context += f"\nProject Details:"
-            resolution_context += f"\n- Status: {status}"
-            if category:
-                resolution_context += f"\n- Category: {category}"
-            if scheduled_date:
-                resolution_context += f"\n- Scheduled: {scheduled_date}"
-
-        resolution_context += "\n</pronoun_resolution>"
-
-        enhanced_message += resolution_context
-        logger.info(f"🔗 Resolved pronoun to project {project_id}")
-
-        # Also add to session attributes for Lambda calls
-        enhanced_attributes['resolved_project_id'] = project_id
-
-    # Invoke the selected agent
-    invoke_start = time.time()
-    response = bedrock_client.invoke_agent(
-        agentId=agent_id,
-        agentAliasId=alias_id,
-        sessionId=session_id,
-        inputText=enhanced_message,
-        sessionState={
-            'sessionAttributes': enhanced_attributes
-        }
-    )
-    timing['bedrock_invoke'] = time.time() - invoke_start
-
-    # Process event stream
-    event_stream = response['completion']
-    stream_start = time.time()
-
-    full_response = []
-    for event in event_stream:
-        if 'chunk' in event:
-            chunk = event['chunk']
-            if 'bytes' in chunk:
-                text = chunk['bytes'].decode('utf-8')
-                full_response.append(text)
-
-    timing['stream_processing'] = time.time() - stream_start
-    timing['total'] = time.time() - start_time
-
-    response_text = ''.join(full_response)
-
-    logger.info(f"⏱️  Agent Performance: Total={timing['total']:.2f}s | "
-                f"Invoke={timing['bedrock_invoke']:.2f}s | "
-                f"Stream={timing['stream_processing']:.2f}s | "
-                f"Classification={timing['classification']:.3f}s")
-    logger.info(f"📝 Agent response (first 100 chars): {response_text[:100]}...")
-
-    # FORMATTING FIX: Check if agent returned raw JSON and format it
-    formatted_response = response_text
-    try:
-        # Try to parse as JSON
-        if response_text.strip().startswith('{') and '"action"' in response_text:
-            response_data = json.loads(response_text)
-            action_name = response_data.get('action')
-
-            # Format using the same function as Direct Lambda
-            if action_name:
-                formatted_response = format_lambda_response(action_name, response_data)
-                logger.info(f"✅ Formatted agent JSON response for action: {action_name}")
-    except (json.JSONDecodeError, KeyError) as e:
-        # Not JSON or formatting failed - use original response
-        logger.debug(f"Agent response not JSON or formatting failed: {e}")
-        formatted_response = response_text
-
-    return {
-        'response': formatted_response,
-        'agent_name': agent_name,
-        'intent': intent,
-        'timing': timing,
-        'direct_call': False
-    }
+# DEPRECATED: Bedrock agents are no longer used
+# All functionality moved to direct Lambda calls and workflow orchestration
+# The invoke_bedrock_agent() function has been removed.
 
 
 def route_request(
@@ -527,9 +446,44 @@ def route_request(
         'pf_bearer_token': pf_bearer_token
     }
 
+    # INTELLIGENT ORCHESTRATION: Use Sonnet 3.5 for ALL workflow decisions
+    # NO hardcoding, NO regex - pure intelligence!
+    workflow_actions = [
+        'schedule_project', 'confirm_appointment', 'reschedule_appointment',
+        'cancel_appointment', 'add_note', 'list_notes'
+    ]
+
+    # Weather requests without explicit location need intelligent context extraction
+    needs_intelligent_orchestration = (
+        action in workflow_actions or
+        intent == 'scheduling' or
+        (action == 'get_weather' and not merged_params.get('location') and not merged_params.get('latitude'))
+    )
+
+    if needs_intelligent_orchestration:
+        logger.info(f"🧠 INTELLIGENT ORCHESTRATION: Using Sonnet 3.7 for workflow decisions")
+
+        try:
+            from intelligent_orchestrator import orchestrate_intelligent_workflow
+
+            intelligent_result = orchestrate_intelligent_workflow(
+                message=resolved_message,
+                session_id=session_id,
+                customer_id=customer_id,
+                client_id=client_id,
+                pf_bearer_token=pf_bearer_token,
+                conversation_history=conversation_history
+            )
+
+            return intelligent_result
+
+        except Exception as e:
+            logger.error(f"Intelligent orchestration failed: {e}")
+            # Fall through to direct Lambda call below
+
     # OPTIMIZATION: Call Lambda directly for simple data retrieval
     if config.allow_direct_lambda and can_call_direct and action:
-        logger.info(f"⚡ DIRECT LAMBDA CALL: {action} (bypassing agent)")
+        logger.info(f"⚡ DIRECT LAMBDA CALL: {action} (bypassing Bedrock)")
 
         try:
             lambda_start = time.time()
@@ -581,21 +535,26 @@ def route_request(
             }
 
         except Exception as e:
-            logger.error(f"Direct Lambda call failed: {e}, falling back to agent")
-            # Fall through to agent invocation below
+            logger.error(f"Direct Lambda call failed: {e}")
+            timing['total'] = time.time() - start_time
+            return {
+                'response': f"I encountered an error processing your request: {str(e)}. Please try again.",
+                'intent': intent,
+                'action': action,
+                'agent_name': 'Direct Lambda',
+                'direct_call': False,
+                'timing': timing
+            }
 
-    # FALLBACK: Use Bedrock agent for complex queries or if direct call fails
-    logger.info(f"Routing to Bedrock agent (reason: can_call_direct={can_call_direct}, action={action})")
+    # NO BEDROCK FALLBACK - All actions should be handled by direct Lambda or workflow
+    logger.warning(f"⚠️ No handler found for: intent={intent}, action={action}, can_call_direct={can_call_direct}")
 
-    # Use resolved message for agent (with context already resolved)
-    agent_result = invoke_bedrock_agent(
-        message=resolved_message,
-        session_id=session_id,
-        session_attributes=session_attributes,
-        conversation_history=conversation_history
-    )
-
-    # Merge classification timing with agent timing
-    agent_result['timing']['classification'] = timing['classification']
-
-    return agent_result
+    timing['total'] = time.time() - start_time
+    return {
+        'response': "I'm not sure how to help with that. Please try rephrasing your request or ask for help to see what I can do.",
+        'intent': intent,
+        'action': action or 'unknown',
+        'agent_name': 'Orchestrator',
+        'direct_call': False,
+        'timing': timing
+    }

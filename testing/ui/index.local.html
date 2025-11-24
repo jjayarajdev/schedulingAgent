@@ -604,6 +604,10 @@
                 return '<p>Error: Invalid message content</p>';
             }
 
+            console.log('=== formatAgentMessage DEBUG ===');
+            console.log('Content length:', content.length);
+            console.log('First 200 chars:', content.substring(0, 200));
+
             const statusColors = {
                 'New': '#28a745',
                 'Scheduled': '#17a2b8',
@@ -619,9 +623,11 @@
 
             // Method 1: Try JSON with backticks first (```json ... ```)
             let jsonBlockMatch = content.match(/```json\s*([\s\S]*?)```/);
+            console.log('JSON block match:', jsonBlockMatch ? 'FOUND' : 'NOT FOUND');
             if (jsonBlockMatch) {
                 try {
                     jsonData = jsonBlockMatch[1];
+                    console.log('Extracted JSON data length:', jsonData.length);
                     textAfterJson = content.substring(content.indexOf('```', content.indexOf('```json') + 7) + 3).trim();
                     textBeforeJson = content.substring(0, content.indexOf('```json')).trim();
                 } catch (e) {
@@ -665,9 +671,16 @@
             if (jsonData) {
                 try {
                     const data = JSON.parse(jsonData);
+                    console.log('Parsed JSON successfully!');
+                    console.log('Has project?', !!data.project);
+                    console.log('Has projects array?', !!(data.projects && Array.isArray(data.projects)));
+                    console.log('Has dates?', !!(data.dates && Array.isArray(data.dates)));
+                    console.log('Has timeSlots?', !!(data.timeSlots || data.timeSlotsGrouped));
+                    console.log('Has weather?', !!(data.location && data.current));
 
                     // Handle single project details JSON
                     if (data.project && typeof data.project === 'object' && data.project.id) {
+                        console.log('Rendering single project details');
                         const proj = data.project;
                         let html = '';
 
@@ -915,6 +928,7 @@
 
                     // Handle projects list JSON
                     if (data.projects && Array.isArray(data.projects) && data.projects.length > 0) {
+                        console.log('Rendering projects list! Count:', data.projects.length);
                         let html = '';
 
                         // Header with message and count
@@ -927,6 +941,7 @@
                             </div>`;
                         }
 
+                        console.log('Building projects table HTML...');
                         // Projects table
                         html += `
                             <div style="margin: 20px 0; overflow-x: auto; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.1);">
@@ -991,7 +1006,10 @@
 
                         // Removed - using textAfterJson from above
                         const afterJson = textAfterJson; // content.substring(content.indexOf('```', content.indexOf('```json') + 7) + 3).trim();
-                        return html + (afterJson ? `<p style="margin-top: 16px;">${afterJson}</p>` : '');
+                        const finalHtml = html + (afterJson ? `<p style="margin-top: 16px;">${afterJson}</p>` : '');
+                        console.log('Generated projects table HTML length:', finalHtml.length);
+                        console.log('First 500 chars of generated HTML:', finalHtml.substring(0, 500));
+                        return finalHtml;
                     }
 
                     // Handle weather JSON

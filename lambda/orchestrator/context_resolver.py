@@ -6,7 +6,6 @@ import json
 import re
 import logging
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
 
 logger = logging.getLogger()
 
@@ -204,20 +203,24 @@ def _extract_context_from_history(conversation_history: List[Dict]) -> Dict[str,
     Extract entities and context from conversation history
 
     Returns dictionary with:
-    - project_ids: List of mentioned project IDs
+    - project_ids: ORDERED list from most recently displayed list (for positional refs like "10th project")
+    - last_displayed_list: Most recent multi-project list shown to user
+    - last_project: Most recently mentioned single project (for pronoun refs like "it")
     - dates: List of mentioned dates
     - times: List of mentioned times
-    - last_project: Most recently mentioned project
-    - last_date: Most recently mentioned date
     """
     context = {
-        'project_ids': [],
+        'project_ids': [],  # Will be set to last_displayed_list for positional references
+        'last_displayed_list': None,  # Most recent list with multiple projects
         'dates': [],
         'times': [],
-        'last_project': None,
+        'last_project': None,  # Most recently mentioned single project
         'last_date': None,
         'last_time': None
     }
+
+    # Track all project mentions for finding the most recent single mention
+    all_project_mentions = []
 
     # Process history in reverse (most recent first)
     for msg in reversed(conversation_history[-5:]):  # Last 5 messages
@@ -225,9 +228,16 @@ def _extract_context_from_history(conversation_history: List[Dict]) -> Dict[str,
 
         # Extract project IDs using enhanced JSON parsing
         project_ids_found = _extract_project_ids_from_content(content)
+
+        # If this message has MULTIPLE projects (likely a list), save for positional refs
+        if len(project_ids_found) > 1 and context['last_displayed_list'] is None:
+            context['last_displayed_list'] = project_ids_found.copy()
+            logger.debug(f"📋 Found list with {len(project_ids_found)} projects for positional refs")
+
+        # Track all individual project mentions (chronological order, newest first)
         for pid in project_ids_found:
-            if pid not in context['project_ids']:
-                context['project_ids'].append(pid)
+            if pid not in all_project_mentions:
+                all_project_mentions.append(pid)
 
         # OLD: Try JSON first - REPLACED WITH ENHANCED FUNCTION ABOVE
         # try:
@@ -256,12 +266,6 @@ def _extract_context_from_history(conversation_history: List[Dict]) -> Dict[str,
         # except Exception as e:
         #     logger.debug(f"JSON parsing failed in history: {e}")
 
-        # Also extract via regex (for non-JSON mentions)
-        project_id_matches = re.findall(r'\b(\d{7})\b', content)
-        for pid in project_id_matches:
-            if pid not in context['project_ids']:
-                context['project_ids'].append(pid)
-
         # Extract dates (YYYY-MM-DD or "Nov 14", etc.)
         date_matches = re.findall(r'\b(\d{4}-\d{2}-\d{2})\b', content)
         for date in date_matches:
@@ -274,17 +278,30 @@ def _extract_context_from_history(conversation_history: List[Dict]) -> Dict[str,
             if time not in context['times']:
                 context['times'].append(time)
 
-    # Set "last" entities (use [-1] to get LAST item, not [0] which is FIRST)
-    if context['project_ids']:
-        context['last_project'] = context['project_ids'][-1]  # Fixed: was [0], now [-1]
+    # Set project_ids for positional references
+    # Use last_displayed_list if available, otherwise use all mentions
+    if context['last_displayed_list']:
+        context['project_ids'] = context['last_displayed_list']
+        logger.debug(f"✅ Using last displayed list ({len(context['project_ids'])} projects) for positional refs")
+    else:
+        context['project_ids'] = all_project_mentions
+        logger.debug(f"⚠️  No list found, using all mentions ({len(all_project_mentions)} projects)")
 
+    # Set last_project for pronoun references ("it", "schedule it")
+    # This is the most recently mentioned single project (chronologically)
+    if all_project_mentions:
+        context['last_project'] = all_project_mentions[0]  # First in reversed list = most recent
+        logger.debug(f"📌 last_project for pronouns: {context['last_project']}")
+
+    # Set last date/time
     if context['dates']:
-        context['last_date'] = context['dates'][-1]  # Fixed: was [0], now [-1]
+        context['last_date'] = context['dates'][0]  # First = most recent
 
     if context['times']:
-        context['last_time'] = context['times'][-1]  # Fixed: was [0], now [-1]
+        context['last_time'] = context['times'][0]  # First = most recent
 
-    logger.debug(f"Context extracted: {len(context['project_ids'])} projects, "
+    logger.debug(f"Context: {len(context['project_ids'])} projects in list, "
+                f"last_project={context.get('last_project')}, "
                 f"{len(context['dates'])} dates, {len(context['times'])} times")
 
     return context

@@ -160,7 +160,28 @@ Even if the message doesn't contain explicit action verbs, use semantic understa
 - "Let's go with 2pm on Friday" → ACTION (implicit confirmation)
 - "What times work for Friday" → QUERY (asking for info)
 
-DIRECT Lambda actions (QUERIES ONLY - simple data retrieval):
+DIRECT Lambda actions:
+
+**CHITCHAT actions (always can_call_direct=true):**
+greet:
+- Examples: "hi", "hello", "hey", "good morning"
+- Response: intent=chitchat, action=greet, can_call_direct=true, params=null
+
+help:
+- Examples: "help", "what can you do", "how does this work"
+- Response: intent=chitchat, action=help, can_call_direct=true, params=null
+
+general:
+- Examples: "thank you", "thanks", "bye", "goodbye"
+- Response: intent=chitchat, action=general, can_call_direct=true, params=null
+
+**INFORMATION actions (always can_call_direct=true):**
+get_weather:
+- Examples: "weather in Tampa", "what's the weather", "forecast for tomorrow"
+- Extract location from message if mentioned
+- Response: intent=information, action=get_weather, can_call_direct=true, params={{"location":"..."}} if found
+
+**SCHEDULING QUERY actions (simple data retrieval):**
 
 list_projects:
 - Examples: "show my projects", "list projects", "what projects do I have", "display projects"
@@ -201,16 +222,33 @@ get_time_slots:
 - CRITICAL: If conversation history shows available dates for a project, extract that project_id too
 - Response: intent=scheduling, action=get_time_slots, can_call_direct=true, params with date AND project_id if found in context
 
-NEEDS AGENT (requires conversation/confirmation/actions):
-- ❌ ANY message with "schedule", "book", "reserve" → can_call_direct=FALSE
-  Examples: "schedule the last project", "book project 123", "I want to schedule"
-- ❌ ANY message with "reschedule", "change appointment", "move" → can_call_direct=FALSE
-- ❌ ANY message with "cancel", "delete appointment" → can_call_direct=FALSE
-- ❌ ANY message with "note", "notes" (add/list/show notes) → can_call_direct=FALSE
-  Examples: "add a note to project 123", "show notes for project 123", "list notes"
-- ❌ Confirmations: "yes", "confirm", "go ahead" → can_call_direct=FALSE
-- ❌ Chitchat: conversational → can_call_direct=FALSE
-- ❌ Information queries: weather, etc. → can_call_direct=FALSE
+**SCHEDULING WORKFLOW actions (multi-step but using Lambda orchestration):**
+schedule_project:
+- Examples: "schedule it", "book project 123", "I want to schedule", "schedule the last one"
+- This triggers a multi-step workflow managed by Lambda (not Bedrock)
+- Response: intent=scheduling, action=schedule_project, can_call_direct=true, params={{"project_id":"..."}}
+
+confirm_appointment:
+- Examples: "2pm", "Nov 25", "the first one" (when responding to date/time selection)
+- Response: intent=scheduling, action=confirm_appointment, can_call_direct=true, params extracted
+
+reschedule_appointment:
+- Examples: "reschedule project 123", "change my appointment"
+- Response: intent=scheduling, action=reschedule_appointment, can_call_direct=true, params={{"project_id":"..."}}
+
+cancel_appointment:
+- Examples: "cancel my appointment", "cancel project 123"
+- Response: intent=scheduling, action=cancel_appointment, can_call_direct=true, params={{"project_id":"..."}}
+
+add_note:
+- Examples: "add a note to project 123", "add note"
+- Response: intent=scheduling, action=add_note, can_call_direct=true, params={{"project_id":"..."}}
+
+list_notes:
+- Examples: "show notes for project 123", "list notes"
+- Response: intent=scheduling, action=list_notes, can_call_direct=true, params={{"project_id":"..."}}
+
+✅ ALL intents now use can_call_direct=TRUE (NO Bedrock agents)
 
 Example JSON responses (respond with VALID JSON only):
 
@@ -225,15 +263,15 @@ For "show me the 3rd project":
 {{"intent":"scheduling","action":"get_project_details","can_call_direct":true,"params":{{"project_id":"7751743"}}}}
 Reasoning: User wants to SEE info → QUERY. "3rd project" = id at index 2 = "7751743"
 
-Example 3 - Action intent with verb (Agent):
-For "schedule the last project for Nov 13":
-{{"intent":"scheduling","action":null,"can_call_direct":false,"params":null}}
-Reasoning: User wants to CREATE appointment → ACTION (needs confirmation, multi-step)
+Example 3 - Schedule action (Lambda Workflow):
+For "schedule the last project":
+{{"intent":"scheduling","action":"schedule_project","can_call_direct":true,"params":{{"project_id":"7751743"}}}}
+Reasoning: User wants to CREATE appointment → triggers Lambda workflow orchestration (multi-step)
 
-Example 4 - Action intent without explicit verb (Agent):
-For "I'll take the 2pm slot on Friday":
-{{"intent":"scheduling","action":null,"can_call_direct":false,"params":null}}
-Reasoning: User is COMMITTING to booking → ACTION (even without "book" or "schedule" verb)
+Example 4 - Time selection in workflow:
+For "2pm" (when previous message showed time slots):
+{{"intent":"scheduling","action":"confirm_appointment","can_call_direct":true,"params":{{"time":"2pm"}}}}
+Reasoning: User selecting time slot → part of workflow, handled by Lambda
 
 Example 5 - Query about availability (Direct Lambda):
 For "what dates are free for project 123":
@@ -250,14 +288,15 @@ For "can you tell me what projects I have":
 {{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":null}}
 Reasoning: Polite phrasing but semantic intent is VIEW/GET info → QUERY
 
-Example 8 - Information intent (Agent):
+Example 8 - Information intent (Direct Lambda):
 For "what's the weather in Tampa":
-{{"intent":"information","action":null,"can_call_direct":false,"params":null}}
-Reasoning: Weather query → INFORMATION intent (will route to Information Agent)
+{{"intent":"information","action":"get_weather","can_call_direct":true,"params":{{"location":"Tampa"}}}}
+Reasoning: Weather query → INFORMATION intent (call pf-information-actions directly)
 
-Example 9 - Chitchat (Agent):
+Example 9 - Chitchat (Direct Lambda):
 For "hello":
-{{"intent":"chitchat","action":null,"can_call_direct":false,"params":null}}
+{{"intent":"chitchat","action":"greet","can_call_direct":true,"params":null}}
+Reasoning: Greeting → CHITCHAT intent (call pf-chitchat-actions directly)
 
 Example 10 - Query with status filter (Direct Lambda):
 For "show the scheduled projects":
@@ -298,11 +337,12 @@ Respond ONLY with the JSON object, nothing else."""
     try:
         bedrock_runtime = get_bedrock_client()
 
+        # Use Sonnet 3.7 for superior classification accuracy
         response = bedrock_runtime.invoke_model(
-            modelId=config.classifier_model,
+            modelId=config.orchestrator_model,
             body=json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 300,
+                "max_tokens": 500,  # More tokens for complex reasoning
                 "temperature": 0.0,
                 "messages": [{"role": "user", "content": prompt}]
             })

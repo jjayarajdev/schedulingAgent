@@ -15,7 +15,7 @@ class Config:
 
     def __init__(self):
         # AWS Configuration
-        self.region = os.environ.get('AWS_REGION', 'us-east-1')
+        self.region = os.environ.get('REGION', os.environ.get('AWS_REGION', 'us-east-1'))
 
         # Redis/ElastiCache Configuration
         self.redis_endpoint = os.environ.get('REDIS_ENDPOINT', '')
@@ -40,13 +40,17 @@ class Config:
         self.enable_multi_agent_orchestration = os.environ.get('ENABLE_MULTI_AGENT_ORCHESTRATION', 'true').lower() == 'true'
         self.max_parallel_agents = int(os.environ.get('MAX_PARALLEL_AGENTS', '3'))
 
-        # Classification Configuration
-        self.classifier_model = os.environ.get('CLASSIFIER_MODEL', 'us.anthropic.claude-3-5-sonnet-20240620-v1:0')
+        # Intelligent Orchestration with Sonnet 3.7
+        self.orchestrator_model = os.environ.get('ORCHESTRATOR_MODEL', 'us.anthropic.claude-3-7-sonnet-20250219-v1:0')
         self.classification_cache_ttl = int(os.environ.get('CLASSIFICATION_CACHE_TTL', '300'))  # 5 min
 
+        # DynamoDB table for workflow state management
+        self.workflow_state_table = os.environ.get('WORKFLOW_STATE_TABLE', 'pf-workflow-states-dev')
+
         # Lambda Function Names (for direct invocation)
-        self.scheduling_lambda = os.environ.get('SCHEDULING_LAMBDA_NAME', 'pf-scheduling-actions')
-        self.information_lambda = os.environ.get('INFORMATION_LAMBDA_NAME', 'pf-information-actions')
+        self.scheduling_lambda = os.environ.get('SCHEDULING_LAMBDA', 'pf-scheduling-actions')
+        self.information_lambda = os.environ.get('INFORMATION_LAMBDA', 'pf-information-actions')
+        self.chitchat_lambda = os.environ.get('CHITCHAT_LAMBDA', 'pf-chitchat-actions')
 
         # Agent IDs (for direct routing without supervisor)
         self.agents = self._load_agent_config()
@@ -86,20 +90,16 @@ class Config:
         errors = []
 
         # Redis validation removed - now using DynamoDB for session management
-        # if not self.redis_endpoint:
-        #     errors.append("REDIS_ENDPOINT is required")
-
-        if not self.supervisor_agent_id:
-            errors.append("SUPERVISOR_AGENT_ID is required")
+        # Bedrock agent validation removed - now using direct Lambda calls only
 
         if self.allow_direct_lambda:
             if not self.scheduling_lambda:
-                errors.append("SCHEDULING_LAMBDA_NAME is required for direct calls")
+                errors.append("SCHEDULING_LAMBDA is required for direct calls")
 
         if errors:
             raise ValueError(f"Configuration validation failed: {', '.join(errors)}")
 
-        logger.info(f"Configuration loaded: region={self.region}, routing={self.routing_method}")
+        logger.info(f"Configuration loaded: region={self.region}, allow_direct_lambda={self.allow_direct_lambda}")
 
         return True
 

@@ -194,6 +194,115 @@ logger.info(f"📋 Loaded Supervisor Agent: {AGENT_CONFIG.get('supervisor_id')}"
 logger.info(f"📋 Loaded Supervisor Alias: {AGENT_CONFIG.get('supervisor_alias')}")
 
 
+def format_lambda_response(action: str, response_body: dict) -> str:
+    """
+    Format Lambda response as human-readable text instead of raw JSON
+
+    Args:
+        action: The action that was performed (list_projects, get_project_details, etc.)
+        response_body: The Lambda response body (parsed JSON)
+
+    Returns:
+        Formatted human-readable text
+    """
+    try:
+        if action == 'list_projects':
+            projects = response_body.get('projects', [])
+            if not projects:
+                return response_body.get('message', "You have no projects matching your criteria.")
+
+            lines = [f"Found {len(projects)} project(s):\n"]
+            for i, project in enumerate(projects, 1):
+                status = project.get('status', 'Unknown')
+                category = project.get('category', 'Not specified')
+                project_type = project.get('projectType', 'Not specified')
+                scheduled_date = project.get('scheduledDate', 'Not scheduled')
+                address = project.get('address', {})
+                city = address.get('city', '')
+                state = address.get('state', '')
+                location = f"{city}, {state}" if city and state else "No address"
+
+                lines.append(f"{i}. Project {project.get('id', 'Unknown')}")
+                lines.append(f"   Status: {status}")
+                lines.append(f"   Category: {category}")
+                lines.append(f"   Type: {project_type}")
+                lines.append(f"   Scheduled: {scheduled_date}")
+                lines.append(f"   Location: {location}")
+
+                tech = project.get('technician', {})
+                if tech and tech.get('name'):
+                    lines.append(f"   Technician: {tech.get('name')} (#{tech.get('id', 'N/A')})")
+                lines.append("")  # Empty line between projects
+
+            return "\n".join(lines)
+
+        elif action == 'get_project_details':
+            project = response_body.get('project', {})
+            if not project:
+                return "Project details not found."
+
+            lines = [f"Details for Project {project.get('id', 'Unknown')}:\n"]
+            lines.append(f"Status: {project.get('status', 'Unknown')}")
+            lines.append(f"Category: {project.get('category', 'Not specified')}")
+            lines.append(f"Project Type: {project.get('projectType', 'Not specified')}")
+
+            scheduled = project.get('scheduledDate', 'Not scheduled')
+            lines.append(f"Scheduled Date: {scheduled}")
+
+            address = project.get('address', {})
+            if address:
+                addr_parts = [
+                    address.get('address1', ''),
+                    address.get('city', ''),
+                    address.get('state', ''),
+                    address.get('zipcode', '')
+                ]
+                full_addr = ', '.join(filter(None, addr_parts))
+                lines.append(f"Address: {full_addr}")
+
+            tech = project.get('technician', {})
+            if tech and tech.get('name'):
+                lines.append(f"Technician: {tech.get('name')} (#{tech.get('id', 'N/A')})")
+
+            return "\n".join(lines)
+
+        elif action == 'get_available_dates':
+            dates = response_body.get('available_dates', [])
+            if not dates:
+                return "No available dates found."
+
+            lines = ["Available dates:\n"]
+            for date in dates[:10]:  # Show first 10
+                lines.append(f"  • {date}")
+
+            if len(dates) > 10:
+                lines.append(f"\n...and {len(dates) - 10} more dates")
+
+            return "\n".join(lines)
+
+        elif action == 'get_time_slots':
+            slots = response_body.get('slots', [])
+            if not slots:
+                return "No available time slots found."
+
+            lines = ["Available time slots:\n"]
+            for slot in slots:
+                start = slot.get('start', '')
+                end = slot.get('end', '')
+                lines.append(f"  • {start} - {end}")
+
+            return "\n".join(lines)
+
+        else:
+            # For unknown actions, return JSON
+            return json.dumps(response_body, indent=2)
+
+    except Exception as e:
+        logger.error(f"Response formatting error: {e}")
+        # Fallback to JSON if formatting fails
+        return json.dumps(response_body, indent=2)
+
+
 def classify_intent_and_action(message, conversation_history=None):
     """
     Enhanced intent and action classification using Claude Sonnet with conversation context
@@ -666,285 +775,106 @@ def invoke_agent():
         use_supervisor = routing_config.get('use_supervisor', False)
         allow_direct_lambda = routing_config.get('allow_direct_lambda', True)  # NEW: enable direct Lambda calls
 
-        # Enhanced classification with conversation context
-        classification = classify_intent_and_action(message, conversation_history=conversation_history)
-        intent = classification['intent']
-        action = classification.get('action')
-        can_call_direct = classification.get('can_call_direct', False)
-        extracted_params = classification.get('params', {}) or {}  # Params extracted from message
+        # ALWAYS route through orchestrator (no direct Lambda calls from proxy)
+        # Orchestrator handles: Direct Lambda optimization + context resolution + formatting
+        logger.info(f"🎯 Routing ALL requests to LAMBDA ORCHESTRATOR: pf-orchestrator")
 
-        # OPTIMIZATION: Call Lambda directly for simple data retrieval
-        if allow_direct_lambda and can_call_direct and action:
-            logger.info(f"⚡ DIRECT LAMBDA CALL: {action} (bypassing agent)")
-            logger.info(f"📋 Extracted params: {extracted_params}")
+        try:
+            lambda_start = time.time()
+            lambda_client = boto3.client('lambda', region_name='us-east-1')
 
-            try:
-                lambda_start = time.time()
-
-                # Prepare Lambda parameters (merge session params with extracted params)
-                lambda_params = {
-                    'customer_id': str(pf_user_id),
-                    'client_id': pf_client_id,
-                    'pf_bearer_token': pf_token,
-                    **extracted_params  # Add extracted params from message
-                }
-
-                # Call Lambda directly
-                lambda_response = call_lambda_directly(action, lambda_params)
-                timing['lambda_direct'] = time.time() - lambda_start
-                timing['total_request'] = time.time() - request_start
-
-                # Extract response body from Lambda response
-                # Lambda returns nested structure: response.functionResponse.responseBody.TEXT.body
-                logger.debug(f"Lambda raw response: {json.dumps(lambda_response, indent=2)}")
-
-                response_data = lambda_response.get('response', {})
-                function_response = response_data.get('functionResponse', {})
-                response_body_wrapper = function_response.get('responseBody', {})
-                text_wrapper = response_body_wrapper.get('TEXT', {})
-                response_body_str = text_wrapper.get('body', '{}')
-
-                # Parse the JSON string
-                if isinstance(response_body_str, str):
-                    response_body = json.loads(response_body_str)
-                else:
-                    response_body = response_body_str
-
-                # Format response for UI
-                formatted_response = json.dumps(response_body, separators=(',', ':'))
-
-                logger.info(f"⏱️  PERFORMANCE: Total={timing['total_request']:.2f}s | Lambda={timing['lambda_direct']:.2f}s | Init={timing['boto3_init']:.3f}s")
-                logger.info(f"📝 Lambda response (first 100 chars): {formatted_response[:100]}...")
-
-                # Add Lambda response to conversation history
-                add_to_conversation_history(
-                    session_id,
-                    'assistant',
-                    formatted_response,
-                    metadata={
-                        'action': action,
-                        'intent': intent,
-                        'direct_call': True,
-                        'performance': timing
-                    }
-                )
-
-                return jsonify({
-                    "response": formatted_response,
-                    "agent_name": "Direct Lambda",
-                    "intent": intent,
-                    "action": action,
-                    "session_id": session_id,
-                    "performance": timing,
-                    "direct_call": True
-                })
-
-            except Exception as e:
-                logger.error(f"Direct Lambda call failed: {e}, falling back to agent")
-                # Fall through to agent invocation below
-
-        # FALLBACK: Use Lambda orchestrator or Bedrock agent for complex queries
-        if use_supervisor:
-            # Use Bedrock Supervisor agent
-            agent_id = AGENT_CONFIG.get('supervisor_id')
-            alias_id = AGENT_CONFIG.get('supervisor_alias')
-            agent_name = "Supervisor Agent"
-            logger.info(f"Routing via BEDROCK SUPERVISOR: {agent_id} (Alias: {alias_id})")
-        else:
-            # Use Lambda Orchestrator instead of Bedrock Supervisor
-            logger.info(f"🎯 Routing to LAMBDA ORCHESTRATOR: pf_orchestrator")
-
-            try:
-                lambda_start = time.time()
-                lambda_client = boto3.client('lambda', region_name='us-east-1')
-
-                # Prepare orchestrator event (API Gateway format)
-                request_body = {
-                    'message': message,
-                    'session_id': session_id,
-                    'pf_token': pf_token,
-                    'pf_client_id': pf_client_id,
-                    'pf_user_id': str(pf_user_id)
-                }
-
-                orchestrator_event = {
-                    'body': json.dumps(request_body),  # API Gateway wraps body as JSON string
-                    'headers': {
-                        'Content-Type': 'application/json'
-                    }
-                }
-
-                logger.info(f"📤 Invoking pf_orchestrator with intent: {intent}")
-
-                # Invoke Lambda orchestrator (use full ARN to avoid $LATEST qualifier issue)
-                orchestrator_function = AGENT_CONFIG.get('orchestrator_arn', 'arn:aws:lambda:us-east-1:618048437522:function:pf_orchestrator')
-                response = lambda_client.invoke(
-                    FunctionName=orchestrator_function,
-                    InvocationType='RequestResponse',
-                    Payload=json.dumps(orchestrator_event)
-                )
-
-                payload = json.loads(response['Payload'].read())
-                timing['orchestrator_lambda'] = time.time() - lambda_start
-                timing['total_request'] = time.time() - request_start
-
-                logger.info(f"⏱️  PERFORMANCE: Total={timing['total_request']:.2f}s | Orchestrator={timing['orchestrator_lambda']:.2f}s")
-
-                # Extract response from orchestrator (API Gateway format)
-                # Orchestrator returns: {statusCode: 200, body: "{\"response\": \"...\"}", ...}
-                status_code = payload.get('statusCode', 200)
-
-                if status_code != 200:
-                    # Error response
-                    error_body = payload.get('body', '{}')
-                    if isinstance(error_body, str):
-                        error_body = json.loads(error_body)
-                    error_msg = error_body.get('error', 'Unknown error from orchestrator')
-                    raise Exception(f"Orchestrator error ({status_code}): {error_msg}")
-
-                # Parse the body (it's a JSON string)
-                body_str = payload.get('body', '{}')
-                if isinstance(body_str, str):
-                    body = json.loads(body_str)
-                else:
-                    body = body_str
-
-                # Extract the response text
-                response_text = body.get('response', str(body))
-                agent_name_from_orch = body.get('agent_name', 'Lambda Orchestrator')
-
-                logger.info(f"📝 Orchestrator response: {str(response_text)[:100]}...")
-                logger.debug(f"Full orchestrator payload: {json.dumps(payload, indent=2)}")
-
-                # Add orchestrator response to conversation history
-                add_to_conversation_history(
-                    session_id,
-                    'assistant',
-                    str(response_text),
-                    metadata={
-                        'agent_name': agent_name_from_orch,
-                        'intent': intent,
-                        'direct_call': False,
-                        'performance': timing
-                    }
-                )
-
-                return jsonify({
-                    "response": str(response_text),
-                    "agent_name": agent_name_from_orch,
-                    "intent": intent,
-                    "session_id": session_id,
-                    "performance": timing,
-                    "orchestrator": True
-                })
-
-            except Exception as e:
-                logger.error(f"Lambda Orchestrator error: {e}, falling back to individual agents")
-                # Fall back to individual agents
-                agents = AGENT_CONFIG.get('agents', {})
-                agent_config = agents.get(intent, agents.get('chitchat'))
-                agent_id = agent_config['agent_id']
-                alias_id = agent_config['alias_id']
-                agent_name = f"{intent.capitalize()} Agent"
-                logger.info(f"Routing to {intent.upper()} agent: {agent_id} (orchestrator fallback)")
-
-        # Prepare session attributes
-        session_attributes = {
-            'customer_id': str(pf_user_id),
-            'client_id': pf_client_id,
-            'pf_bearer_token': pf_token
-        }
-
-        # For Information Agent: Extract location from conversation history if available
-        if intent == 'information' and 'weather' in message.lower():
-            location = extract_location_from_history(conversation_history)
-            if location:
-                logger.info(f"📍 Extracted location from history: {location}")
-                session_attributes['inferred_location'] = location
-
-        # Invoke the selected agent
-        invoke_start = time.time()
-        response = bedrock_client.invoke_agent(
-            agentId=agent_id,
-            agentAliasId=alias_id,
-            sessionId=session_id,
-            inputText=message,
-            sessionState={
-                'sessionAttributes': session_attributes
+            # Prepare orchestrator event (API Gateway format)
+            request_body = {
+                'message': message,
+                'session_id': session_id,
+                'pf_token': pf_token,
+                'pf_client_id': pf_client_id,
+                'pf_user_id': str(pf_user_id)
             }
-        )
-        timing['bedrock_invoke'] = time.time() - invoke_start
 
-        event_stream = response['completion']
-        stream_start = time.time()
-
-        if stream:
-            # Stream response using Server-Sent Events
-            def generate():
-                try:
-                    for event in event_stream:
-                        if 'chunk' in event:
-                            chunk = event['chunk']
-                            if 'bytes' in chunk:
-                                text = chunk['bytes'].decode('utf-8')
-                                # Send as SSE format
-                                yield f"data: {json.dumps({'chunk': text})}\n\n"
-                    # Send completion event
-                    yield f"data: {json.dumps({'done': True})}\n\n"
-                except Exception as e:
-                    logger.error(f"Streaming error: {str(e)}")
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
-
-            return app.response_class(
-                generate(),
-                mimetype='text/event-stream',
-                headers={
-                    'Cache-Control': 'no-cache',
-                    'X-Accel-Buffering': 'no'
+            orchestrator_event = {
+                'body': json.dumps(request_body),  # API Gateway wraps body as JSON string
+                'headers': {
+                    'Content-Type': 'application/json'
                 }
-            )
-        else:
-            # Non-streaming: collect all chunks and return
-            full_response = []
-            for event in event_stream:
-                if 'chunk' in event:
-                    chunk = event['chunk']
-                    if 'bytes' in chunk:
-                        text = chunk['bytes'].decode('utf-8')
-                        full_response.append(text)
+            }
 
-            timing['stream_processing'] = time.time() - stream_start
+            logger.info(f"📤 Invoking pf-orchestrator for message: '{message[:50]}...'")
+
+            # Invoke Lambda orchestrator (use function name without version qualifier)
+            orchestrator_function = AGENT_CONFIG.get('orchestrator_function', 'pf-orchestrator')
+            response = lambda_client.invoke(
+                FunctionName=orchestrator_function,
+                InvocationType='RequestResponse',
+                Payload=json.dumps(orchestrator_event)
+            )
+
+            payload = json.loads(response['Payload'].read())
+            timing['orchestrator_lambda'] = time.time() - lambda_start
             timing['total_request'] = time.time() - request_start
 
-            response_text = ''.join(full_response)
+            logger.info(f"⏱️  PERFORMANCE: Total={timing['total_request']:.2f}s | Orchestrator={timing['orchestrator_lambda']:.2f}s")
 
-            # Log performance metrics
-            logger.info(f"⏱️  PERFORMANCE: Total={timing['total_request']:.2f}s | Invoke={timing['bedrock_invoke']:.2f}s | Stream={timing['stream_processing']:.2f}s | Init={timing['boto3_init']:.3f}s")
-            logger.info(f"📝 Agent response: {response_text[:100]}...")
+            # Extract response from orchestrator (API Gateway format)
+            # Orchestrator returns: {statusCode: 200, body: "{\"response\": \"...\"}", ...}
+            status_code = payload.get('statusCode', 200)
 
-            # Add agent response to conversation history
+            if status_code != 200:
+                # Error response
+                error_body = payload.get('body', '{}')
+                if isinstance(error_body, str):
+                    error_body = json.loads(error_body)
+                error_msg = error_body.get('error', 'Unknown error from orchestrator')
+                raise Exception(f"Orchestrator error ({status_code}): {error_msg}")
+
+            # Parse the body (it's a JSON string)
+            body_str = payload.get('body', '{}')
+            if isinstance(body_str, str):
+                body = json.loads(body_str)
+            else:
+                body = body_str
+
+            # Extract the response text
+            response_text = body.get('response', str(body))
+            agent_name_from_orch = body.get('agent_name', 'Orchestrator')
+            action = body.get('action')
+            intent = body.get('intent', 'unknown')
+
+            logger.info(f"📝 Orchestrator response: {str(response_text)[:100]}...")
+
+            # Add orchestrator response to conversation history
             add_to_conversation_history(
                 session_id,
                 'assistant',
-                response_text,
+                str(response_text),
                 metadata={
-                    'agent_name': agent_name,
+                    'agent_name': agent_name_from_orch,
                     'intent': intent,
-                    'direct_call': False,
+                    'action': action,
                     'performance': timing
                 }
             )
 
             return jsonify({
-                "response": response_text,
-                "agent_name": agent_name,
+                "response": str(response_text),
+                "agent_name": agent_name_from_orch,
                 "intent": intent,
+                "action": action,
                 "session_id": session_id,
-                "performance": timing
+                "performance": timing,
+                "orchestrator": True
             })
 
+        except Exception as e:
+            logger.error(f"Lambda Orchestrator error: {e}")
+            # Return error response (no Bedrock fallback)
+            return jsonify({
+                "error": f"Orchestrator error: {str(e)}",
+                "session_id": session_id
+            }), 500
+
     except Exception as e:
-        logger.error(f"Agent invocation error: {str(e)}")
+        logger.error(f"Error in invoke-agent endpoint: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
