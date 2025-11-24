@@ -559,22 +559,48 @@ def _format_projects_for_voice(response_body: Dict[str, Any]) -> str:
 
         else:
             project_count = len(projects)
-            projects_to_list = projects[:10]  # Show up to 10 projects (increased from 5)
 
-            descriptions = []
-            for i, project in enumerate(projects_to_list, 1):
-                descriptions.append(
-                    f"{i}. {project.get('category', 'unknown')} project {project.get('project_id', 'N/A')}, {project.get('status', 'unknown')}"
-                )
+            # Strategy: Read all projects if ≤10, use smart summarization if >10
+            if project_count <= 10:
+                # Read ALL projects in detail (up to 10 is manageable for voice)
+                descriptions = []
+                for i, project in enumerate(projects, 1):
+                    descriptions.append(
+                        f"{i}. {project.get('category', 'unknown')} project {project.get('project_id', 'N/A')}, {project.get('status', 'unknown')}"
+                    )
 
-            message = f"You have {project_count} projects. Here are the first {len(projects_to_list)}: "
-            message += ". ".join(descriptions)
-            message += ". "
+                message = f"You have {project_count} projects. Here are your projects: "
+                message += ". ".join(descriptions)
+                message += ". Would you like to schedule an appointment for any of these?"
 
-            if project_count > 10:
-                message += f"You have {project_count - 10} more projects. "
+            else:
+                # >10 projects: Use smart summarization with status breakdown
+                # Group projects by status for better voice UX
+                status_counts = {}
+                for p in projects:
+                    status = p.get('status', 'Unknown')
+                    status_counts[status] = status_counts.get(status, 0) + 1
 
-            message += "Would you like to schedule an appointment for any of these?"
+                # Read first 5 in detail, summarize the rest
+                max_detailed = 5
+                projects_to_detail = projects[:max_detailed]
+
+                # Start with summary including status breakdown
+                message = f"You have {project_count} projects: "
+                status_parts = [f"{count} {status}" for status, count in status_counts.items()]
+                message += f"{', '.join(status_parts)}. "
+
+                # Read first 5 in detail
+                message += f"Here are the first {max_detailed}: "
+                descriptions = []
+                for i, project in enumerate(projects_to_detail, 1):
+                    descriptions.append(
+                        f"{i}. {project.get('category', 'unknown')} project, {project.get('status', 'unknown')}"
+                    )
+                message += ". ".join(descriptions)
+
+                # Mention remaining
+                message += f". You have {project_count - max_detailed} more projects. Would you like to schedule an appointment?"
 
             return message
 
