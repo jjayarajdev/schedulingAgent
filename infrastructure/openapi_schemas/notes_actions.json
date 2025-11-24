@@ -1,0 +1,163 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Notes Actions API",
+    "version": "1.0.0",
+    "description": "API for managing notes associated with projects"
+  },
+  "paths": {
+    "/add_note": {
+      "post": {
+        "summary": "Add a note to a project",
+        "description": "Creates a new note and associates it with a specific project",
+        "operationId": "add_note",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the project"
+                  },
+                  "note_text": {
+                    "type": "string",
+                    "description": "The content of the note to add",
+                    "maxLength": 2000
+                  },
+                  "author": {
+                    "type": "string",
+                    "description": "Who is creating the note (e.g., 'Customer', 'Agent', 'System')",
+                    "default": "Agent"
+                  }
+                },
+                "required": ["project_id", "note_text"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Note added successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "description": "Action performed"
+                    },
+                    "project_id": {
+                      "type": "string",
+                      "description": "Project ID the note was added to"
+                    },
+                    "note_text": {
+                      "type": "string",
+                      "description": "The note text that was added"
+                    },
+                    "author": {
+                      "type": "string",
+                      "description": "Who created the note"
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable confirmation message"
+                    },
+                    "mock_mode": {
+                      "type": "boolean",
+                      "description": "Whether mock mode was used"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/list_notes": {
+      "post": {
+        "summary": "List all notes for a project",
+        "description": "Retrieves all notes associated with a specific project",
+        "operationId": "list_notes",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the project"
+                  }
+                },
+                "required": ["project_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of notes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "description": "Action performed"
+                    },
+                    "project_id": {
+                      "type": "string",
+                      "description": "Project ID"
+                    },
+                    "total_count": {
+                      "type": "integer",
+                      "description": "Total number of notes"
+                    },
+                    "notes": {
+                      "type": "array",
+                      "description": "Array of notes for this project",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "project_id": {
+                            "type": "string"
+                          },
+                          "note_text": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "description": "Timestamp when note was created"
+                          },
+                          "author": {
+                            "type": "string",
+                            "description": "Who created the note"
+                          }
+                        }
+                      }
+                    },
+                    "source": {
+                      "type": "string",
+                      "description": "Data source (api or dynamodb)"
+                    },
+                    "mock_mode": {
+                      "type": "boolean",
+                      "description": "Whether mock mode was used"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

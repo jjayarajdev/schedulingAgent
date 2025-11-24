@@ -1,0 +1,35 @@
+{
+  "environment": "prod",
+  "supervisor_id": "SQRXPIXRFY",
+  "supervisor_alias": "TSTALIASID",
+  "agents": {
+    "scheduling": {
+      "agent_id": "NMJD4Q7WTT",
+      "alias_id": "TSTALIASID"
+    },
+    "information": {
+      "agent_id": "NOPPMZSTXH",
+      "alias_id": "TSTALIASID"
+    },
+    "chitchat": {
+      "agent_id": "KJKI3QLC7B",
+      "alias_id": "TSTALIASID"
+    }
+  },
+  "routing": {
+    "enabled": true,
+    "method": "supervisor",
+    "use_supervisor": true,
+    "classifier_model": "anthropic.claude-3-haiku-20240307-v1:0"
+  },
+  "region": "us-east-1",
+  "prefix": "pf_",
+  "customer_context": {
+    "injection_method": "prompt_augmentation_and_session_attributes",
+    "session_attributes": [
+      "customer_id",
+      "customer_type",
+      "client_id"
+    ]
+  }
+}

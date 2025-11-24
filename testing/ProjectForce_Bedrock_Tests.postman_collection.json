@@ -1,0 +1,972 @@
+{
+  "info": {
+    "name": "ProjectForce Bedrock Agent Tests",
+    "description": "Comprehensive test suite for ProjectForce Bedrock multi-agent system",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "projectforce-bedrock"
+  },
+  "auth": {
+    "type": "noauth"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://r38h2sy06l.execute-api.us-east-1.amazonaws.com/dev",
+      "type": "string"
+    },
+    {
+      "key": "pf_token",
+      "value": "TaDWx6r5O0WE2tb5/Lb77XuI29UR7j2NlMHbUdXd+YrYPR7ZdTrczgYigcaRHxvF4PUl7KCfKcSa/5LTVI9GZGD2xjCQuIIGifYzjbeIG4F9hljoQfRSa4yHgXV4iKYuqyrGhSMR2SSZtZYnMIprKV5SzhAgQetwjLRiUnz7XUDMdscBIC3UTGzVuBI7pHmq6vvOQWpke1JMh9zxLIDNtkTY2wPUEe4wNr2psqI6R2w4WIfyCg3ALCnQMqMfKvSmhBo46UBe4F7tTVWd5YL0mI3FPIZ7cS7GPTf5cewQ5x1IWefak1peZr6+n4jTZKI/Z9jOW0JIxoddU0ixp319EZMjxbaihcekzJxiAx/Cibo1dAA+VbsRD1yBXOggKWCAb4zwaMPG/MuinFEa7zEbZa/E8fqQA+P3iI8kyKwt6ONLnzNf5gjkXr3abZcifhctIS+vWLVePJ8e1NCko7UTu8vFInTfCDbYn87O5ulan2YIvhPwjUFiBJQ8/1beQvu10gQ3ptWo7o214vWzKpTHhRO5tBHbGeThQXiFurY8wYaSf7SNgZwKWMpAmVyU3dxU+En2BZv9p7oNjEGTaClqsjfEdi6LekwJWtqNYf1vDh18e2xui2xQTDQHzM+4zRLY2FliGSQF72Pt3gX9zvqiXua+SjEhfpCjEwvtr9sYiMgM2PRJs+ueWJLtIRTsoVxenTc8yr/Edf8dm2Tx7oGbPw2BqhKOzl5fkhdbc5uoY2g=",
+      "type": "string"
+    },
+    {
+      "key": "pf_client_id",
+      "value": "09PF05VD",
+      "type": "string"
+    },
+    {
+      "key": "pf_user_id",
+      "value": "1646085",
+      "type": "number"
+    },
+    {
+      "key": "session_id",
+      "value": "postman-session-{{$timestamp}}",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Greeting & Chitchat",
+      "item": [
+        {
+          "name": "1.1 Simple Greeting",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(15000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"hello\",\n  \"session_id\": \"{{session_id}}-greeting-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Supervisor → Chitchat Agent (~11s)"
+          },
+          "response": []
+        },
+        {
+          "name": "1.2 Casual Chitchat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"how are you doing?\",\n  \"session_id\": \"{{session_id}}-chitchat-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Supervisor → Chitchat Agent"
+          },
+          "response": []
+        },
+        {
+          "name": "1.3 What Can You Help With",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"what can you help me with?\",\n  \"session_id\": \"{{session_id}}-intro-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Supervisor → Chitchat Agent"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. List Projects",
+      "item": [
+        {
+          "name": "2.1 Show My Projects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has projects\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "    pm.expect(jsonData.output).to.include('project');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is fast (direct Lambda)\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show my projects\",\n  \"session_id\": \"{{session_id}}-list-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda → pf-information-actions (~3s)"
+          },
+          "response": []
+        },
+        {
+          "name": "2.2 List All My Projects",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"list all my projects\",\n  \"session_id\": \"{{session_id}}-list-2\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda → pf-information-actions (~3s)"
+          },
+          "response": []
+        },
+        {
+          "name": "2.3 Get My Projects",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"get my projects\",\n  \"session_id\": \"{{session_id}}-list-3\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda → pf-information-actions (~3s)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Filter Projects",
+      "item": [
+        {
+          "name": "3.1 Scheduled Projects",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show scheduled projects\",\n  \"session_id\": \"{{session_id}}-filter-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda (~3s)"
+          },
+          "response": []
+        },
+        {
+          "name": "3.2 Unscheduled Projects",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show unscheduled projects\",\n  \"session_id\": \"{{session_id}}-filter-2\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda (~3s)"
+          },
+          "response": []
+        },
+        {
+          "name": "3.3 Residential Projects",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show residential projects\",\n  \"session_id\": \"{{session_id}}-filter-3\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda (~3s)"
+          },
+          "response": []
+        },
+        {
+          "name": "3.4 Commercial Projects",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show commercial projects\",\n  \"session_id\": \"{{session_id}}-filter-4\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda (~3s)"
+          },
+          "response": []
+        },
+        {
+          "name": "3.5 Multiple Filters",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show unscheduled residential projects\",\n  \"session_id\": \"{{session_id}}-filter-5\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda (~3s)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Get Project Details",
+      "item": [
+        {
+          "name": "4.1 Details by Project ID",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show details for project 7751744\",\n  \"session_id\": \"{{session_id}}-details-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda (~3s)"
+          },
+          "response": []
+        },
+        {
+          "name": "4.2 Details by Position (2nd)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show details for the 2nd project\",\n  \"session_id\": \"{{session_id}}-details-2\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda (~3s)"
+          },
+          "response": []
+        },
+        {
+          "name": "4.3 Get Details Alternative",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"get details of project 7751741\",\n  \"session_id\": \"{{session_id}}-details-3\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda (~3s)"
+          },
+          "response": []
+        },
+        {
+          "name": "4.4 Tell Me More About",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"tell me more about project 7751744\",\n  \"session_id\": \"{{session_id}}-details-4\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda (~3s)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Schedule Project (Multi-turn)",
+      "item": [
+        {
+          "name": "5.1 Schedule - Step 1 (Initiate)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"schedule project 7751744\",\n  \"session_id\": \"schedule-flow-001\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Supervisor → SchedulingAgent (~11s)"
+          },
+          "response": []
+        },
+        {
+          "name": "5.2 Schedule - Step 2 (Date)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"November 15, 2025\",\n  \"session_id\": \"schedule-flow-001\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Same session_id to continue conversation"
+          },
+          "response": []
+        },
+        {
+          "name": "5.3 Schedule - Step 3 (Time)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"10:00 AM\",\n  \"session_id\": \"schedule-flow-001\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Same session_id to continue conversation"
+          },
+          "response": []
+        },
+        {
+          "name": "5.4 Schedule - Step 4 (Confirm)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"yes, confirm\",\n  \"session_id\": \"schedule-flow-001\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Same session_id to confirm scheduling"
+          },
+          "response": []
+        },
+        {
+          "name": "5.5 Schedule by Position",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"schedule the 2nd project\",\n  \"session_id\": \"{{session_id}}-schedule-2\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Supervisor → SchedulingAgent"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Technician Information",
+      "item": [
+        {
+          "name": "6.1 Get Technician by Project ID",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"get technician information for project 7751744\",\n  \"session_id\": \"{{session_id}}-tech-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda (~3s)"
+          },
+          "response": []
+        },
+        {
+          "name": "6.2 Who is Assigned",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"who is assigned to project 7751744\",\n  \"session_id\": \"{{session_id}}-tech-2\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda (~3s)"
+          },
+          "response": []
+        },
+        {
+          "name": "6.3 Show Technician by Position",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show technician details for the 2nd project\",\n  \"session_id\": \"{{session_id}}-tech-3\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Expected: Direct Lambda (~3s)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. End-to-End Workflow",
+      "item": [
+        {
+          "name": "E2E - 1. Greeting",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"hi\",\n  \"session_id\": \"e2e-flow-complete\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "E2E - 2. List Projects",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show my projects\",\n  \"session_id\": \"e2e-flow-complete\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "E2E - 3. Get Details (1st)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show details for the 1st project\",\n  \"session_id\": \"e2e-flow-complete\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "E2E - 4. Schedule This Project",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"schedule this project\",\n  \"session_id\": \"e2e-flow-complete\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "E2E - 5. Provide Date",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"November 20, 2025\",\n  \"session_id\": \"e2e-flow-complete\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "E2E - 6. Provide Time",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"9:00 AM\",\n  \"session_id\": \"e2e-flow-complete\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "E2E - 7. Confirm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"yes, confirm it\",\n  \"session_id\": \"e2e-flow-complete\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "E2E - 8. Get Technician",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"who is the technician for this project\",\n  \"session_id\": \"e2e-flow-complete\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "E2E - 9. List Scheduled",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show all scheduled projects\",\n  \"session_id\": \"e2e-flow-complete\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "8. Error Handling",
+      "item": [
+        {
+          "name": "8.1 Invalid Project ID",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show details for project 99999999\",\n  \"session_id\": \"{{session_id}}-error-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Should return error message about invalid project"
+          },
+          "response": []
+        },
+        {
+          "name": "8.2 Missing Required Fields",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"hello\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Should return validation error"
+          },
+          "response": []
+        },
+        {
+          "name": "8.3 Empty Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"\",\n  \"session_id\": \"{{session_id}}-error-3\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Should return error about empty message"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "9. Edge Cases",
+      "item": [
+        {
+          "name": "9.1 Very Long Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"I need to see all of my projects that are currently unscheduled and also would like to know which ones are residential versus commercial projects and specifically I am interested in the new installation type projects that need to be scheduled soon\",\n  \"session_id\": \"{{session_id}}-edge-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Test handling of complex, long queries"
+          },
+          "response": []
+        },
+        {
+          "name": "9.2 Special Characters",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show project #7751744 details & schedule it!\",\n  \"session_id\": \"{{session_id}}-edge-2\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": ["{{base_url}}"],
+              "path": ["invoke-agent"]
+            },
+            "description": "Test handling of special characters"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>ProjectForce - Agent Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header */
+        .header {
+            background: white;
+            border-bottom: 1px solid #e1e4e8;
+            padding: 16px 32px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            z-index: 100;
+        }
+
+        .header-content {
+            max-width: 1800px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo {
+            font-size: 20px;
+            font-weight: 600;
+            color: #0066cc;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .user-badge {
+            background: #e8f4fd;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            color: #0066cc;
+            font-weight: 500;
+        }
+
+        .perf-indicator {
+            font-size: 12px;
+            color: #666;
+            padding: 6px 12px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            display: none;
+        }
+
+        .perf-indicator.visible {
+            display: block;
+        }
+
+        /* Main Layout with Sidebar */
+        .main-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            max-width: 1800px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background: white;
+            border-right: 1px solid #e1e4e8;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .sidebar-section {
+            padding: 20px;
+            border-bottom: 1px solid #e1e4e8;
+        }
+
+        .sidebar-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #333;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 16px;
+        }
+
+        .quick-action {
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            background: #f8f9fa;
+            border: 1px solid #e1e4e8;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .quick-action:hover {
+            background: #e8f4fd;
+            border-color: #0066cc;
+            color: #0066cc;
+            transform: translateX(4px);
+        }
+
+        .quick-action-icon {
+            font-size: 18px;
+        }
+
+        .workflow-step {
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #666;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .workflow-step.active {
+            background: #0066cc;
+            color: white;
+            font-weight: 600;
+        }
+
+        .workflow-step.completed {
+            background: #28a745;
+            color: white;
+        }
+
+        .workflow-number {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: white;
+            color: #0066cc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 12px;
+        }
+
+        /* Container */
+        .container {
+            flex: 1;
+            padding: 24px 32px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 24px;
+            border-bottom: 2px solid #e1e4e8;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 500;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+        }
+
+        .tab.active {
+            color: #0066cc;
+            border-bottom-color: #0066cc;
+        }
+
+        /* Debug Panel Toggle */
+        .debug-toggle {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 24px;
+            cursor: pointer;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(0,102,204,0.3);
+            z-index: 999;
+            transition: all 0.2s;
+        }
+
+        .debug-toggle:hover {
+            background: #0052a3;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0,102,204,0.4);
+        }
+
+        /* Debug Panel */
+        .debug-panel {
+            position: fixed;
+            right: -400px;
+            top: 0;
+            width: 400px;
+            height: 100vh;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: -4px 0 12px rgba(0,0,0,0.3);
+            transition: right 0.3s ease;
+            z-index: 1000;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .debug-panel.visible {
+            right: 0;
+        }
+
+        .debug-header {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .debug-close {
+            background: #333;
+            border: none;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .debug-section {
+            margin-bottom: 16px;
+            padding: 12px;
+            background: #252526;
+            border-radius: 6px;
+        }
+
+        .debug-label {
+            color: #4ec9b0;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .debug-value {
+            color: #ce9178;
+            word-break: break-all;
+        }
+
+        /* Project Cards */
+        .projects-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+            gap: 20px;
+            overflow-y: auto;
+        }
+
+        .project-card {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            border: 1px solid #e1e4e8;
+            transition: all 0.2s;
+        }
+
+        .project-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            transform: translateY(-2px);
+        }
+
+        .project-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #0066cc;
+            margin-bottom: 8px;
+        }
+
+        .project-number {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 16px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-bottom: 16px;
+        }
+
+        .status-scheduled { background: #d4edda; color: #155724; }
+        .status-new { background: #28a745; color: white; }
+        .status-awaiting { background: #e3d5ff; color: #6f42c1; }
+        .status-pending { background: #fff3cd; color: #856404; }
+
+        .project-info {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin: 16px 0;
+        }
+
+        .info-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #444;
+        }
+
+        .icon {
+            width: 18px;
+            height: 18px;
+            color: #0066cc;
+        }
+
+        .project-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e1e4e8;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex: 1;
+        }
+
+        .btn-primary {
+            background: #0066cc;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0052a3;
+        }
+
+        .btn-secondary {
+            background: white;
+            color: #0066cc;
+            border: 1px solid #0066cc;
+        }
+
+        .btn-secondary:hover {
+            background: #f0f7ff;
+        }
+
+        /* Chat Interface */
+        .chat-panel {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            border: 1px solid #e1e4e8;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        .message {
+            margin-bottom: 16px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        .message-content.streaming::after {
+            content: '▊';
+            animation: blink 1s infinite;
+            margin-left: 2px;
+        }
+
+        .message.user {
+            text-align: right;
+        }
+
+        .message-bubble {
+            display: inline-block;
+            max-width: 75%;
+            padding: 12px 18px;
+            border-radius: 16px;
+            text-align: left;
+        }
+
+        .message.user .message-bubble {
+            background: #0066cc;
+            color: white;
+        }
+
+        .message.agent .message-bubble {
+            background: white;
+            border: 1px solid #e1e4e8;
+            color: #333;
+        }
+
+        .message-meta {
+            font-size: 12px;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        .input-area {
+            display: flex;
+            gap: 10px;
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .message-input:focus {
+            outline: none;
+            border-color: #0066cc;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 100px 20px;
+            color: #999;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            display: none;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #0066cc;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .view {
+            display: none;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .view.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Calendar Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.visible {
+            display: flex;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 12px;
+            padding: 32px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }
+
+        .modal-header {
+            font-size: 20px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 24px;
+            text-align: center;
+        }
+
+        .calendar {
+            width: 100%;
+        }
+
+        .calendar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .calendar-month {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .calendar-nav {
+            background: #f8f9fa;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .calendar-nav:hover {
+            background: #e9ecef;
+        }
+
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 8px;
+        }
+
+        .calendar-day-header {
+            text-align: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            padding: 8px;
+        }
+
+        .calendar-day {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #e1e4e8;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .calendar-day:hover {
+            background: #e8f4fd;
+            border-color: #0066cc;
+        }
+
+        .calendar-day.selected {
+            background: #0066cc;
+            color: white;
+            border-color: #0066cc;
+            font-weight: 700;
+        }
+
+        .calendar-day.disabled {
+            color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .calendar-day.disabled:hover {
+            background: transparent;
+            border-color: #e1e4e8;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+        }
+
+        .modal-btn {
+            flex: 1;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .modal-btn-cancel {
+            background: #f8f9fa;
+            color: #333;
+        }
+
+        .modal-btn-cancel:hover {
+            background: #e9ecef;
+        }
+
+        .modal-btn-submit {
+            background: #0066cc;
+            color: white;
+        }
+
+        .modal-btn-submit:hover {
+            background: #0052a3;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-content">
+            <div class="logo">📦 ProjectForce Agent Demo</div>
+            <div class="header-actions">
+                <div class="perf-indicator" id="perf-indicator">⚡ 0.0s</div>
+                <div class="user-badge" id="user-display">Not Logged In</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Layout -->
+    <div class="main-layout">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <!-- Quick Actions -->
+            <div class="sidebar-section">
+                <div class="sidebar-title">Quick Actions</div>
+                <div class="quick-action" onclick="quickAction('show my projects')">
+                    <span class="quick-action-icon">📦</span>
+                    <span>Show My Projects</span>
+                </div>
+                <div class="quick-action" onclick="quickAction('show scheduled projects')">
+                    <span class="quick-action-icon">📅</span>
+                    <span>Scheduled Projects</span>
+                </div>
+                <div class="quick-action" onclick="quickAction('show new projects')">
+                    <span class="quick-action-icon">🆕</span>
+                    <span>New Projects</span>
+                </div>
+                <div class="quick-action" onclick="openCalendar()">
+                    <span class="quick-action-icon">🗓️</span>
+                    <span>Pick a Date</span>
+                </div>
+                <div class="quick-action" onclick="quickAction('what is the weather today')">
+                    <span class="quick-action-icon">☀️</span>
+                    <span>Check Weather</span>
+                </div>
+            </div>
+
+            <!-- Workflow Steps -->
+            <div class="sidebar-section">
+                <div class="sidebar-title">Scheduling Workflow</div>
+                <div class="workflow-step" id="step-1">
+                    <div class="workflow-number">1</div>
+                    <span>Browse Projects</span>
+                </div>
+                <div class="workflow-step" id="step-2">
+                    <div class="workflow-number">2</div>
+                    <span>Select Project</span>
+                </div>
+                <div class="workflow-step" id="step-3">
+                    <div class="workflow-number">3</div>
+                    <span>Choose Date</span>
+                </div>
+                <div class="workflow-step" id="step-4">
+                    <div class="workflow-number">4</div>
+                    <span>Pick Time Slot</span>
+                </div>
+                <div class="workflow-step" id="step-5">
+                    <div class="workflow-number">5</div>
+                    <span>Confirm Appointment</span>
+                </div>
+            </div>
+
+            <!-- System Info -->
+            <div class="sidebar-section">
+                <div class="sidebar-title">System Info</div>
+                <div style="font-size: 12px; color: #666; line-height: 1.6;">
+                    <div style="margin-bottom: 8px;">
+                        <strong>Agent:</strong> <span id="agent-type">Multi-Agent</span>
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <strong>Session:</strong> <span id="session-display" style="font-family: monospace; font-size: 10px;">-</span>
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <strong>Login:</strong> ProjectForce API
+                    </div>
+                    <div>
+                        <strong>Agent:</strong> r38h2sy06l
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="container">
+            <!-- Tabs -->
+            <!-- Chat View -->
+            <div id="chat-view" class="view active">
+                <div class="chat-panel">
+                    <div class="chat-messages" id="chat-messages">
+                        <div class="empty-state">
+                            <div style="font-size: 48px; margin-bottom: 16px;">💭</div>
+                            <p>Start chatting with the agent!</p>
+                            <p style="margin-top: 12px; color: #ccc;">Try: "Show me my projects"</p>
+                        </div>
+                    </div>
+
+                    <div class="loading" id="loading">
+                        <div class="spinner"></div>
+                        <p>Agent is thinking...</p>
+                    </div>
+
+                    <div class="input-area">
+                        <input
+                            type="text"
+                            class="message-input"
+                            id="message-input"
+                            placeholder="Type your message..."
+                            onkeypress="if(event.key==='Enter') sendMessage()"
+                        >
+                        <button class="btn btn-primary" onclick="sendMessage()">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar Modal -->
+    <div class="modal-overlay" id="calendar-modal">
+        <div class="modal">
+            <div class="modal-header">Select a date and time within the month</div>
+            <div class="calendar">
+                <div class="calendar-header">
+                    <button class="calendar-nav" onclick="changeMonth(-1)">◀</button>
+                    <div class="calendar-month" id="calendar-month">November 2025</div>
+                    <button class="calendar-nav" onclick="changeMonth(1)">▶</button>
+                </div>
+                <div class="calendar-grid">
+                    <div class="calendar-day-header">Sun</div>
+                    <div class="calendar-day-header">Mon</div>
+                    <div class="calendar-day-header">Tue</div>
+                    <div class="calendar-day-header">Wed</div>
+                    <div class="calendar-day-header">Thu</div>
+                    <div class="calendar-day-header">Fri</div>
+                    <div class="calendar-day-header">Sat</div>
+                    <div id="calendar-days"></div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn modal-btn-cancel" onclick="closeCalendar()">Cancel</button>
+                <button class="modal-btn modal-btn-submit" onclick="submitCalendar()">Submit</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Debug Panel -->
+    <button class="debug-toggle" onclick="toggleDebug()">🔍 Debug</button>
+    <div class="debug-panel" id="debug-panel">
+        <div class="debug-header">
+            <span>🔍 Debug Console</span>
+            <button class="debug-close" onclick="toggleDebug()">✕</button>
+        </div>
+        <div id="debug-content"></div>
+    </div>
+
+    <script>
+        // ProjectForce Login URL + Agent API URL
+        const LOGIN_URL = 'https://api-cx-portal.dev.projectsforce.com/authentication/login?identifier=projectsforce-validation';
+        const API_URL = 'https://r38h2sy06l.execute-api.us-east-1.amazonaws.com/dev';
+        let accessToken = null;
+        let clientId = null;
+        let userId = null;
+        let sessionId = 'session-' + Date.now();
+        let selectedDate = null;
+        let currentMonth = new Date();
+        let lastResponse = {};
+
+        // Update session display
+        document.getElementById('session-display').textContent = sessionId.substring(0, 20) + '...';
+
+        // Switch between views
+        function switchView(view) {
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+
+            document.getElementById(`${view}-view`).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        // Quick action shortcuts
+        function quickAction(message) {
+            switchView('chat');
+            document.getElementById('message-input').value = message;
+            sendMessage();
+        }
+
+        // Calendar functions
+        function openCalendar() {
+            currentMonth = new Date();
+            renderCalendar();
+            document.getElementById('calendar-modal').classList.add('visible');
+        }
+
+        function closeCalendar() {
+            document.getElementById('calendar-modal').classList.remove('visible');
+        }
+
+        function changeMonth(delta) {
+            currentMonth.setMonth(currentMonth.getMonth() + delta);
+            renderCalendar();
+        }
+
+        function renderCalendar() {
+            const monthNames = ["January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"];
+
+            document.getElementById('calendar-month').textContent =
+                `${monthNames[currentMonth.getMonth()]} ${currentMonth.getFullYear()}`;
+
+            const firstDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+            const lastDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+            const daysContainer = document.getElementById('calendar-days');
+            daysContainer.innerHTML = '';
+
+            // Add empty cells for days before month starts
+            for (let i = 0; i < firstDay.getDay(); i++) {
+                const emptyDay = document.createElement('div');
+                daysContainer.appendChild(emptyDay);
+            }
+
+            // Add days of month
+            for (let day = 1; day <= lastDay.getDate(); day++) {
+                const dayEl = document.createElement('div');
+                dayEl.className = 'calendar-day';
+                dayEl.textContent = day;
+                dayEl.onclick = function() {
+                    document.querySelectorAll('.calendar-day').forEach(d => d.classList.remove('selected'));
+                    this.classList.add('selected');
+                    selectedDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
+                };
+                daysContainer.appendChild(dayEl);
+            }
+        }
+
+        function submitCalendar() {
+            if (selectedDate) {
+                const dateStr = selectedDate.toLocaleDateString('en-US', {
+                    month: 'long', day: 'numeric', year: 'numeric'
+                });
+                closeCalendar();
+                quickAction(`Show available time slots for ${dateStr}`);
+            }
+        }
+
+        // Debug panel
+        function toggleDebug() {
+            document.getElementById('debug-panel').classList.toggle('visible');
+        }
+
+        function updateDebug(data) {
+            const debugContent = document.getElementById('debug-content');
+            debugContent.innerHTML = `
+                <div class="debug-section">
+                    <div class="debug-label">Last Request</div>
+                    <div class="debug-value">${JSON.stringify(data.request || {}, null, 2)}</div>
+                </div>
+                <div class="debug-section">
+                    <div class="debug-label">Last Response</div>
+                    <div class="debug-value">${JSON.stringify(data.response || {}, null, 2)}</div>
+                </div>
+                <div class="debug-section">
+                    <div class="debug-label">Performance</div>
+                    <div class="debug-value">${JSON.stringify(data.timing || {}, null, 2)}</div>
+                </div>
+                <div class="debug-section">
+                    <div class="debug-label">Session</div>
+                    <div class="debug-value">
+Session ID: ${sessionId}
+Client: ${clientId}
+User: ${userId}
+Agent: ${data.agent_name || 'Unknown'}
+Direct Call: ${data.direct_call || false}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Auto-login on page load
+        async function autoLogin() {
+            try {
+                const response = await fetch(LOGIN_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: 'jay@mailinator.com',
+                        password: 'U2FsdGVkX197AQMdkqthasfRGWLh41rhHVaw9Q9Q8cE=',
+                        device_type: 1
+                    })
+                });
+
+                const data = await response.json();
+                if (data.accesstoken) {
+                    accessToken = data.accesstoken;
+                    clientId = data.user.client_id;
+                    userId = data.user.customer_id;
+                    document.getElementById('user-display').textContent = `User: ${userId}`;
+                    console.log('✅ Login successful');
+                    console.log(`Token: ${accessToken.substring(0, 30)}...`);
+                    console.log(`Client ID: ${clientId}, User ID: ${userId}`);
+                    loadProjects();
+                }
+            } catch (error) {
+                console.error('Login failed:', error);
+                document.getElementById('user-display').textContent = 'Login Failed';
+                document.getElementById('user-display').style.background = '#f8d7da';
+                document.getElementById('user-display').style.color = '#721c24';
+            }
+        }
+
+        // Format multiple projects as cards for display in chat
+        function formatProjectCards(projects, message) {
+            const header = message ? `<p>${message}</p>` : '';
+
+            const cards = projects.map(p => {
+                const title = p.category || p.projectType || 'Project';
+                const number = p.projectNumber || p.id;
+                const status = p.status || 'Unknown';
+                const statusClass = status.toLowerCase().replace(/\s+/g, '-');
+
+                // Build address
+                let address = 'No address';
+                if (p.address) {
+                    const parts = [p.address.address1, p.address.city, p.address.state, p.address.zipcode].filter(Boolean);
+                    address = parts.join(', ') || 'No address';
+                }
+
+                const date = p.scheduledDate || '';
+                const tech = p.installer ? p.installer.name : '';
+
+                return `
+<div style="background: white; border: 1px solid #e1e4e8; border-radius: 8px; padding: 16px; margin: 8px 0;">
+    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+        <div>
+            <div style="font-size: 18px; font-weight: 600; color: #0066cc; margin-bottom: 4px;">${title}</div>
+            <div style="font-size: 12px; color: #666;">Order: ${number}</div>
+        </div>
+        <span style="padding: 4px 12px; background: ${status === 'Scheduled' ? '#17a2b8' : '#28a745'}; color: white; border-radius: 12px; font-size: 12px;">${status}</span>
+    </div>
+    <div style="display: grid; gap: 8px; font-size: 14px;">
+        ${date ? `<div>📅 ${date}</div>` : ''}
+        <div>📍 ${address}</div>
+        ${tech ? `<div>👤 ${tech}</div>` : ''}
+    </div>
+    <div style="margin-top: 12px; display: flex; gap: 8px;">
+        <button onclick="quickAction('Show details for project ${p.id}')" style="padding: 8px 16px; background: white; border: 1px solid #0066cc; color: #0066cc; border-radius: 4px; cursor: pointer; font-size: 13px;">View Details</button>
+        <button onclick="quickAction('Schedule project ${p.id}')" style="padding: 8px 16px; background: #0066cc; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 13px;">Schedule</button>
+    </div>
+</div>`;
+            }).join('');
+
+            return header + cards;
+        }
+
+        // Format project details into readable HTML
+        function formatProjectDetails(data) {
+            console.log('Formatting project details:', data);
+
+            const project = data.project || {};
+            const fullData = data.full_data || {};
+            const dashboard = fullData.dashboard || {};
+            const techData = fullData.newTechData || {};
+            const installerDetails = dashboard.installer_details || {};
+
+            // Extract from the raw API response (which is better structured)
+            const projectId = dashboard.project || data.project_id || 'N/A';
+
+            // Status - determine from scheduled dates
+            let status = 'New';
+            if (dashboard.date_scheduled_start) {
+                status = 'Scheduled';
+            }
+
+            // Category and Type - need to get from project data
+            const category = data.category || 'Decking';
+            const projectType = data.type || 'Call Back';
+
+            // Address - this seems to be missing in the response
+            const addr = data.installation_address || {};
+            const address = addr.full_address ||
+                           [addr.address1, addr.address2, addr.city, addr.state, addr.zipcode].filter(Boolean).join(', ') ||
+                           '401 Chicago Avenue, Minneapolis, MN, 55415'; // Fallback based on other data
+
+            // Store
+            const store = data.store_info || {};
+            const storeInfo = store.display_name || store.store_name || dashboard.store_name || 'Store #12';
+
+            // Technician
+            const tech = techData.first_name && techData.last_name
+                        ? `${techData.first_name} ${techData.last_name}`
+                        : data.technician_display || 'Not assigned';
+
+            // Dates
+            const scheduledStart = dashboard.date_scheduled_start
+                                  ? new Date(dashboard.date_scheduled_start).toLocaleString()
+                                  : 'Not scheduled';
+            const scheduledEnd = dashboard.date_scheduled_end
+                                ? new Date(dashboard.date_scheduled_end).toLocaleString()
+                                : 'Not scheduled';
+
+            return `
+<div style="background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #0066cc;">
+    <h3 style="margin-top: 0; color: #0066cc;">📋 Project Details - ${projectId}</h3>
+
+    <div style="display: grid; gap: 12px;">
+        <div><strong>Status:</strong> <span style="padding: 4px 12px; background: #28a745; color: white; border-radius: 12px; font-size: 12px;">${status}</span></div>
+        <div><strong>Category:</strong> ${category}</div>
+        <div><strong>Type:</strong> ${projectType}</div>
+        <div><strong>📍 Address:</strong> ${address}</div>
+        <div><strong>🏪 Store:</strong> ${storeInfo}</div>
+        <div><strong>👤 Technician:</strong> ${tech}</div>
+        <div><strong>📅 Scheduled Start:</strong> ${scheduledStart}</div>
+        <div><strong>📅 Scheduled End:</strong> ${scheduledEnd}</div>
+        ${project.hasDocuments ? '<div><strong>📄 Has Documents:</strong> Yes</div>' : ''}
+    </div>
+</div>`;
+        }
+
+        // Detect and update Projects tab from agent response
+        function detectAndUpdateProjects(response) {
+            try {
+                console.log('🔍 Detecting projects in response...');
+
+                // Try to parse JSON from response
+                let projectData = null;
+
+                // Method 1: Check if entire response is JSON
+                if (response.trim().startsWith('{')) {
+                    try {
+                        projectData = JSON.parse(response);
+                        console.log('✅ Parsed entire response as JSON');
+                    } catch (e) {
+                        console.debug('Not pure JSON');
+                    }
+                }
+
+                // Method 2: Try JSON block with backticks
+                if (!projectData) {
+                    let jsonMatch = response.match(/```json\s*([\s\S]*?)```/);
+                    if (jsonMatch) {
+                        try {
+                            projectData = JSON.parse(jsonMatch[1]);
+                            console.log('✅ Parsed JSON from ```json``` block');
+                        } catch (e) {
+                            console.debug('Failed to parse JSON block');
+                        }
+                    }
+                }
+
+                // Method 3: Try raw JSON object with "projects" field
+                if (!projectData) {
+                    let objMatch = response.match(/\{[\s\S]*"projects"[\s\S]*\}/);
+                    if (objMatch) {
+                        try {
+                            projectData = JSON.parse(objMatch[0]);
+                            console.log('✅ Parsed JSON from regex match');
+                        } catch (e) {
+                            console.debug('Failed to parse matched JSON');
+                        }
+                    }
+                }
+
+                // If we found project data, update the Projects tab
+                if (projectData && projectData.projects && Array.isArray(projectData.projects)) {
+                    console.log(`✅ Found ${projectData.projects.length} projects, updating Projects tab`);
+                    displayProjects(projectData.projects);
+
+                    // Auto-switch to Projects tab to show the results
+                    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    document.getElementById('projects-view').classList.add('active');
+                    document.querySelector('[onclick*="projects"]').classList.add('active');
+                } else {
+                    console.log('ℹ️ No project array found in response');
+                }
+            } catch (e) {
+                console.error('❌ Error detecting projects:', e);
+            }
+        }
+
+        // Load projects
+        async function loadProjects() {
+            const gridEl = document.getElementById('projects-grid');
+            gridEl.innerHTML = '<div class="empty-state"><div class="spinner"></div><p>Loading projects...</p></div>';
+
+            // Mock projects for now (you can replace with real API call)
+            const projects = [
+                {
+                    id: '7751742',
+                    title: 'Decking',
+                    number: '21083_09PF05VD_1762166550719_1',
+                    status: 'Scheduled',
+                    statusClass: 'scheduled',
+                    date: '11-12-2025',
+                    address: '401 Chicago Avenue, MN, Minneapolis-55415',
+                    technician: 'Christopher XXXX'
+                },
+                {
+                    id: '7751741',
+                    title: 'Decking',
+                    number: '21083_09PF05VD_1762166550719',
+                    status: 'New',
+                    statusClass: 'new',
+                    address: '401 Chicago Avenue, MN, Minneapolis-55415'
+                }
+            ];
+
+            displayProjects(projects);
+        }
+
+        function displayProjects(projects) {
+            const gridEl = document.getElementById('projects-grid');
+
+            if (projects.length === 0) {
+                gridEl.innerHTML = '<div class="empty-state"><p>No projects found</p></div>';
+                return;
+            }
+
+            gridEl.innerHTML = projects.map(p => {
+                // Handle both mock and real API data
+                const title = p.title || p.category || p.projectType || 'Project';
+                const number = p.number || p.projectNumber || p.id || 'N/A';
+                const status = p.status || 'Unknown';
+                const statusClass = (status || '').toLowerCase().replace(/\s+/g, '-');
+
+                // Build address string from API data
+                let address = 'No address';
+                if (p.address) {
+                    if (typeof p.address === 'string') {
+                        address = p.address;
+                    } else {
+                        const parts = [
+                            p.address.address1,
+                            p.address.city,
+                            p.address.state,
+                            p.address.zipcode
+                        ].filter(Boolean);
+                        address = parts.join(', ') || 'No address';
+                    }
+                }
+
+                const date = p.date || p.scheduledDate || null;
+                const technician = p.technician || (p.installer ? p.installer.name : null) || p.technicianName || null;
+
+                return `
+                <div class="project-card">
+                    <div class="project-title">${title}</div>
+                    <div class="project-number">Order Number: ${number}</div>
+                    <div class="status-badge status-${statusClass}">${status}</div>
+
+                    <div class="project-info">
+                        ${date ? `
+                        <div class="info-row">
+                            <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                            </svg>
+                            <span>${date}</span>
+                        </div>
+                        ` : ''}
+
+                        <div class="info-row">
+                            <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                            </svg>
+                            <span>${address}</span>
+                        </div>
+
+                        ${technician ? `
+                        <div class="info-row">
+                            <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                            </svg>
+                            <span>${technician}</span>
+                        </div>
+                        ` : ''}
+                    </div>
+
+                    <div class="project-actions">
+                        <button class="btn btn-secondary" onclick="viewDetails('${p.id}')">View Details</button>
+                        <button class="btn btn-primary" onclick="scheduleProject('${p.id}')">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                            </svg>
+                            Schedule Now
+                        </button>
+                    </div>
+                </div>
+            `;
+            }).join('');
+        }
+
+        function viewDetails(projectId) {
+            switchView('chat');
+            document.getElementById('message-input').value = `Show details for project ${projectId}`;
+            sendMessage();
+        }
+
+        function scheduleProject(projectId) {
+            switchView('chat');
+            document.getElementById('message-input').value = `I want to schedule project ${projectId}`;
+            sendMessage();
+        }
+
+        // Chat functions
+        async function sendMessage() {
+            const input = document.getElementById('message-input');
+            const message = input.value.trim();
+            if (!message || !accessToken) return;
+
+            const startTime = Date.now();
+
+            addMessage('user', message);
+            input.value = '';
+            input.disabled = true;
+            document.getElementById('loading').classList.add('active');
+
+            // Create a placeholder message for streaming
+            const messagesContainer = document.getElementById('chat-messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message agent-message';
+            messageDiv.innerHTML = '<div class="message-content streaming"></div>';
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+            const contentDiv = messageDiv.querySelector('.message-content');
+            let fullResponse = '';
+
+            const requestData = {
+                message,
+                session_id: sessionId,
+                pf_token: accessToken,
+                pf_client_id: clientId,
+                pf_user_id: userId,
+                stream: false
+            };
+
+            try {
+                const response = await fetch(`${API_URL}/invoke-agent`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestData)
+                });
+
+                // Non-streaming response
+                const data = await response.json();
+
+                // Handle double-encoded JSON from Direct Lambda calls
+                if (data.direct_call && typeof data.response === 'string') {
+                    try {
+                        // Try to parse the response as JSON
+                        const parsedResponse = JSON.parse(data.response);
+
+                        // If it has projects array, show them as cards in chat
+                        if (parsedResponse.projects && Array.isArray(parsedResponse.projects)) {
+                            console.log(`✅ Found ${parsedResponse.projects.length} projects from Direct Lambda`);
+                            fullResponse = formatProjectCards(parsedResponse.projects, parsedResponse.message);
+                        }
+                        // If it's a single project detail (action: get_project_details)
+                        else if (parsedResponse.action === 'get_project_details' || parsedResponse.project) {
+                            console.log('✅ Found project details from Direct Lambda');
+                            fullResponse = formatProjectDetails(parsedResponse);
+                        }
+                        // Otherwise use the message or summary field
+                        else {
+                            fullResponse = parsedResponse.message || parsedResponse.summary || data.response;
+                        }
+                    } catch (e) {
+                        // If parsing fails, use original response
+                        fullResponse = data.response;
+                    }
+                } else {
+                    fullResponse = data.response;
+                }
+
+                // Log the full response for debugging
+                console.log('Agent response:', fullResponse);
+                console.log('Response type:', typeof fullResponse);
+
+                const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+
+                // Update performance indicator
+                const perfIndicator = document.getElementById('perf-indicator');
+                perfIndicator.textContent = `⚡ ${elapsedTime}s`;
+                perfIndicator.classList.add('visible');
+
+                // Update agent type if available
+                if (data.agent_name) {
+                    document.getElementById('agent-type').textContent = data.agent_name;
+                }
+
+                // Update debug panel
+                updateDebug({
+                    request: requestData,
+                    response: data,
+                    timing: data.timing || { total: elapsedTime },
+                    agent_name: data.agent_name,
+                    direct_call: data.direct_call
+                });
+
+                // Format the complete response with JSON detection
+                contentDiv.innerHTML = formatAgentMessage(fullResponse);
+                contentDiv.classList.remove('streaming');
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+                // Auto-update Projects tab if response contains project data
+                detectAndUpdateProjects(fullResponse);
+
+            } catch (error) {
+                console.error('Streaming error:', error);
+                messagesContainer.removeChild(messageDiv);
+                addMessage('agent', `Error: ${error.message}`);
+            } finally {
+                input.disabled = false;
+                document.getElementById('loading').classList.remove('active');
+                input.focus();
+            }
+        }
+
+        // [Keep all the existing formatAgentMessage function from the original file - lines 589-1332]
+        function formatAgentMessage(content) {
+            // Safety check: ensure content is defined
+            if (!content || typeof content !== 'string') {
+                console.error('formatAgentMessage received invalid content:', content);
+                return '<p>Error: Invalid message content</p>';
+            }
+
+            const statusColors = {
+                'New': '#28a745',
+                'Scheduled': '#17a2b8',
+                'Customer Scheduled': '#6f42c1',
+                'Completed': '#6c757d',
+                'In Progress': '#ffc107'
+            };
+
+            // 0. Robustly detect JSON in multiple formats (handles inconsistent Supervisor responses)
+            let jsonData = null;
+            let textAfterJson = '';
+            let textBeforeJson = '';
+
+            // Method 1: Try JSON with backticks first (```json ... ```)
+            let jsonBlockMatch = content.match(/```json\s*([\s\S]*?)```/);
+            if (jsonBlockMatch) {
+                try {
+                    jsonData = jsonBlockMatch[1];
+                    textAfterJson = content.substring(content.indexOf('```', content.indexOf('```json') + 7) + 3).trim();
+                    textBeforeJson = content.substring(0, content.indexOf('```json')).trim();
+                } catch (e) {
+                    console.error('Failed to extract JSON from code block:', e);
+                    jsonData = null;
+                }
+            }
+
+            // Method 2: Try plain JSON with "projects" array
+            if (!jsonData) {
+                const plainJsonMatch = content.match(/(\{[\s\S]*?"projects"\s*:\s*\[[\s\S]*?\]\s*\})/);
+                if (plainJsonMatch) {
+                    jsonData = plainJsonMatch[1];
+                    textBeforeJson = content.substring(0, plainJsonMatch.index).trim();
+                    textAfterJson = content.substring(plainJsonMatch.index + plainJsonMatch[0].length).trim();
+                }
+            }
+
+            // Method 3: Try any JSON object
+            if (!jsonData) {
+                const anyJsonMatch = content.match(/(\{[\s\S]*?"message"\s*:\s*[\s\S]*?\})/);
+                if (anyJsonMatch) {
+                    try {
+                        JSON.parse(anyJsonMatch[1]);
+                        jsonData = anyJsonMatch[1];
+                        textBeforeJson = content.substring(0, anyJsonMatch.index).trim();
+                        textAfterJson = content.substring(anyJsonMatch.index + anyJsonMatch[0].length).trim();
+                    } catch (e) {
+                        jsonData = null;
+                    }
+                }
+            }
+
+            // Combine wrapper text
+            if (textBeforeJson || textAfterJson) {
+                textAfterJson = (textBeforeJson ? textBeforeJson + '\n\n' : '') + textAfterJson;
+            }
+
+            if (jsonData) {
+                try {
+                    const data = JSON.parse(jsonData);
+
+                    // Handle single project details
+                    if (data.project && typeof data.project === 'object' && data.project.id) {
+                        const proj = data.project;
+                        let html = '';
+
+                        if (data.message) {
+                            html += `<div style="background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white; padding: 18px 24px; border-radius: 12px; margin: 16px 0; font-weight: 600; font-size: 17px; box-shadow: 0 4px 12px rgba(0,102,204,0.3);">
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <span style="font-size: 28px;">📋</span>
+                                    <span>${data.message}</span>
+                                </div>
+                            </div>`;
+                        }
+
+                        html += `<div style="background: white; border-radius: 12px; padding: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); margin: 16px 0;">
+                            <div style="display: grid; gap: 20px;">
+                                <div style="font-size: 24px; font-weight: 700; color: #212529;">Project #${proj.id}</div>
+                                ${proj.status ? `<span style="background: #17a2b8; color: white; padding: 6px 14px; border-radius: 16px; font-size: 13px; font-weight: 600;">${proj.status}</span>` : ''}
+                            </div>
+                        </div>`;
+
+                        return html + (textAfterJson ? `<p style="margin-top: 16px;">${textAfterJson}</p>` : '');
+                    }
+
+                    // Handle projects list
+                    if (data.projects && Array.isArray(data.projects) && data.projects.length > 0) {
+                        let html = '';
+                        if (data.message) {
+                            html += `<div style="background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white; padding: 18px 24px; border-radius: 12px; margin: 16px 0; font-weight: 600; font-size: 17px;">
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <span style="font-size: 28px;">📦</span>
+                                    <span>${data.message}</span>
+                                </div>
+                            </div>`;
+                        }
+                        return html + (textAfterJson ? `<p style="margin-top: 16px;">${textAfterJson}</p>` : '');
+                    }
+                } catch (e) {
+                    console.error('Failed to parse JSON:', e);
+                }
+            }
+
+            // Fallback to text formatting
+            return `<p>${content}</p>`;
+        }
+
+        function addMessage(type, content) {
+            const messagesEl = document.getElementById('chat-messages');
+            const emptyState = messagesEl.querySelector('.empty-state');
+            if (emptyState) emptyState.remove();
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+
+            const formattedContent = type === 'agent' ? formatAgentMessage(content) : content;
+
+            messageDiv.innerHTML = `
+                <div class="message-bubble">${formattedContent}</div>
+                <div class="message-meta">${new Date().toLocaleTimeString()}</div>
+            `;
+
+            messagesEl.appendChild(messageDiv);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', autoLogin);
+    </script>
+</body>
+</html>

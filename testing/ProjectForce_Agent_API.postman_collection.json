@@ -1,0 +1,579 @@
+{
+	"info": {
+		"_postman_id": "scheduling-agent-api-v2",
+		"name": "ProjectForce Scheduling Agent API",
+		"description": "Complete API testing collection for ProjectForce Scheduling Agent with AWS Bedrock - Updated with Weather-Only Information Agent",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Authentication",
+			"item": [
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Save access token for subsequent requests",
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.environment.set('access_token', jsonData.data.access_token);",
+									"    pm.environment.set('user_id', jsonData.data.user_id);",
+									"    console.log('Access token saved:', jsonData.data.access_token.substring(0, 20) + '...');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"jay@mailinator.com\",\n    \"password\": \"Password@123\"\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/login",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"login"
+							]
+						},
+						"description": "Login to ProjectForce API and get access token"
+					},
+					"response": []
+				},
+				{
+					"name": "Validate Token",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{proxy_url}}/api/validate-token?user_id={{user_id}}&identifier=projectsforce-validation",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"validate-token"
+							],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								},
+								{
+									"key": "identifier",
+									"value": "projectsforce-validation"
+								}
+							]
+						},
+						"description": "Validate the access token"
+					},
+					"response": []
+				}
+			],
+			"description": "Authentication endpoints for ProjectForce API"
+		},
+		{
+			"name": "2. ProjectForce Dashboard API",
+			"item": [
+				{
+					"name": "Get Dashboard/Projects",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{proxy_url}}/api/dashboard?client_id={{client_id}}&user_id={{user_id}}",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"dashboard"
+							],
+							"query": [
+								{
+									"key": "client_id",
+									"value": "{{client_id}}"
+								},
+								{
+									"key": "user_id",
+									"value": "{{user_id}}"
+								}
+							]
+						},
+						"description": "Get dashboard with all projects for the user"
+					},
+					"response": []
+				}
+			],
+			"description": "ProjectForce Dashboard and Projects API"
+		},
+		{
+			"name": "3. Bedrock Agent - Non-Streaming",
+			"item": [
+				{
+					"name": "Invoke Agent - Show Projects",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"show my projects\",\n    \"session_id\": \"test-session-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Invoke Bedrock agent to show projects (non-streaming)"
+					},
+					"response": []
+				},
+				{
+					"name": "Invoke Agent - Greeting",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Hi, how are you?\",\n    \"session_id\": \"test-session-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test chitchat agent with greeting"
+					},
+					"response": []
+				},
+				{
+					"name": "Invoke Agent - Project Details",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"give me details for project 7751743\",\n    \"session_id\": \"test-session-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Get detailed information about a specific project"
+					},
+					"response": []
+				},
+				{
+					"name": "Invoke Agent - Schedule Appointment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"I want to schedule an appointment for project 7751743 on December 15th at 2 PM\",\n    \"session_id\": \"test-session-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Schedule an appointment for a specific project"
+					},
+					"response": []
+				},
+				{
+					"name": "Weather - City Name (Tampa)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"What's the weather in Tampa?\",\n    \"session_id\": \"test-weather-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test weather query with city name - Information agent uses Open-Meteo geocoding to get coordinates"
+					},
+					"response": []
+				},
+				{
+					"name": "Weather - City with State",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Check weather for Minneapolis, MN\",\n    \"session_id\": \"test-weather-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test weather query with city and state format"
+					},
+					"response": []
+				},
+				{
+					"name": "Weather - Zip Code",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"What's the weather in 33601?\",\n    \"session_id\": \"test-weather-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test weather query with zip code"
+					},
+					"response": []
+				},
+				{
+					"name": "Weather - Project Location Context",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Show me project 7751743 details and then tell me what's the weather there\",\n    \"session_id\": \"test-weather-context-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test weather query with project context - should use coordinates from project address"
+					},
+					"response": []
+				},
+				{
+					"name": "Weather - Rain Forecast",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Is it going to rain in Miami tomorrow?\",\n    \"session_id\": \"test-weather-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test specific weather condition query (rain forecast)"
+					},
+					"response": []
+				},
+				{
+					"name": "Weather - Out of Scope (Should Defer)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"What are your business hours?\",\n    \"session_id\": \"test-weather-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test out-of-scope query - information agent should defer to scheduling agent"
+					},
+					"response": []
+				}
+			],
+			"description": "Bedrock Agent invocations without streaming - includes weather-only information agent tests"
+		},
+		{
+			"name": "4. Bedrock Agent - Streaming",
+			"item": [
+				{
+					"name": "Invoke Agent - Show Projects (Streaming)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"show my projects\",\n    \"session_id\": \"test-session-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": true\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Invoke Bedrock agent with streaming enabled (Server-Sent Events)"
+					},
+					"response": []
+				},
+				{
+					"name": "Invoke Agent - Greeting (Streaming)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Hi, how are you doing today?\",\n    \"session_id\": \"test-session-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": true\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test streaming with chitchat agent"
+					},
+					"response": []
+				},
+				{
+					"name": "Weather - City Name (Streaming)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"What's the weather like in New York?\",\n    \"session_id\": \"test-weather-stream-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": true\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"api",
+								"invoke-agent"
+							]
+						},
+						"description": "Test weather query with streaming enabled"
+					},
+					"response": []
+				}
+			],
+			"description": "Bedrock Agent invocations with streaming (SSE)"
+		},
+		{
+			"name": "5. Health Checks",
+			"item": [
+				{
+					"name": "Proxy Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{proxy_url}}/health",
+							"host": [
+								"{{proxy_url}}"
+							],
+							"path": [
+								"health"
+							]
+						},
+						"description": "Check if the proxy server is running"
+					},
+					"response": []
+				}
+			],
+			"description": "Health check endpoints"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "proxy_url",
+			"value": "http://localhost:5003",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "1646085",
+			"type": "string"
+		},
+		{
+			"key": "client_id",
+			"value": "09PF05VD",
+			"type": "string"
+		}
+	]
+}

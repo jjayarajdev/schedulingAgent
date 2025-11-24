@@ -1,0 +1,365 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Coordinator Operations API",
+    "description": "Bulk operations for scheduling coordinators - route optimization, bulk assignments, validation",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/optimize_route": {
+      "post": {
+        "summary": "Optimize route for multiple projects",
+        "description": "Given a list of 2-50 project IDs, calculate the optimal route that minimizes travel time/distance",
+        "operationId": "optimize_route",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["project_ids"],
+                "properties": {
+                  "project_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of project IDs to optimize (2-50)",
+                    "minItems": 2,
+                    "maxItems": 50,
+                    "example": ["12345", "12347", "12350", "12352"]
+                  },
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Target date for route (ISO format)",
+                    "example": "2025-10-15"
+                  },
+                  "optimize_for": {
+                    "type": "string",
+                    "enum": ["time", "distance", "cost"],
+                    "default": "time",
+                    "description": "Optimization criteria"
+                  },
+                  "start_location": {
+                    "type": "object",
+                    "properties": {
+                      "latitude": {"type": "number"},
+                      "longitude": {"type": "number"}
+                    },
+                    "description": "Optional starting location (default: office)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Optimized route with sequence and metrics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operation": {"type": "string", "example": "route_optimize"},
+                    "project_count": {"type": "integer", "example": 12},
+                    "optimized_route": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sequence": {"type": "integer", "example": 1},
+                          "project_id": {"type": "string", "example": "12345"},
+                          "address": {"type": "string", "example": "123 Main St, Tampa, FL"},
+                          "arrival_time": {"type": "string", "format": "date-time"},
+                          "duration_minutes": {"type": "integer", "example": 120},
+                          "drive_time_to_next_minutes": {"type": "integer", "example": 15},
+                          "coordinates": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 2,
+                            "maxItems": 2
+                          }
+                        }
+                      }
+                    },
+                    "metrics": {
+                      "type": "object",
+                      "properties": {
+                        "total_distance_miles": {"type": "number"},
+                        "total_drive_time_minutes": {"type": "integer"},
+                        "time_saved_minutes": {"type": "integer"},
+                        "savings_percentage": {"type": "number"}
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {"type": "string"}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bulk_assign": {
+      "post": {
+        "summary": "Assign multiple projects to a team",
+        "description": "Bulk assign 1-100 projects to a team with conflict detection",
+        "operationId": "bulk_assign_teams",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["project_ids", "team"],
+                "properties": {
+                  "project_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of project IDs to assign (1-100)",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "example": ["15001", "15002", "15003"]
+                  },
+                  "team": {
+                    "type": "string",
+                    "description": "Team ID or name",
+                    "example": "Team A"
+                  },
+                  "date_range": {
+                    "type": "array",
+                    "items": {"type": "string", "format": "date"},
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "description": "Start and end dates for assignments",
+                    "example": ["2025-10-15", "2025-10-20"]
+                  },
+                  "ignore_conflicts": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Force assignment even if conflicts detected"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bulk assignment result with conflicts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operation": {"type": "string", "example": "bulk_assign"},
+                    "requested_count": {"type": "integer"},
+                    "successful": {"type": "integer"},
+                    "failed": {"type": "integer"},
+                    "assignments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "project_id": {"type": "string"},
+                          "team": {"type": "string"},
+                          "scheduled_date": {"type": "string", "format": "date"},
+                          "estimated_hours": {"type": "number"},
+                          "status": {"type": "string", "enum": ["assigned", "failed"]}
+                        }
+                      }
+                    },
+                    "conflicts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "project_id": {"type": "string"},
+                          "reason": {"type": "string"},
+                          "severity": {"type": "string", "enum": ["warning", "error"]},
+                          "suggested_resolution": {"type": "string"}
+                        }
+                      }
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "team": {"type": "string"},
+                        "assigned_projects": {"type": "array", "items": {"type": "string"}},
+                        "total_hours_allocated": {"type": "number"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/validate_projects": {
+      "post": {
+        "summary": "Validate multiple projects for scheduling",
+        "description": "Check 1-100 projects for permit, measurement, access, and conflict issues",
+        "operationId": "validate_projects",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["project_ids"],
+                "properties": {
+                  "project_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of project IDs to validate (1-100)",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "example": ["10001", "10002", "10003"]
+                  },
+                  "validation_checks": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": ["permit", "measurement", "access", "conflicts"]
+                    },
+                    "default": ["permit", "measurement", "access", "conflicts"],
+                    "description": "Which checks to run (default: all)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validation results for all projects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operation": {"type": "string", "example": "validate"},
+                    "total_projects": {"type": "integer"},
+                    "valid_count": {"type": "integer"},
+                    "issues_count": {"type": "integer"},
+                    "projects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "project_id": {"type": "string"},
+                          "is_valid": {"type": "boolean"},
+                          "checks": {
+                            "type": "object",
+                            "properties": {
+                              "permit_valid": {"type": "boolean"},
+                              "measurements_complete": {"type": "boolean"},
+                              "access_approved": {"type": "boolean"},
+                              "no_conflicts": {"type": "boolean"}
+                            }
+                          },
+                          "issues": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "type": {"type": "string", "enum": ["permit", "measurement", "access", "conflict"]},
+                                "severity": {"type": "string", "enum": ["warning", "error", "blocking"]},
+                                "message": {"type": "string"},
+                                "resolution_steps": {"type": "array", "items": {"type": "string"}}
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "ready_to_schedule": {"type": "array", "items": {"type": "string"}},
+                        "requires_action": {"type": "array", "items": {"type": "string"}},
+                        "blocked": {"type": "array", "items": {"type": "string"}}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/detect_conflicts": {
+      "post": {
+        "summary": "Detect scheduling conflicts",
+        "description": "Check for scheduling conflicts across projects and teams",
+        "operationId": "detect_conflicts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["project_ids"],
+                "properties": {
+                  "project_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of project IDs to check",
+                    "example": ["12345", "12347"]
+                  },
+                  "team": {
+                    "type": "string",
+                    "description": "Check conflicts for specific team (optional)"
+                  },
+                  "date_range": {
+                    "type": "array",
+                    "items": {"type": "string", "format": "date"},
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "description": "Date range to check conflicts"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Conflict detection results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "conflicts_found": {"type": "integer"},
+                    "conflicts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "project_id": {"type": "string"},
+                          "reason": {"type": "string"},
+                          "severity": {"type": "string", "enum": ["warning", "error"]},
+                          "suggested_resolution": {"type": "string"}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {}
+  }
+}

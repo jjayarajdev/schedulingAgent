@@ -1,0 +1,35 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+            ],
+            "Effect": "Allow",
+            "Resource": "arn:aws:logs:us-east-1:772634497954:log-group:/aws/lambda/pf-lex-fulfillment-dev:*"
+        },
+        {
+            "Action": [
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:Query"
+            ],
+            "Effect": "Allow",
+            "Resource": "arn:aws:dynamodb:us-east-1:772634497954:table/pf-session-data-dev"
+        },
+        {
+            "Action": [
+                "lambda:InvokeFunction"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:lambda:us-east-1:772634497954:function:pf-information-actions",
+                "arn:aws:lambda:us-east-1:772634497954:function:pf-scheduling-actions",
+                "arn:aws:lambda:us-east-1:772634497954:function:pf-voice-bedrock-bridge-dev"
+            ]
+        }
+    ]
+}

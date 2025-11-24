@@ -1,0 +1,22 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowConnectToInvokeLexBot",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "connect.amazonaws.com"
+      },
+      "Action": "lex:StartConversation",
+      "Resource": "arn:aws:lex:us-east-1:772634497954:bot-alias/WXFDD1TVEQ/TSTALIASID",
+      "Condition": {
+        "StringEquals": {
+          "AWS:SourceAccount": "772634497954"
+        },
+        "ArnEquals": {
+          "AWS:SourceArn": "arn:aws:connect:us-east-1:772634497954:instance/3edd99db-14e2-4628-836e-478b574e4b90"
+        }
+      }
+    }
+  ]
+}

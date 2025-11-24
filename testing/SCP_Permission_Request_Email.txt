@@ -1,0 +1,233 @@
+Subject: Request to Update AWS Organizations SCP - Enable bedrock-agent-runtime:InvokeAgent for Account 772634497954
+
+Dear AWS Organization Administrator,
+
+I hope this message finds you well. I am writing to request an update to the Service Control Policy (SCP) for our AWS account to enable critical AWS Bedrock functionality that is currently being blocked.
+
+ISSUE SUMMARY
+=============
+
+Our multi-agent orchestration system built on AWS Bedrock is unable to invoke agents at runtime due to an SCP blocking the bedrock-agent-runtime:InvokeAgent action. While all IAM permissions are correctly configured, the organization-level SCP is overriding these permissions and preventing our application from functioning.
+
+ACCOUNT DETAILS
+================
+
+Target Account ID: 772634497954
+AWS Organization ID: o-zzg6n5wtir
+Master Account ID: 965005424843
+Region: us-east-1
+
+PERMISSION REQUIRED
+===================
+
+We need the Service Control Policy to allow the following AWS Bedrock Agent Runtime action:
+
+Primary Permission (Recommended):
+  bedrock-agent-runtime:InvokeAgent
+
+Alternative (More Permissive):
+  bedrock-agent-runtime:*
+
+RECOMMENDED SCP STATEMENT
+=========================
+
+Please add one of the following statements to the SCP applied to account 772634497954:
+
+Option 1: Allow All Bedrock Agent Runtime Actions (Recommended)
+---------------------------------------------------------------
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowBedrockAgentRuntime",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agent-runtime:*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+
+Option 2: Allow Only InvokeAgent (Most Restrictive)
+----------------------------------------------------
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowBedrockAgentInvoke",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agent-runtime:InvokeAgent"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+
+Option 3: Allow All Bedrock Services (If Full Bedrock Access Is Desired)
+-------------------------------------------------------------------------
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowBedrockServices",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:*",
+        "bedrock-agent:*",
+        "bedrock-agent-runtime:*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+
+STEPS TO APPLY THE FIX
+======================
+
+1. Log into the AWS Organizations Master Account (965005424843)
+   Sign in at: https://console.aws.amazon.com/
+
+2. Navigate to AWS Organizations
+   Go to: AWS Console → Services → AWS Organizations
+   Or visit: https://console.aws.amazon.com/organizations/
+
+3. Go to Policies → Service Control Policies
+   - Click "Policies" in the left navigation
+   - Click "Service control policies"
+
+4. Find the SCP Applied to Account 772634497954
+   - Click on "Accounts" in the left navigation
+   - Find account 772634497954
+   - View "Policies" attached to this account
+   - Identify which SCP(s) are currently applied
+
+5. Update the SCP
+
+   Option A - Edit Existing SCP:
+   - Click on the SCP name
+   - Click "Edit policy"
+   - Add one of the statement examples above to the existing policy
+   - Click "Save changes"
+
+   Option B - Create New SCP:
+   - Click "Create policy"
+   - Name it: "AllowBedrockAgentRuntime"
+   - Paste one of the policy examples above
+   - Click "Create policy"
+   - Attach the new policy to account 772634497954
+
+6. Wait for Propagation
+   SCP changes typically take 5-10 minutes to propagate. No restart of services is required.
+
+IAM PERMISSIONS ALREADY IN PLACE
+=================================
+
+All necessary IAM roles already have the correct permissions configured:
+
+Lambda Orchestrator Role: pf-orchestrator-role-dev
+  ✓ Has bedrock-agent-runtime:InvokeAgent permission
+  ✓ Has correct resource ARNs
+  ✓ Has trust relationship configured
+
+Bedrock Agent Execution Roles:
+  ✓ Supervisor Agent: AmazonBedrockExecutionRoleForAgents_Supervisor
+  ✓ Chitchat Agent: AmazonBedrockExecutionRoleForAgents_pf-chitchat
+  ✓ Scheduling Agent: AmazonBedrockExecutionRoleForAgents_SchedulingAgent
+  ✓ Information Agent: AmazonBedrockExecutionRoleForAgents_pf-information
+
+All have bedrock-agent-runtime:InvokeAgent permission.
+
+CURRENT IMPACT
+==============
+
+What Currently Works:
+  ✓ Bedrock model invocations (bedrock:InvokeModel)
+  ✓ Agent management operations (bedrock-agent:CreateAgent, UpdateAgent, etc.)
+  ✓ Direct Lambda function calls (non-agent workflows)
+
+What's Blocked:
+  ✗ bedrock-agent-runtime:InvokeAgent - Invoking agents at runtime
+  ✗ Conversational/chitchat features
+  ✗ Multi-agent orchestration workflows
+
+TECHNICAL ARCHITECTURE
+======================
+
+User Request → API Gateway → Lambda (pf-orchestrator)
+                                  ↓
+                     [SCP Blocks Here]
+                                  ↓
+                     AWS Bedrock Agent Runtime API
+                                  ↓
+                     Bedrock Agents (Supervisor, Chitchat, etc.)
+
+The SCP is blocking the Lambda → Bedrock Agent Runtime API call.
+
+SECURITY CONSIDERATIONS
+========================
+
+Is This Permission Safe?
+
+YES - This is a standard AWS Bedrock permission.
+
+- bedrock-agent-runtime:InvokeAgent allows calling Bedrock agents at runtime
+- This is required for ANY AWS Bedrock multi-agent architecture
+- The IAM role already restricts which specific agents can be invoked
+- Agent ARNs are scoped to account 772634497954 only
+
+Risk Assessment:
+
+- Low Risk: The permission only allows invoking pre-configured Bedrock agents
+- No Data Risk: Agents can only access data through their configured action groups
+- Cost Control: IAM policies already limit which agents can be invoked
+- Compliance: This is AWS's standard permission model for Bedrock agents
+
+VERIFICATION
+============
+
+Once the SCP is updated, we can verify the fix works by:
+
+1. Testing from AWS Console:
+   - Log into account 772634497954
+   - Navigate to AWS Bedrock → Agents
+   - Try to test an agent using the built-in console test
+   - If it works, the SCP is fixed
+
+2. Testing via API:
+   We will test our application endpoint and confirm agent invocations succeed.
+
+TIMELINE
+========
+
+This is blocking our production multi-agent orchestration system. We would greatly appreciate if this change could be applied at your earliest convenience.
+
+SCP changes typically propagate within 5-10 minutes, so the fix should be effective immediately after being applied.
+
+REFERENCES
+==========
+
+- AWS Bedrock Agents Documentation:
+  https://docs.aws.amazon.com/bedrock/latest/userguide/agents.html
+
+- AWS Organizations SCP Documentation:
+  https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps.html
+
+- AWS Bedrock Agent Runtime API:
+  https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_InvokeAgent.html
+
+NEXT STEPS
+==========
+
+Please let me know if you need any additional information or clarification. I am happy to schedule a call to discuss this request if needed.
+
+Once the SCP is updated, I will test and confirm the fix is working.
+
+Thank you for your assistance with this request.
+
+Best regards,
+[Your Name]
+[Your Title]
+[Your Contact Information]
+[Date: 2025-11-18]

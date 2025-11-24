@@ -1,0 +1,215 @@
+{
+  "timestamp": "2025-10-21T13:51:54.777845",
+  "summary": {
+    "total": 19,
+    "passed": 14,
+    "partial": 5,
+    "failed": 0
+  },
+  "results": [
+    {
+      "test_id": "CC-1",
+      "name": "Greeting - Hello",
+      "agent": "Chitchat",
+      "status": "PASS",
+      "response_length": 138,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": []
+    },
+    {
+      "test_id": "CC-2",
+      "name": "Greeting - Good Morning",
+      "agent": "Chitchat",
+      "status": "PASS",
+      "response_length": 124,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": []
+    },
+    {
+      "test_id": "CC-3",
+      "name": "Thank You",
+      "agent": "Chitchat",
+      "status": "PASS",
+      "response_length": 64,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": []
+    },
+    {
+      "test_id": "CC-4",
+      "name": "Goodbye",
+      "agent": "Chitchat",
+      "status": "PASS",
+      "response_length": 90,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": []
+    },
+    {
+      "test_id": "CC-5",
+      "name": "Help Request",
+      "agent": "Chitchat",
+      "status": "PASS",
+      "response_length": 308,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": []
+    },
+    {
+      "test_id": "CC-6",
+      "name": "General Chitchat",
+      "agent": "Chitchat",
+      "status": "PASS",
+      "response_length": 165,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": []
+    },
+    {
+      "test_id": "SCH-1",
+      "name": "List Projects",
+      "agent": "Scheduling",
+      "status": "PARTIAL",
+      "response_length": 300,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": [
+        "Lambda NOT invoked - agent responded without action"
+      ]
+    },
+    {
+      "test_id": "SCH-2",
+      "name": "Get Available Dates",
+      "agent": "Scheduling",
+      "status": "PARTIAL",
+      "response_length": 167,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": [
+        "Lambda NOT invoked - agent responded without action"
+      ]
+    },
+    {
+      "test_id": "SCH-3",
+      "name": "Get Time Slots",
+      "agent": "Scheduling",
+      "status": "PARTIAL",
+      "response_length": 408,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": [
+        "Lambda NOT invoked - agent responded without action"
+      ]
+    },
+    {
+      "test_id": "SCH-4",
+      "name": "Confirm Appointment (Mock)",
+      "agent": "Scheduling",
+      "status": "PARTIAL",
+      "response_length": 800,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": [
+        "Lambda NOT invoked - agent responded without action"
+      ]
+    },
+    {
+      "test_id": "SCH-5",
+      "name": "Cancel Appointment (Mock)",
+      "agent": "Scheduling",
+      "status": "PARTIAL",
+      "response_length": 372,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": [
+        "Lambda NOT invoked - agent responded without action"
+      ]
+    },
+    {
+      "test_id": "INFO-1",
+      "name": "Get Business Hours",
+      "agent": "Information",
+      "status": "PASS",
+      "response_length": 520,
+      "lambda_invoked": true,
+      "error": null,
+      "notes": [
+        "Lambda invoked"
+      ]
+    },
+    {
+      "test_id": "INFO-2",
+      "name": "Get Weather Forecast",
+      "agent": "Information",
+      "status": "PASS",
+      "response_length": 193,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": []
+    },
+    {
+      "test_id": "INFO-3",
+      "name": "Get Project Information",
+      "agent": "Information",
+      "status": "PASS",
+      "response_length": 353,
+      "lambda_invoked": true,
+      "error": null,
+      "notes": [
+        "Lambda invoked"
+      ]
+    },
+    {
+      "test_id": "INFO-4",
+      "name": "General Information Query",
+      "agent": "Information",
+      "status": "PASS",
+      "response_length": 1294,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": []
+    },
+    {
+      "test_id": "NOTE-1",
+      "name": "Add Note to Project",
+      "agent": "Notes",
+      "status": "PASS",
+      "response_length": 529,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": []
+    },
+    {
+      "test_id": "NOTE-2",
+      "name": "View Notes for Project",
+      "agent": "Notes",
+      "status": "PASS",
+      "response_length": 515,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": []
+    },
+    {
+      "test_id": "NOTE-3",
+      "name": "Update Existing Note",
+      "agent": "Notes",
+      "status": "PASS",
+      "response_length": 663,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": []
+    },
+    {
+      "test_id": "NOTE-4",
+      "name": "Delete Note",
+      "agent": "Notes",
+      "status": "PASS",
+      "response_length": 504,
+      "lambda_invoked": false,
+      "error": null,
+      "notes": []
+    }
+  ]
+}

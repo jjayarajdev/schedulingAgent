@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProjectForce API Demo - 3-Step Authentication</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f7fa;
+            min-height: 100vh;
+            padding: 0;
+            margin: 0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .header h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .header .subtitle {
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .panel {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .panel h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .step-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .status-box {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .status-box.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            display: block;
+        }
+
+        .status-box.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            display: block;
+        }
+
+        .status-box.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+            display: block;
+        }
+
+        .status-box.warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+            display: block;
+        }
+
+        .btn {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 1em;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #5a6268;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .code-block {
+            background: #f8f9ff;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 10px;
+            font-family: monospace;
+            font-size: 0.9em;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .projects-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .project-card {
+            background: #f8f9ff;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 20px;
+            transition: all 0.3s;
+        }
+
+        .project-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            border-color: #667eea;
+        }
+
+        .project-card h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 1.2em;
+        }
+
+        .project-card .project-meta {
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .project-card .project-id {
+            font-family: monospace;
+            background: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.85em;
+        }
+
+        .credentials-info {
+            background: #fff3cd;
+            border: 1px solid #ffeeba;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            font-size: 0.9em;
+        }
+
+        .credentials-info code {
+            background: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+
+        .step-complete {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .step-pending {
+            color: #6c757d;
+            font-weight: normal;
+        }
+
+        .step-error {
+            color: #dc3545;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🔐 ProjectForce API Demo</h1>
+            <div class="subtitle">3-Step Authentication Flow: Login → Validate → Fetch Projects</div>
+        </div>
+
+        <!-- Step 1: Login -->
+        <div class="panel">
+            <h2>
+                <span class="step-badge">1</span>
+                Login & Get Access Token
+            </h2>
+
+            <div class="credentials-info">
+                <strong>ℹ️ Automatic Login</strong><br>
+                This demo will automatically log in with:
+                <code>jay@mailinator.com</code>
+            </div>
+
+            <div id="step1-status" class="status-box"></div>
+
+            <button class="btn btn-primary" onclick="performLogin()" id="login-btn">
+                🔑 Step 1: Login & Get Token
+            </button>
+
+            <div id="step1-response" class="code-block" style="display: none;"></div>
+        </div>
+
+        <!-- Step 2: Validate Token -->
+        <div class="panel">
+            <h2>
+                <span class="step-badge">2</span>
+                Validate Access Token
+            </h2>
+
+            <div id="step2-status" class="status-box"></div>
+
+            <button class="btn btn-secondary" onclick="validateToken()" id="validate-btn" disabled>
+                ✅ Step 2: Validate Token
+            </button>
+
+            <div id="step2-response" class="code-block" style="display: none;"></div>
+        </div>
+
+        <!-- Step 3: Chat with Bedrock Agents -->
+        <div class="panel">
+            <h2>
+                <span class="step-badge">3</span>
+                Chat with Bedrock Agents
+            </h2>
+
+            <div id="step3-status" class="status-box"></div>
+
+            <!-- Chat Container -->
+            <div id="chat-container" style="display: none;">
+                <div class="chat-area" id="chat-messages" style="background: #f8f9ff; border-radius: 10px; padding: 20px; height: 500px; overflow-y: auto; margin-bottom: 20px;">
+                    <div style="text-align: center; color: #999; padding: 100px 20px;">
+                        <div style="font-size: 3em;">💬</div>
+                        <div>Ready to chat! Try asking:</div>
+                        <div style="margin-top: 15px; color: #667eea;">
+                            • "Show me my projects"<br>
+                            • "What appointments do I have?"<br>
+                            • "Hello!"
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 10px;">
+                    <input
+                        type="text"
+                        id="chat-input"
+                        placeholder="Type your message here..."
+                        style="flex: 1; padding: 15px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1em;"
+                        onkeypress="handleChatKeyPress(event)"
+                    >
+                    <button class="btn btn-primary" onclick="sendChatMessage()" id="send-btn">
+                        Send
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_CONFIG = {
+            proxyUrl: 'http://localhost:5003',  // Our CORS proxy
+            clientId: '09PF05VD',
+            userId: '1646085',
+            credentials: {
+                email: 'jay@mailinator.com',
+                password: 'U2FsdGVkX197AQMdkqthasfRGWLh41rhHVaw9Q9Q8cE=',
+                device_type: 1
+            }
+        };
+
+        // State
+        let accessToken = null;
+        let tokenValidated = false;
+
+        // ========================================
+        // Step 1: Login & Get Access Token
+        // ========================================
+        async function performLogin() {
+            const statusDiv = document.getElementById('step1-status');
+            const responseDiv = document.getElementById('step1-response');
+            const loginBtn = document.getElementById('login-btn');
+
+            // Show loading
+            statusDiv.className = 'status-box info';
+            statusDiv.innerHTML = '<div class="spinner"></div>Logging in to ProjectForce...';
+            loginBtn.disabled = true;
+            responseDiv.style.display = 'none';
+
+            try {
+                const response = await fetch(`${API_CONFIG.proxyUrl}/api/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(API_CONFIG.credentials)
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.accesstoken) {
+                    accessToken = data.accesstoken;
+
+                    // Extract user info for Step 3
+                    if (data.user) {
+                        API_CONFIG.clientId = data.user.client_id;
+                        API_CONFIG.userId = data.user.customer_id;
+                    }
+
+                    statusDiv.className = 'status-box success';
+                    statusDiv.innerHTML = `
+                        ✅ <strong>Login Successful!</strong><br>
+                        <small>Access Token: ${accessToken.substring(0, 50)}...</small><br>
+                        <small>Client ID: ${API_CONFIG.clientId} | User ID: ${API_CONFIG.userId}</small>
+                    `;
+
+                    // Show response
+                    responseDiv.style.display = 'block';
+                    responseDiv.textContent = JSON.stringify(data, null, 2);
+
+                    // Show chat interface for Step 3
+                    showChatInterface();
+
+                } else {
+                    throw new Error(data.message || 'Login failed');
+                }
+
+            } catch (error) {
+                statusDiv.className = 'status-box error';
+                statusDiv.innerHTML = `❌ <strong>Login Failed:</strong> ${error.message}`;
+                loginBtn.disabled = false;
+
+                responseDiv.style.display = 'block';
+                responseDiv.textContent = error.toString();
+            }
+        }
+
+        // ========================================
+        // Step 2: Validate Token
+        // ========================================
+        async function validateToken() {
+            const statusDiv = document.getElementById('step2-status');
+            const responseDiv = document.getElementById('step2-response');
+            const validateBtn = document.getElementById('validate-btn');
+
+            if (!accessToken) {
+                statusDiv.className = 'status-box error';
+                statusDiv.innerHTML = '❌ No access token available. Please complete Step 1 first.';
+                return;
+            }
+
+            // Show loading
+            statusDiv.className = 'status-box info';
+            statusDiv.innerHTML = '<div class="spinner"></div>Validating token...';
+            validateBtn.disabled = true;
+            responseDiv.style.display = 'none';
+
+            try {
+                const response = await fetch(
+                    `${API_CONFIG.proxyUrl}/api/validate-token?user_id=${API_CONFIG.userId}&identifier=projectsforce-validation`,
+                    {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'Content-Type': 'application/json',
+                        }
+                    }
+                );
+
+                const data = await response.json();
+
+                if (response.ok && data.status === 'Active') {
+                    tokenValidated = true;
+
+                    statusDiv.className = 'status-box success';
+                    statusDiv.innerHTML = `
+                        ✅ <strong>Token Validated!</strong><br>
+                        <small>User: ${data.customer_name || 'Unknown'} (ID: ${data.customer_id})</small>
+                    `;
+
+                    // Show response
+                    responseDiv.style.display = 'block';
+                    responseDiv.textContent = JSON.stringify(data, null, 2);
+
+                    // Enable Step 3
+                    document.getElementById('projects-btn').disabled = false;
+
+                    // Auto-proceed to Step 3
+                    setTimeout(() => fetchProjects(), 1000);
+
+                } else {
+                    throw new Error(data.message || 'Token validation failed');
+                }
+
+            } catch (error) {
+                statusDiv.className = 'status-box error';
+                statusDiv.innerHTML = `❌ <strong>Validation Failed:</strong> ${error.message}`;
+
+                responseDiv.style.display = 'block';
+                responseDiv.textContent = error.toString();
+            }
+        }
+
+        // ========================================
+        // Step 3: Chat with Bedrock Agents
+        // ========================================
+        let sessionId = 'session-' + Date.now();
+
+        function showChatInterface() {
+            const statusDiv = document.getElementById('step3-status');
+            const chatContainer = document.getElementById('chat-container');
+
+            statusDiv.className = 'status-box success';
+            statusDiv.innerHTML = `
+                ✅ <strong>Ready to Chat!</strong><br>
+                <small>Connected to AWS Bedrock Supervisor Agent</small>
+            `;
+
+            chatContainer.style.display = 'block';
+            document.getElementById('chat-input').focus();
+        }
+
+        function handleChatKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendChatMessage();
+            }
+        }
+
+        async function sendChatMessage() {
+            const input = document.getElementById('chat-input');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            // Add user message to chat
+            addChatMessage('user', message);
+            input.value = '';
+            input.disabled = true;
+            document.getElementById('send-btn').disabled = true;
+
+            try {
+                // Call Bedrock Supervisor agent via proxy
+                const response = await fetch(`${API_CONFIG.proxyUrl}/api/invoke-agent`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: message,
+                        session_id: sessionId,
+                        pf_token: accessToken,
+                        pf_client_id: API_CONFIG.clientId,
+                        pf_user_id: API_CONFIG.userId
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    addChatMessage('agent', data.response || data.message, data.agent_name);
+                } else {
+                    addChatMessage('error', `Error: ${data.error || 'Unknown error'}`);
+                }
+
+            } catch (error) {
+                addChatMessage('error', `Connection error: ${error.message}`);
+            } finally {
+                input.disabled = false;
+                document.getElementById('send-btn').disabled = false;
+                input.focus();
+            }
+        }
+
+        function formatAgentResponse(content) {
+            // Convert markdown-style lists to HTML lists
+            let formatted = content;
+
+            // Convert bullet lists (- Item)
+            formatted = formatted.replace(/^- (.+)$/gm, '<li>$1</li>');
+            formatted = formatted.replace(/(<li>.*<\/li>\s*)+/g, '<ul style="margin: 10px 0; padding-left: 25px;">$&</ul>');
+
+            // Convert numbered lists (1. Item, 2. Item, etc.)
+            formatted = formatted.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
+
+            // Bold text with **text** or __text__
+            formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            formatted = formatted.replace(/__(.+?)__/g, '<strong>$1</strong>');
+
+            // Italic text with *text* or _text_
+            formatted = formatted.replace(/\*(.+?)\*/g, '<em>$1</em>');
+            formatted = formatted.replace(/_(.+?)_/g, '<em>$1</em>');
+
+            // Code blocks with `code`
+            formatted = formatted.replace(/`([^`]+)`/g, '<code style="background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: monospace; font-size: 0.9em;">$1</code>');
+
+            // Convert line breaks to <br>
+            formatted = formatted.replace(/\n/g, '<br>');
+
+            // Highlight project IDs (7-8 digits)
+            formatted = formatted.replace(/\b(\d{7,8})\b/g, '<span style="background: #e8f4fd; padding: 2px 6px; border-radius: 3px; font-family: monospace; color: #0066cc; font-weight: 600;">$1</span>');
+
+            // Highlight dates (YYYY-MM-DD)
+            formatted = formatted.replace(/\b(\d{4}-\d{2}-\d{2})\b/g, '<span style="background: #fff3cd; padding: 2px 6px; border-radius: 3px; font-family: monospace;">$1</span>');
+
+            // Highlight times (HH:MM)
+            formatted = formatted.replace(/\b(\d{1,2}:\d{2}\s?(?:AM|PM|am|pm)?)\b/g, '<span style="background: #d4edda; padding: 2px 6px; border-radius: 3px; font-family: monospace;">$1</span>');
+
+            return formatted;
+        }
+
+        function addChatMessage(type, content, agentName = null) {
+            const chatMessages = document.getElementById('chat-messages');
+
+            // Remove empty state if present
+            const emptyState = chatMessages.querySelector('[style*="text-align: center"]');
+            if (emptyState) {
+                emptyState.remove();
+            }
+
+            const messageDiv = document.createElement('div');
+            messageDiv.style.marginBottom = '20px';
+            messageDiv.style.animation = 'slideIn 0.3s ease-out';
+
+            if (type === 'user') {
+                messageDiv.style.textAlign = 'right';
+                messageDiv.innerHTML = `
+                    <div style="display: inline-block; max-width: 75%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 20px; border-radius: 18px 18px 4px 18px; text-align: left; box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);">
+                        <div style="font-size: 1em; line-height: 1.5;">${content}</div>
+                    </div>
+                    <div style="font-size: 0.75em; color: #999; margin-top: 5px; margin-right: 5px;">${new Date().toLocaleTimeString()}</div>
+                `;
+            } else if (type === 'agent') {
+                const formattedContent = formatAgentResponse(content);
+                messageDiv.innerHTML = `
+                    <div style="display: inline-block; max-width: 80%; background: white; border: 2px solid #e0e0e0; padding: 18px 22px; border-radius: 18px 18px 18px 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                        ${agentName ? `<div style="font-weight: 600; color: #667eea; margin-bottom: 10px; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">🤖 ${agentName}</div>` : ''}
+                        <div style="color: #333; line-height: 1.7; font-size: 0.95em;">${formattedContent}</div>
+                    </div>
+                    <div style="font-size: 0.75em; color: #999; margin-top: 5px; margin-left: 5px;">${new Date().toLocaleTimeString()}</div>
+                `;
+            } else if (type === 'error') {
+                messageDiv.innerHTML = `
+                    <div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(220, 53, 69, 0.1);">
+                        ⚠️ <strong>Error:</strong> ${content}
+                    </div>
+                `;
+            }
+
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // ========================================
+        // Auto-start on page load
+        // ========================================
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('🚀 ProjectForce API Demo Ready');
+            console.log('Click "Step 1: Login & Get Token" to begin the 3-step flow');
+        });
+    </script>
+</body>
+</html>

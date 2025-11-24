@@ -1,0 +1,11 @@
+# Orchestrator Lambda Dependencies
+
+# AWS SDK for Python
+boto3==1.35.64
+botocore==1.35.64
+
+# Redis client for ElastiCache/conversation storage
+redis==5.2.0
+
+# Type hints support (Python 3.8+)
+typing-extensions==4.12.2

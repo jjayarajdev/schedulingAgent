@@ -1,0 +1,9 @@
+{
+    "BotId": "WXFDD1TVEQ",
+    "BotName": "pf-scheduling-assistant-dev",
+    "BotStatus": "Available",
+    "DataPrivacy": {
+        "childDirected": false
+    },
+    "IdleSessionTTLInSeconds": 600
+}

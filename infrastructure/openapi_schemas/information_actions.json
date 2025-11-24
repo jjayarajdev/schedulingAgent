@@ -1,0 +1,175 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Information Actions API - Weather Only",
+    "version": "2.0.0",
+    "description": "API for retrieving weather information. All project-related actions have been moved to scheduling-actions."
+  },
+  "paths": {
+    "/get_weather": {
+      "post": {
+        "summary": "Get weather forecast for a specific location",
+        "description": "Retrieves weather forecast to help customers plan for appointments. Uses external weather API.",
+        "operationId": "get_weather",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "latitude": {
+                    "type": "number",
+                    "description": "Latitude coordinate (decimal format). Preferred method for accurate weather data. Example: 27.9506"
+                  },
+                  "longitude": {
+                    "type": "number",
+                    "description": "Longitude coordinate (decimal format). Must be provided with latitude. Example: -82.4572"
+                  },
+                  "location": {
+                    "type": "string",
+                    "description": "Location name (city, zip code, or 'City, State' format). Fallback if coordinates not available. Examples: 'Tampa', 'Tampa, FL', '33601'"
+                  },
+                  "project_id": {
+                    "type": "string",
+                    "description": "Project ID for context and logging (optional)"
+                  },
+                  "address": {
+                    "type": "string",
+                    "description": "Full address for reference and logging (optional)"
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Weather forecast for the location",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "example": "get_weather"
+                    },
+                    "location": {
+                      "type": "string",
+                      "description": "The requested location"
+                    },
+                    "weather": {
+                      "type": "object",
+                      "properties": {
+                        "location": {
+                          "type": "object",
+                          "properties": {
+                            "area": {
+                              "type": "string",
+                              "description": "City name"
+                            },
+                            "region": {
+                              "type": "string",
+                              "description": "State/Region name"
+                            },
+                            "country": {
+                              "type": "string",
+                              "description": "Country name"
+                            }
+                          }
+                        },
+                        "current": {
+                          "type": "object",
+                          "properties": {
+                            "temp_f": {
+                              "type": "string",
+                              "description": "Current temperature in Fahrenheit"
+                            },
+                            "temp_c": {
+                              "type": "string",
+                              "description": "Current temperature in Celsius"
+                            },
+                            "condition": {
+                              "type": "string",
+                              "description": "Weather condition (e.g., 'Partly Cloudy', 'Rain', 'Sunny')"
+                            },
+                            "humidity": {
+                              "type": "string",
+                              "description": "Humidity percentage"
+                            },
+                            "wind_mph": {
+                              "type": "string",
+                              "description": "Wind speed in miles per hour"
+                            },
+                            "wind_dir": {
+                              "type": "string",
+                              "description": "Wind direction (e.g., 'NE', 'SW')"
+                            },
+                            "feels_like_f": {
+                              "type": "string",
+                              "description": "Feels like temperature in Fahrenheit"
+                            },
+                            "uv_index": {
+                              "type": "string",
+                              "description": "UV index"
+                            }
+                          }
+                        },
+                        "forecast": {
+                          "type": "array",
+                          "description": "3-day weather forecast",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "date": {
+                                "type": "string",
+                                "format": "date",
+                                "description": "Forecast date (YYYY-MM-DD)"
+                              },
+                              "max_temp_f": {
+                                "type": "string",
+                                "description": "Maximum temperature in Fahrenheit"
+                              },
+                              "min_temp_f": {
+                                "type": "string",
+                                "description": "Minimum temperature in Fahrenheit"
+                              },
+                              "avg_temp_f": {
+                                "type": "string",
+                                "description": "Average temperature in Fahrenheit"
+                              },
+                              "uv_index": {
+                                "type": "string",
+                                "description": "UV index for the day"
+                              },
+                              "sun_hours": {
+                                "type": "string",
+                                "description": "Hours of sunshine"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "mock_mode": {
+                      "type": "boolean",
+                      "description": "Whether mock data was used"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing or invalid location parameter"
+          },
+          "502": {
+            "description": "External weather API error"
+          }
+        }
+      }
+    }
+  }
+}

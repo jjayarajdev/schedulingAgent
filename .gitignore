@@ -1,0 +1,124 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+venv/
+ENV/
+env/
+agent-improvements/
+archive/
+utils/
+pf-requirements/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+terraform.tfvars
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+dist/
+.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# AWS
+.aws/
+
+# Database
+*.db
+*.sqlite
+
+# Lambda
+*.zip
+lambda/*/venv/
+lambda/*/package/
+lambda/layers/common/python/
+lambda/layers/common/build/
+
+# Temporary files
+response.json
+output*.json
+testing/voice/test_*.json
+
+# Claude Code / AI Assistant files
+.claude/
+.claude-code/
+.cursor/
+.copilot/
+**/claude-context.txt
+**/context.md
+**/.claude*
+claude_history/
+.ai/
+
+# Documentation - Ignore auto-generated/temporary MD files
+# Keep only MD files referenced in main README.md
+docs/**/*.md
+!docs/ARCHITECTURE.md
+!docs/NEW_ENVIRONMENT_DEPLOYMENT.md
+!docs/README.md
+!docs/COMPLEX_QUERY_SCENARIOS.md
+!docs/MONITORING_SETUP_GUIDE.md
+!docs/phase3/README.md
+
+# Ignore other non-essential MD files
+backend/**/*.md
+lambda/**/README.md
+!lambda/orchestrator/README.md
+!lambda/scheduling-actions/README.md
+!lambda/information-actions/README.md
+scripts/**/*.md
+!scripts/README.md
+testing/**/*.md
+!testing/FORMATTED_TESTING.md
+!testing/README.md

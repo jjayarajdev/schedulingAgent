@@ -1,0 +1,486 @@
+# ==============================================================================
+# Bedrock Agents Configuration
+# ==============================================================================
+# This Terraform configuration creates:
+# - 1 Supervisor Agent
+# - 3 Collaborator Agents (Scheduling, Information, Chitchat)
+# - IAM roles and policies for agents
+# - S3 bucket for OpenAPI schemas
+# - S3 objects for OpenAPI schemas
+#
+# NOTE: Agent aliases, action groups, and collaborations are NOT created by
+# Terraform. These will be created via scripts after the initial deployment.
+# ==============================================================================
+
+# ==============================================================================
+# Variables
+# ==============================================================================
+# NOTE: Variables have been moved to variables.tf to prevent loss during deployments
+
+# ==============================================================================
+# S3 Bucket for OpenAPI Schemas
+# ==============================================================================
+
+resource "aws_s3_bucket" "agent_schemas" {
+  bucket = "${var.project_name}-schemas-${var.environment}-${data.aws_caller_identity.current.account_id}"
+
+  tags = {
+    Name        = "${var.project_name}-schemas"
+    Environment = var.environment
+    Purpose     = "Bedrock Agent OpenAPI Schemas"
+  }
+}
+
+resource "aws_s3_bucket_versioning" "agent_schemas" {
+  bucket = aws_s3_bucket.agent_schemas.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# Upload OpenAPI schemas to S3
+resource "aws_s3_object" "scheduling_actions_schema" {
+  bucket = aws_s3_bucket.agent_schemas.id
+  key    = "scheduling_actions.json"
+  source = "${path.module}/../openapi_schemas/scheduling_actions.json"
+  etag   = filemd5("${path.module}/../openapi_schemas/scheduling_actions.json")
+
+  content_type = "application/json"
+}
+
+resource "aws_s3_object" "information_actions_schema" {
+  bucket = aws_s3_bucket.agent_schemas.id
+  key    = "information_actions.json"
+  source = "${path.module}/../openapi_schemas/information_actions.json"
+  etag   = filemd5("${path.module}/../openapi_schemas/information_actions.json")
+
+  content_type = "application/json"
+}
+
+# ==============================================================================
+# Data Sources
+# ==============================================================================
+
+data "aws_caller_identity" "current" {}
+
+data "aws_region" "current" {}
+
+# ==============================================================================
+# IAM Role for Bedrock Agents
+# ==============================================================================
+
+# Trust policy for Bedrock agents
+data "aws_iam_policy_document" "bedrock_agent_trust" {
+  statement {
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["bedrock.amazonaws.com"]
+    }
+
+    actions = ["sts:AssumeRole"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:aws:bedrock:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:agent/*"]
+    }
+  }
+}
+
+# IAM role for supervisor agent
+resource "aws_iam_role" "supervisor_agent" {
+  name               = "${var.project_name}-supervisor-agent-role-${var.environment}"
+  assume_role_policy = data.aws_iam_policy_document.bedrock_agent_trust.json
+
+  tags = {
+    Name        = "${var.project_name}-supervisor-agent-role"
+    Environment = var.environment
+  }
+}
+
+# Policy for supervisor agent to invoke foundation model
+data "aws_iam_policy_document" "supervisor_agent_permissions" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "bedrock:InvokeModel",
+      "bedrock:InvokeModelWithResponseStream"
+    ]
+    resources = [
+      # Allow access to the specific inference profile in us-east-1
+      "arn:aws:bedrock:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:inference-profile/${var.foundation_model}",
+      # Also allow access to all inference profiles (needed for cross-region inference)
+      "arn:aws:bedrock:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:inference-profile/*",
+      # Allow access to foundation models in ALL US regions (cross-region inference requirement)
+      # Cross-region inference for US Anthropic Claude Sonnet 4.5 can route to: us-east-1, us-east-2, us-west-2
+      "arn:aws:bedrock:us-east-1::foundation-model/*",
+      "arn:aws:bedrock:us-east-2::foundation-model/*",
+      "arn:aws:bedrock:us-west-2::foundation-model/*"
+    ]
+  }
+
+  # Allow supervisor to invoke collaborator agents and their aliases
+  statement {
+    effect = "Allow"
+    actions = [
+      "bedrock:GetAgentAlias",
+      "bedrock:InvokeAgent"
+    ]
+    resources = [
+      "arn:aws:bedrock:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:agent/*",
+      "arn:aws:bedrock:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:agent-alias/*"
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "supervisor_agent_permissions" {
+  name   = "${var.project_name}-supervisor-agent-policy"
+  role   = aws_iam_role.supervisor_agent.id
+  policy = data.aws_iam_policy_document.supervisor_agent_permissions.json
+}
+
+# ==============================================================================
+# IAM Roles for Collaborator Agents
+# ==============================================================================
+
+# Scheduling agent role
+resource "aws_iam_role" "scheduling_agent" {
+  name               = "${var.project_name}-scheduling-agent-role-${var.environment}"
+  assume_role_policy = data.aws_iam_policy_document.bedrock_agent_trust.json
+
+  tags = {
+    Name        = "${var.project_name}-scheduling-agent-role"
+    Environment = var.environment
+  }
+}
+
+# Information agent role
+resource "aws_iam_role" "information_agent" {
+  name               = "${var.project_name}-information-agent-role-${var.environment}"
+  assume_role_policy = data.aws_iam_policy_document.bedrock_agent_trust.json
+
+  tags = {
+    Name        = "${var.project_name}-information-agent-role"
+    Environment = var.environment
+  }
+}
+
+# Chitchat agent role
+resource "aws_iam_role" "chitchat_agent" {
+  name               = "${var.project_name}-chitchat-agent-role-${var.environment}"
+  assume_role_policy = data.aws_iam_policy_document.bedrock_agent_trust.json
+
+  tags = {
+    Name        = "${var.project_name}-chitchat-agent-role"
+    Environment = var.environment
+  }
+}
+
+# Policy for collaborator agents to invoke foundation model
+data "aws_iam_policy_document" "collaborator_agent_permissions" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "bedrock:InvokeModel",
+      "bedrock:InvokeModelWithResponseStream"
+    ]
+    resources = [
+      # Allow access to Claude 3.5 Sonnet V2 (inference profile)
+      "arn:aws:bedrock:us-east-1:${data.aws_caller_identity.current.account_id}:inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+      # Allow access to foundation models in ALL US regions (cross-region inference requirement)
+      "arn:aws:bedrock:us-east-1::foundation-model/*",
+      "arn:aws:bedrock:us-east-2::foundation-model/*",
+      "arn:aws:bedrock:us-west-2::foundation-model/*",
+      # Also allow access to all inference profiles (needed for cross-region inference)
+      "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/*"
+    ]
+  }
+
+  # S3 permissions for reading OpenAPI schemas
+  statement {
+    effect = "Allow"
+    actions = [
+      "s3:GetObject"
+    ]
+    resources = [
+      "${aws_s3_bucket.agent_schemas.arn}/*"
+    ]
+  }
+
+  # Lambda permissions for action groups
+  statement {
+    effect = "Allow"
+    actions = [
+      "lambda:InvokeFunction"
+    ]
+    resources = [
+      "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-scheduling-actions",
+      "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-information-actions"
+    ]
+  }
+}
+
+# Attach policies to collaborator agents
+resource "aws_iam_role_policy" "scheduling_agent_permissions" {
+  name   = "${var.project_name}-scheduling-agent-policy"
+  role   = aws_iam_role.scheduling_agent.id
+  policy = data.aws_iam_policy_document.collaborator_agent_permissions.json
+}
+
+resource "aws_iam_role_policy" "information_agent_permissions" {
+  name   = "${var.project_name}-information-agent-policy"
+  role   = aws_iam_role.information_agent.id
+  policy = data.aws_iam_policy_document.collaborator_agent_permissions.json
+}
+
+resource "aws_iam_role_policy" "chitchat_agent_permissions" {
+  name   = "${var.project_name}-chitchat-agent-policy"
+  role   = aws_iam_role.chitchat_agent.id
+  policy = data.aws_iam_policy_document.collaborator_agent_permissions.json
+}
+
+# ==============================================================================
+# Bedrock Agents
+# ==============================================================================
+
+# NOTE: Lambda functions for action groups need to be created first
+# This configuration assumes Lambda functions exist or uses placeholders
+# Lambda ARNs should be passed as variables once functions are deployed
+
+# Supervisor Agent
+resource "aws_bedrockagent_agent" "supervisor" {
+  agent_name              = "${var.project_name}-supervisor"
+  agent_resource_role_arn = aws_iam_role.supervisor_agent.arn
+  foundation_model        = var.foundation_model
+  instruction             = file("${path.module}/../agent_instructions/supervisor.txt")
+  description             = "Supervisor agent that routes customer requests to specialized collaborator agents"
+
+  # Enable multi-agent collaboration
+  agent_collaboration = "SUPERVISOR"
+
+  # Don't auto-prepare - will be prepared after collaborators are added
+  prepare_agent = false
+
+  # Idle session timeout (in seconds)
+  idle_session_ttl_in_seconds = 1800
+
+  tags = {
+    Name        = "${var.project_name}-supervisor"
+    Environment = var.environment
+    AgentType   = "supervisor"
+  }
+}
+
+# ==============================================================================
+# Collaborator Agents
+# ==============================================================================
+
+# Scheduling Collaborator Agent
+resource "aws_bedrockagent_agent" "scheduling" {
+  agent_name              = "${var.project_name}-scheduling"
+  agent_resource_role_arn = aws_iam_role.scheduling_agent.arn
+  foundation_model        = var.foundation_model
+  instruction             = file("${path.module}/../agent_instructions/scheduling_collaborator.txt")
+  description             = "Scheduling specialist agent for managing appointments, availability, and bookings"
+
+  # Disable collaboration for collaborator agents
+  agent_collaboration = "DISABLED"
+
+  # Don't auto-prepare - will be prepared after association
+  prepare_agent = false
+
+  idle_session_ttl_in_seconds = 1800
+
+  tags = {
+    Name        = "${var.project_name}-scheduling"
+    Environment = var.environment
+    AgentType   = "collaborator"
+    Specialty   = "scheduling"
+  }
+}
+
+# Information Collaborator Agent
+resource "aws_bedrockagent_agent" "information" {
+  agent_name              = "${var.project_name}-information"
+  agent_resource_role_arn = aws_iam_role.information_agent.arn
+  foundation_model        = var.foundation_model
+  instruction             = file("${path.module}/../agent_instructions/information_collaborator.txt")
+  description             = "Information specialist agent for providing project details, status, hours, and weather"
+
+  # Disable collaboration for collaborator agents
+  agent_collaboration = "DISABLED"
+
+  # Don't auto-prepare - will be prepared after association
+  prepare_agent = false
+
+  idle_session_ttl_in_seconds = 1800
+
+  tags = {
+    Name        = "${var.project_name}-information"
+    Environment = var.environment
+    AgentType   = "collaborator"
+    Specialty   = "information"
+  }
+}
+
+# Chitchat Collaborator Agent
+resource "aws_bedrockagent_agent" "chitchat" {
+  agent_name              = "${var.project_name}-chitchat"
+  agent_resource_role_arn = aws_iam_role.chitchat_agent.arn
+  foundation_model        = var.foundation_model
+  instruction             = file("${path.module}/../agent_instructions/chitchat_collaborator.txt")
+  description             = "Chitchat specialist agent for greetings, thanks, help, and general conversation"
+
+  # Disable collaboration for collaborator agents
+  agent_collaboration = "DISABLED"
+
+  # Don't auto-prepare - will be prepared after association
+  prepare_agent = false
+
+  idle_session_ttl_in_seconds = 1800
+
+  tags = {
+    Name        = "${var.project_name}-chitchat"
+    Environment = var.environment
+    AgentType   = "collaborator"
+    Specialty   = "chitchat"
+  }
+}
+
+# ==============================================================================
+# Agent Collaborations (Multi-Agent Setup)
+# ==============================================================================
+# NOTE: Agent collaborations will be created via scripts after Terraform deployment
+
+# Associate Scheduling Agent with Supervisor
+##resource "aws_bedrockagent_agent_collaborator" "scheduling" {
+#  agent_id               = aws_bedrockagent_agent.supervisor.agent_id
+#  agent_version          = "DRAFT"
+#  collaborator_name      = "scheduling_collaborator"
+#  collaboration_instruction = "Route all appointment scheduling, availability checking, booking, rescheduling, and cancellation requests to this agent. This agent handles the complete workflow from showing available projects to confirming appointments."
+#
+#  # Don't auto-prepare - we'll do it manually after all associations
+#  prepare_agent = false
+#
+#  agent_descriptor {
+#    alias_arn = aws_bedrockagent_agent_alias.scheduling.agent_alias_arn
+#  }
+#
+#  depends_on = [
+#    aws_bedrockagent_agent.supervisor,
+#    aws_bedrockagent_agent.scheduling,
+#    aws_bedrockagent_agent_alias.scheduling
+#  ]
+#
+#  lifecycle {
+#    ignore_changes = [relay_conversation_history]
+#  }
+#}
+
+# Associate Information Agent with Supervisor
+##resource "aws_bedrockagent_agent_collaborator" "information" {
+#  agent_id               = aws_bedrockagent_agent.supervisor.agent_id
+#  agent_version          = "DRAFT"
+#  collaborator_name      = "information_collaborator"
+#  collaboration_instruction = "Route all information requests to this agent, including project details, appointment status checks, working hours inquiries, and weather forecasts. This agent provides informational responses without taking scheduling actions."
+#
+#  # Don't auto-prepare - we'll do it manually after all associations
+#  prepare_agent = false
+#
+#  agent_descriptor {
+#    alias_arn = aws_bedrockagent_agent_alias.information.agent_alias_arn
+#  }
+#
+#  depends_on = [
+#    aws_bedrockagent_agent.supervisor,
+#    aws_bedrockagent_agent.information,
+#    aws_bedrockagent_agent_alias.information
+#  ]
+#
+#  lifecycle {
+#    ignore_changes = [relay_conversation_history]
+#  }
+#}
+
+# Associate Chitchat Agent with Supervisor
+##resource "aws_bedrockagent_agent_collaborator" "chitchat" {
+#  agent_id               = aws_bedrockagent_agent.supervisor.agent_id
+#  agent_version          = "DRAFT"
+#  collaborator_name      = "chitchat_collaborator"
+#  collaboration_instruction = "Route all conversational interactions to this agent, including greetings, thank you messages, goodbye messages, help requests, and general friendly conversation that doesn't require specific actions."
+#
+#  # Don't auto-prepare - we'll do it manually after all associations
+#  prepare_agent = false
+#
+#  agent_descriptor {
+#    alias_arn = aws_bedrockagent_agent_alias.chitchat.agent_alias_arn
+#  }
+#
+#  depends_on = [
+#    aws_bedrockagent_agent.supervisor,
+#    aws_bedrockagent_agent.chitchat,
+#    aws_bedrockagent_agent_alias.chitchat
+#  ]
+#
+#  lifecycle {
+#    ignore_changes = [relay_conversation_history]
+#  }
+#}
+
+# ==============================================================================
+# Action Groups
+# ==============================================================================
+# NOTE: Action groups will be created via scripts after Terraform deployment
+
+# ==============================================================================
+# Outputs
+# ==============================================================================
+
+output "supervisor_agent_id" {
+  description = "ID of the supervisor agent"
+  value       = aws_bedrockagent_agent.supervisor.agent_id
+}
+
+output "supervisor_agent_arn" {
+  description = "ARN of the supervisor agent"
+  value       = aws_bedrockagent_agent.supervisor.agent_arn
+}
+
+output "scheduling_agent_id" {
+  description = "ID of the scheduling agent"
+  value       = aws_bedrockagent_agent.scheduling.agent_id
+}
+
+output "information_agent_id" {
+  description = "ID of the information agent"
+  value       = aws_bedrockagent_agent.information.agent_id
+}
+
+output "chitchat_agent_id" {
+  description = "ID of the chitchat agent"
+  value       = aws_bedrockagent_agent.chitchat.agent_id
+}
+
+output "agent_schemas_bucket" {
+  description = "S3 bucket name for agent schemas"
+  value       = aws_s3_bucket.agent_schemas.id
+}
+
+output "all_agent_ids" {
+  description = "Map of all agent IDs"
+  value = {
+    supervisor  = aws_bedrockagent_agent.supervisor.agent_id
+    scheduling  = aws_bedrockagent_agent.scheduling.agent_id
+    information = aws_bedrockagent_agent.information.agent_id
+    chitchat    = aws_bedrockagent_agent.chitchat.agent_id
+  }
+}

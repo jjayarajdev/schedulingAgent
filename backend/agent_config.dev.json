@@ -1,0 +1,35 @@
+{
+  "environment": "dev",
+  "supervisor_id": "P9VCJXPIZS",
+  "supervisor_alias": "TSTALIASID",
+  "agents": {
+    "scheduling": {
+      "agent_id": "OHJRRIOVDN",
+      "alias_id": "UHA4SFG5VQ"
+    },
+    "information": {
+      "agent_id": "M0NRSM01QE",
+      "alias_id": "PQWDUTVNMU"
+    },
+    "chitchat": {
+      "agent_id": "WB5OPLGKMF",
+      "alias_id": "XYZZ4KHA9Z"
+    }
+  },
+  "routing": {
+    "enabled": true,
+    "method": "direct",
+    "use_supervisor": false,
+    "classifier_model": "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  },
+  "region": "us-east-1",
+  "prefix": "pf_",
+  "customer_context": {
+    "injection_method": "prompt_augmentation_and_session_attributes",
+    "session_attributes": [
+      "customer_id",
+      "customer_type",
+      "client_id"
+    ]
+  }
+}

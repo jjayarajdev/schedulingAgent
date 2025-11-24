@@ -1,0 +1,153 @@
+{
+  "scheduling": [
+    {
+      "query": "Show me all my projects",
+      "expected_intent": "scheduling",
+      "description": "List all projects"
+    },
+    {
+      "query": "What projects do I have scheduled?",
+      "expected_intent": "scheduling",
+      "description": "List scheduled projects"
+    },
+    {
+      "query": "Tell me about order number ORD-2025-001",
+      "expected_intent": "scheduling",
+      "description": "Get order/project details"
+    },
+    {
+      "query": "Switch to my flooring installation project",
+      "expected_intent": "scheduling",
+      "description": "Switch active project"
+    },
+    {
+      "query": "What are the details of my kitchen cabinets project?",
+      "expected_intent": "scheduling",
+      "description": "Get project details"
+    },
+    {
+      "query": "When is my deck repair scheduled for?",
+      "expected_intent": "scheduling",
+      "description": "Check appointment date"
+    },
+    {
+      "query": "What dates are available for my windows installation?",
+      "expected_intent": "scheduling",
+      "description": "Check availability"
+    },
+    {
+      "query": "Show me time slots available for November 5th",
+      "expected_intent": "scheduling",
+      "description": "View available slots"
+    },
+    {
+      "query": "Schedule my bathroom remodel for November 8th at 2 PM",
+      "expected_intent": "scheduling",
+      "description": "Schedule appointment"
+    },
+    {
+      "query": "Confirm appointment for project PRJ-78946 on November 10th at 9:00 AM",
+      "expected_intent": "scheduling",
+      "description": "Confirm appointment"
+    },
+    {
+      "query": "Reschedule my flooring project to December 1st at 1 PM",
+      "expected_intent": "scheduling",
+      "description": "Reschedule appointment"
+    },
+    {
+      "query": "Cancel the appointment for project PRJ-78945",
+      "expected_intent": "scheduling",
+      "description": "Cancel appointment"
+    }
+  ],
+  "information": [
+    {
+      "query": "What's the weather in Tampa?",
+      "expected_intent": "information",
+      "description": "Check weather"
+    },
+    {
+      "query": "How's the weather in Clearwater Beach?",
+      "expected_intent": "information",
+      "description": "Check weather"
+    },
+    {
+      "query": "What's the temperature in St Petersburg today?",
+      "expected_intent": "information",
+      "description": "Check temperature"
+    },
+    {
+      "query": "Is it going to rain in Tampa tomorrow?",
+      "expected_intent": "information",
+      "description": "Weather forecast"
+    },
+    {
+      "query": "What's the weather forecast for this week?",
+      "expected_intent": "information",
+      "description": "Weekly forecast"
+    },
+    {
+      "query": "Check the weather for my installation address",
+      "expected_intent": "information",
+      "description": "Location-based weather"
+    },
+    {
+      "query": "What are your working days?",
+      "expected_intent": "information",
+      "description": "Business hours"
+    },
+    {
+      "query": "What are your business hours?",
+      "expected_intent": "information",
+      "description": "Business hours"
+    }
+  ],
+  "notes": [
+    {
+      "query": "Add a note to project PRJ-78945: Customer prefers afternoon appointments",
+      "expected_intent": "notes",
+      "description": "Add customer preference note"
+    },
+    {
+      "query": "Save a note for my windows project: Gate code is 5678",
+      "expected_intent": "notes",
+      "description": "Add access information"
+    },
+    {
+      "query": "Add a note: Need to confirm parking arrangements before installation",
+      "expected_intent": "notes",
+      "description": "Add logistics note"
+    },
+    {
+      "query": "Create a note for order ORD-2025-003: Customer has a dog, call ahead",
+      "expected_intent": "notes",
+      "description": "Add safety note"
+    },
+    {
+      "query": "Add reminder: Bring measuring tape for the bathroom remodel",
+      "expected_intent": "notes",
+      "description": "Add equipment reminder"
+    },
+    {
+      "query": "Note for kitchen project: Customer wants white cabinets only",
+      "expected_intent": "notes",
+      "description": "Add preference note"
+    },
+    {
+      "query": "Save note: Installation area needs to be cleared before arrival",
+      "expected_intent": "notes",
+      "description": "Add preparation note"
+    }
+  ],
+  "metadata": {
+    "version": "1.0",
+    "total_queries": 27,
+    "categories": {
+      "scheduling": 12,
+      "information": 8,
+      "notes": 7
+    },
+    "last_updated": "2025-11-03"
+  }
+}
