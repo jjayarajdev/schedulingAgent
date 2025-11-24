@@ -161,6 +161,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         elif intent_name == "ProjectInquiry":
             response = handle_project_inquiry(event, session_id, customer_id)
 
+        elif intent_name == "ProjectStatusInquiry":
+            response = handle_project_status_inquiry(event, session_id, customer_id)
+
+        elif intent_name == "AppointmentInquiry":
+            response = handle_appointment_inquiry(event, session_id, customer_id)
+
         elif intent_name == "CheckAvailability":
             response = handle_check_availability(event, session_id, customer_id)
 
@@ -245,6 +251,7 @@ def handle_project_inquiry(
     Handle ProjectInquiry intent - list customer's projects
 
     Calls the scheduling-actions Lambda to retrieve projects.
+    Supports optional status filter slot.
 
     Args:
         event: Lex event
@@ -267,6 +274,10 @@ def handle_project_inquiry(
             "I'll need your customer ID to look up your projects. What's your customer ID?"
         )
 
+    # Extract status filter from slots if provided
+    slots = event.get('sessionState', {}).get('intent', {}).get('slots', {})
+    status_filter = slots.get('status', {}).get('value', {}).get('interpretedValue') if slots.get('status') else None
+
     try:
         # Get client_id from environment variable
         client_id = os.environ.get('PF_CLIENT_ID', '09PF05VD')
@@ -282,6 +293,11 @@ def handle_project_inquiry(
                 {'name': 'client_id', 'value': client_id}
             ]
         }
+
+        # Add status filter if provided
+        if status_filter:
+            payload['parameters'].append({'name': 'status', 'value': status_filter})
+            logger.info(f"Filtering projects by status: {status_filter}")
 
         logger.debug(f"Invoking {SCHEDULING_LAMBDA} with payload: {json.dumps(payload)}")
 
@@ -416,6 +432,223 @@ def handle_check_availability(
         return LexResponseBuilder.build_error_response(
             event,
             "I encountered an error checking availability. Please try again."
+        )
+
+
+def handle_project_status_inquiry(
+    event: Dict[str, Any],
+    session_id: str,
+    customer_id: Optional[str]
+) -> Dict[str, Any]:
+    """
+    Handle ProjectStatusInquiry intent - Get status of a specific project
+
+    Utterances: "What's the status of project 123", "Status of my project"
+    Slots: project_id (optional), status_filter (optional)
+    """
+    session_attributes = event.get('sessionState', {}).get('sessionAttributes', {})
+    slots = event.get('sessionState', {}).get('intent', {}).get('slots', {})
+
+    # Use default customer ID if not provided
+    if not customer_id and DEFAULT_CUSTOMER_ID:
+        customer_id = DEFAULT_CUSTOMER_ID
+        logger.info(f"Using default customer ID: {customer_id}")
+
+    if not customer_id:
+        return LexResponseBuilder.build_response(
+            event,
+            "I'll need your customer ID to look up project status. What's your customer ID?"
+        )
+
+    # Extract project_id and status filter from slots
+    project_id = slots.get('project_id', {}).get('value', {}).get('interpretedValue') if slots.get('project_id') else None
+    status_filter = slots.get('status', {}).get('value', {}).get('interpretedValue') if slots.get('status') else None
+
+    try:
+        # Get client_id from environment variable
+        client_id = os.environ.get('PF_CLIENT_ID', '09PF05VD')
+
+        # Build Lambda invocation request
+        payload = {
+            'apiPath': '/list_projects',
+            'httpMethod': 'POST',
+            'requestContext': {'authorizer': {}},
+            'sessionAttributes': {'customer_id': customer_id},
+            'parameters': [
+                {'name': 'customer_id', 'value': customer_id},
+                {'name': 'client_id', 'value': client_id}
+            ]
+        }
+
+        # Add filters if provided
+        if status_filter:
+            payload['parameters'].append({'name': 'status', 'value': status_filter})
+
+        logger.debug(f"Invoking {SCHEDULING_LAMBDA} for project status")
+
+        # Call scheduling-actions Lambda
+        response = lambda_client.invoke(
+            FunctionName=SCHEDULING_LAMBDA,
+            InvocationType='RequestResponse',
+            Payload=json.dumps(payload)
+        )
+
+        result = json.loads(response['Payload'].read())
+        response_obj = result.get('response', {})
+        http_status = response_obj.get('httpStatusCode')
+
+        if http_status == 200:
+            response_body = response_obj.get('responseBody', {}).get('application/json', {}).get('body', '{}')
+            if isinstance(response_body, str):
+                response_body = json.loads(response_body)
+
+            projects = response_body.get('projects', [])
+
+            # If project_id specified, find that specific project
+            if project_id:
+                matching = [p for p in projects if project_id.lower() in p.get('project_id', '').lower() or project_id.lower() in p.get('projectNumber', '').lower()]
+
+                if matching:
+                    project = matching[0]
+                    message = f"Project {project.get('projectNumber', project_id)} is currently {project.get('status', 'unknown')}. "
+                    if project.get('scheduledDate'):
+                        message += f"It's scheduled for {project.get('scheduledDate')}. "
+                    message += "Would you like to make any changes?"
+                else:
+                    message = f"I couldn't find project {project_id}. Would you like me to list all your projects?"
+
+            # If status filter specified, filter and report
+            elif status_filter:
+                filtered = [p for p in projects if status_filter.lower() in p.get('status', '').lower()]
+                if filtered:
+                    message = f"You have {len(filtered)} {status_filter} projects. "
+                    if len(filtered) <= 5:
+                        for i, p in enumerate(filtered, 1):
+                            message += f"{i}. {p.get('category')} project {p.get('projectNumber')}, {p.get('status')}. "
+                    else:
+                        for i, p in enumerate(filtered[:3], 1):
+                            message += f"{i}. {p.get('category')} project, {p.get('status')}. "
+                        message += f"You have {len(filtered) - 3} more {status_filter} projects. "
+                    message += "Would you like to schedule one?"
+                else:
+                    message = f"You don't have any {status_filter} projects right now."
+
+            # No filters - provide summary
+            else:
+                if not projects:
+                    message = "You don't have any projects in the system right now."
+                else:
+                    status_counts = {}
+                    for p in projects:
+                        status = p.get('status', 'Unknown')
+                        status_counts[status] = status_counts.get(status, 0) + 1
+
+                    parts = [f"{count} {status}" for status, count in status_counts.items()]
+                    message = f"You have {len(projects)} projects: {', '.join(parts)}. Which status would you like to know about?"
+
+            return LexResponseBuilder.build_response(event, message)
+
+        else:
+            return LexResponseBuilder.build_response(
+                event,
+                "I'm having trouble accessing your project information right now. Please try again."
+            )
+
+    except Exception as e:
+        logger.exception("Error in project status inquiry")
+        return LexResponseBuilder.build_error_response(
+            event,
+            "I encountered an error looking up project status. Please try again."
+        )
+
+
+def handle_appointment_inquiry(
+    event: Dict[str, Any],
+    session_id: str,
+    customer_id: Optional[str]
+) -> Dict[str, Any]:
+    """
+    Handle AppointmentInquiry intent - List appointments/scheduled projects
+
+    Utterances: "Do I have any appointments", "Show my appointments", "What's scheduled"
+    """
+    session_attributes = event.get('sessionState', {}).get('sessionAttributes', {})
+
+    # Use default customer ID if not provided
+    if not customer_id and DEFAULT_CUSTOMER_ID:
+        customer_id = DEFAULT_CUSTOMER_ID
+        logger.info(f"Using default customer ID: {customer_id}")
+
+    if not customer_id:
+        return LexResponseBuilder.build_response(
+            event,
+            "I'll need your customer ID to check your appointments. What's your customer ID?"
+        )
+
+    try:
+        # Get client_id from environment variable
+        client_id = os.environ.get('PF_CLIENT_ID', '09PF05VD')
+
+        # Build Lambda invocation request with status filter for "Scheduled"
+        payload = {
+            'apiPath': '/list_projects',
+            'httpMethod': 'POST',
+            'requestContext': {'authorizer': {}},
+            'sessionAttributes': {'customer_id': customer_id},
+            'parameters': [
+                {'name': 'customer_id', 'value': customer_id},
+                {'name': 'client_id', 'value': client_id},
+                {'name': 'status', 'value': 'Scheduled'}
+            ]
+        }
+
+        logger.debug(f"Invoking {SCHEDULING_LAMBDA} for appointments")
+
+        # Call scheduling-actions Lambda
+        response = lambda_client.invoke(
+            FunctionName=SCHEDULING_LAMBDA,
+            InvocationType='RequestResponse',
+            Payload=json.dumps(payload)
+        )
+
+        result = json.loads(response['Payload'].read())
+        response_obj = result.get('response', {})
+        http_status = response_obj.get('httpStatusCode')
+
+        if http_status == 200:
+            response_body = response_obj.get('responseBody', {}).get('application/json', {}).get('body', '{}')
+            if isinstance(response_body, str):
+                response_body = json.loads(response_body)
+
+            projects = response_body.get('projects', [])
+            scheduled = [p for p in projects if 'scheduled' in p.get('status', '').lower() and p.get('scheduledDate')]
+
+            if not scheduled:
+                message = "You don't have any scheduled appointments at the moment. Would you like to schedule one?"
+            elif len(scheduled) == 1:
+                appt = scheduled[0]
+                message = f"You have 1 appointment scheduled: {appt.get('category')} project on {appt.get('scheduledDate')}. Would you like to reschedule or cancel it?"
+            else:
+                message = f"You have {len(scheduled)} appointments scheduled. "
+                for i, appt in enumerate(scheduled[:3], 1):
+                    message += f"{i}. {appt.get('category')} project on {appt.get('scheduledDate')}. "
+                if len(scheduled) > 3:
+                    message += f"You have {len(scheduled) - 3} more appointments. "
+                message += "Would you like to make any changes?"
+
+            return LexResponseBuilder.build_response(event, message)
+
+        else:
+            return LexResponseBuilder.build_response(
+                event,
+                "I'm having trouble accessing your appointments right now. Please try again."
+            )
+
+    except Exception as e:
+        logger.exception("Error in appointment inquiry")
+        return LexResponseBuilder.build_error_response(
+            event,
+            "I encountered an error checking your appointments. Please try again."
         )
 
 
