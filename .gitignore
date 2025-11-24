@@ -89,6 +89,15 @@ lambda/layers/common/build/
 response.json
 output*.json
 testing/voice/test_*.json
+test*.json
+*-test.json
+*-result.json
+*-output.json
+trust-policy.json
+secrets-policy.json
+orchestrator-permissions.json
+deployment.log
+voice-logs.json
 
 # Claude Code / AI Assistant files
 .claude/
@@ -111,6 +120,11 @@ docs/**/*.md
 !docs/MONITORING_SETUP_GUIDE.md
 !docs/phase3/README.md
 
+# Ignore root-level temporary MD files
+/*.md
+!README.md
+!CHANGELOG.md
+
 # Ignore other non-essential MD files
 backend/**/*.md
 lambda/**/README.md
@@ -122,3 +136,7 @@ scripts/**/*.md
 testing/**/*.md
 !testing/FORMATTED_TESTING.md
 !testing/README.md
+
+# Voice testing temporary files
+testing/voice/15_voice_demo_questions.txt
+testing/voice/VOICE_DEMO_READY_10_QUESTIONS.txt

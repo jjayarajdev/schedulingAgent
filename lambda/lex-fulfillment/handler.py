@@ -268,6 +268,9 @@ def handle_project_inquiry(
         )
 
     try:
+        # Get client_id from environment variable
+        client_id = os.environ.get('PF_CLIENT_ID', '09PF05VD')
+
         # Build Lambda invocation request
         payload = {
             'apiPath': '/list_projects',
@@ -275,7 +278,8 @@ def handle_project_inquiry(
             'requestContext': {'authorizer': {}},
             'sessionAttributes': {'customer_id': customer_id},
             'parameters': [
-                {'name': 'customer_id', 'value': customer_id}
+                {'name': 'customer_id', 'value': customer_id},
+                {'name': 'client_id', 'value': client_id}
             ]
         }
 
@@ -555,7 +559,7 @@ def _format_projects_for_voice(response_body: Dict[str, Any]) -> str:
 
         else:
             project_count = len(projects)
-            projects_to_list = projects[:5]
+            projects_to_list = projects[:10]  # Show up to 10 projects (increased from 5)
 
             descriptions = []
             for i, project in enumerate(projects_to_list, 1):
@@ -567,8 +571,8 @@ def _format_projects_for_voice(response_body: Dict[str, Any]) -> str:
             message += ". ".join(descriptions)
             message += ". "
 
-            if project_count > 5:
-                message += f"You have {project_count - 5} more projects. "
+            if project_count > 10:
+                message += f"You have {project_count - 10} more projects. "
 
             message += "Would you like to schedule an appointment for any of these?"
 
