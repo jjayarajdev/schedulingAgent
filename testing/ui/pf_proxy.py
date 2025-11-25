@@ -680,6 +680,102 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/regenerate-token', methods=['POST'])
+def regenerate_token():
+    """Regenerate token using client_id and user_id"""
+    try:
+        data = request.json or {}
+        user_id = data.get('user_id', '1646085')
+        client_id = data.get('client_id', '09PF05VD')
+
+        logger.info(f"Regenerating token for user: {user_id}, client: {client_id}")
+
+        response = requests.post(
+            "https://auth.dev.projectsforce.com/regenerate-token",
+            json={
+                "client_id": client_id,
+                "user_id": user_id,
+                "login_via_password": False,
+                "client_secret": "devappssecret",
+                "device_type": "web",
+                "grant_type": "authorization_code",
+                "secret_client_id": "devapps"
+            },
+            headers={"Content-Type": "application/json"},
+            timeout=10
+        )
+
+        logger.info(f"Regenerate response status: {response.status_code}")
+
+        if response.status_code == 200:
+            return jsonify(response.json()), 200
+        else:
+            logger.error(f"Failed to regenerate token: {response.text[:200]}")
+            return jsonify({"error": "Failed to regenerate token"}), response.status_code
+
+    except Exception as e:
+        logger.error(f"Regenerate token error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/save-token-to-secrets', methods=['POST'])
+def save_token_to_secrets():
+    """Save current token to AWS Secrets Manager"""
+    try:
+        data = request.json or {}
+        access_token = data.get('access_token', '')
+        client_id = data.get('client_id', '09PF05VD')
+        customer_id = data.get('customer_id', '1646085')
+
+        if not access_token or len(access_token) < 100:
+            return jsonify({"error": "Invalid token"}), 400
+
+        logger.info(f"Saving token to Secrets Manager (length: {len(access_token)})")
+
+        import boto3
+        import time
+
+        secrets_client = boto3.client('secretsmanager', region_name='us-east-1')
+        api_url = "https://api-cx-portal.dev.projectsforce.com"
+
+        # Update target secret
+        secret_value = {
+            "pf_token": access_token,
+            "client_id": client_id,
+            "customer_id": customer_id,
+            "api_url": api_url,
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "updated_by": "pf_proxy.py",
+            "notes": "Saved from UI login"
+        }
+
+        secrets_client.put_secret_value(
+            SecretId='scheduling-agent/pf360/api-credentials',
+            SecretString=json.dumps(secret_value)
+        )
+
+        # Also update source secret
+        source_secret = {
+            "bearer_token": access_token,
+            "client_id": client_id,
+            "user_id": customer_id,
+            "api_base_url": api_url
+        }
+
+        secrets_client.put_secret_value(
+            SecretId='projectforce/api/credentials',
+            SecretString=json.dumps(source_secret)
+        )
+
+        logger.info("✅ Token saved to both secrets")
+
+        return jsonify({"status": "success", "message": "Token saved to AWS Secrets Manager"}), 200
+
+    except Exception as e:
+        logger.error(f"Save token error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/validate-token', methods=['GET'])
 def validate_token():
     """Proxy for token validation endpoint"""

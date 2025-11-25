@@ -454,6 +454,18 @@
             // Try to load saved credentials first
             if (loadSavedCredentials()) {
                 document.getElementById('user-display').textContent = `User: ${userId} (cached)`;
+
+                // Check if token is still valid by refreshing it
+                console.log('🔄 Checking token validity...');
+                const refreshed = await refreshToken();
+                if (refreshed) {
+                    console.log('✅ Token refreshed on startup');
+                    document.getElementById('user-display').textContent = `User: ${userId} (refreshed)`;
+                } else {
+                    console.warn('⚠️ Token refresh failed, using cached token');
+                    document.getElementById('user-display').textContent = `User: ${userId} (cached - may be expired)`;
+                }
+
                 loadProjects();
                 return;
             }
@@ -481,6 +493,22 @@
 
                     // Save credentials to localStorage
                     saveCredentials();
+
+                    // Save to AWS Secrets Manager
+                    try {
+                        await fetch(`${API_URL}/save-token-to-secrets`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                access_token: accessToken,
+                                client_id: clientId,
+                                customer_id: userId
+                            })
+                        });
+                        console.log('✅ Initial token saved to Secrets Manager');
+                    } catch (e) {
+                        console.warn('⚠️ Failed to save initial token to Secrets Manager:', e);
+                    }
 
                     loadProjects();
                 }
@@ -584,14 +612,66 @@
             document.getElementById('message-input').focus();
         }
 
+        // Token refresh function
+        async function refreshToken() {
+            console.log('🔄 Token expired, refreshing...');
+            try {
+                const response = await fetch(`${API_URL}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: 'jay@mailinator.com',
+                        password: 'U2FsdGVkX197AQMdkqthasfRGWLh41rhHVaw9Q9Q8cE=',
+                        device_type: 1
+                    })
+                });
+
+                const data = await response.json();
+                if (data.accesstoken) {
+                    accessToken = data.accesstoken;
+                    if (data.user) {
+                        clientId = data.user.client_id;
+                        userId = data.user.customer_id;
+                    }
+
+                    // Save credentials to localStorage
+                    saveCredentials();
+
+                    // Save to AWS Secrets Manager
+                    try {
+                        await fetch(`${API_URL}/save-token-to-secrets`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                access_token: accessToken,
+                                client_id: clientId,
+                                customer_id: userId
+                            })
+                        });
+                        console.log('✅ Token refreshed and saved to Secrets Manager');
+                    } catch (e) {
+                        console.warn('⚠️ Failed to save token to Secrets Manager:', e);
+                    }
+
+                    return true;
+                }
+                return false;
+            } catch (error) {
+                console.error('❌ Token refresh failed:', error);
+                return false;
+            }
+        }
+
         // Chat functions
-        async function sendMessage() {
+        async function sendMessage(isRetry = false) {
             const input = document.getElementById('message-input');
             const message = input.value.trim();
             if (!message || !accessToken) return;
 
-            addMessage('user', message);
-            input.value = '';
+            if (!isRetry) {
+                addMessage('user', message);
+                input.value = '';
+            }
             input.disabled = true;
             document.getElementById('loading').classList.add('active');
 
@@ -622,6 +702,29 @@
 
                 // Non-streaming response
                 const data = await response.json();
+
+                // Check for token expiration (403 or authentication error)
+                if (response.status === 403 ||
+                    (data.error && data.error.toLowerCase().includes('token')) ||
+                    (data.error && data.error.toLowerCase().includes('auth'))) {
+
+                    if (!isRetry) {
+                        console.log('🔄 Token expired, attempting refresh...');
+                        messagesContainer.removeChild(messageDiv);
+
+                        const refreshed = await refreshToken();
+                        if (refreshed) {
+                            console.log('✅ Token refreshed, retrying request...');
+                            // Save message back to input for retry
+                            input.value = message;
+                            return await sendMessage(true);
+                        } else {
+                            throw new Error('Token refresh failed. Please reload the page.');
+                        }
+                    } else {
+                        throw new Error('Authentication failed after token refresh. Please reload the page.');
+                    }
+                }
 
                 // Check HTTP status
                 if (!response.ok) {

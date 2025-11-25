@@ -44,54 +44,8 @@ fi
 echo "────────────────────────────────────────────────────────────────────────────"
 echo ""
 
-# Update AWS Secrets Manager with current PF token
-echo "🔐 Updating AWS Secrets Manager..."
-echo "────────────────────────────────────────────────────────────────────────────"
-if command -v aws &> /dev/null; then
-    # Get current token from source secret
-    SOURCE_SECRET=$(aws secretsmanager get-secret-value \
-        --secret-id projectforce/api/credentials \
-        --query 'SecretString' --output text 2>/dev/null)
-
-    if [ $? -eq 0 ]; then
-        PF_TOKEN=$(echo "$SOURCE_SECRET" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data['bearer_token'])")
-        CLIENT_ID=$(echo "$SOURCE_SECRET" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data['client_id'])")
-        USER_ID=$(echo "$SOURCE_SECRET" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data['user_id'])")
-        API_URL=$(echo "$SOURCE_SECRET" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data['api_base_url'])")
-
-        # Create updated secret JSON
-        UPDATED_SECRET=$(python3 -c "import json, datetime; print(json.dumps({
-            'pf_token': '$PF_TOKEN',
-            'client_id': '$CLIENT_ID',
-            'customer_id': '$USER_ID',
-            'api_url': '$API_URL',
-            'updated_at': datetime.datetime.utcnow().isoformat() + 'Z',
-            'updated_by': '$(whoami)',
-            'notes': 'Auto-updated by launch_webapp.sh on startup'
-        }))")
-
-        # Update the target secret
-        aws secretsmanager put-secret-value \
-            --secret-id scheduling-agent/pf360/api-credentials \
-            --secret-string "$UPDATED_SECRET" \
-            > /dev/null 2>&1
-
-        if [ $? -eq 0 ]; then
-            echo "  ✅ Secret 'scheduling-agent/pf360/api-credentials' updated"
-            echo "  • Client ID: $CLIENT_ID"
-            echo "  • Customer ID: $USER_ID"
-            echo "  • Token Length: ${#PF_TOKEN} characters"
-        else
-            echo "  ⚠️  Failed to update secret (continuing anyway...)"
-        fi
-    else
-        echo "  ⚠️  Could not retrieve source secret (continuing anyway...)"
-    fi
-else
-    echo "  ⚠️  AWS CLI not available (skipping secret update)"
-fi
-echo "────────────────────────────────────────────────────────────────────────────"
-echo ""
+# Get fresh token from ProjectForce (after proxy starts)
+# This will be called later after pf_proxy.py is running
 
 # Check if flask and flask-cors are installed
 if ! python3 -c "import flask" 2>/dev/null; then
@@ -124,7 +78,54 @@ python3 pf_proxy.py > /tmp/pf_proxy.log 2>&1 &
 PROXY_PID=$!
 
 # Wait for proxy to start
-sleep 2
+sleep 3
+
+# Sync token from source secret to target secret
+echo "🔐 Syncing ProjectForce token to AWS Secrets Manager..."
+python3 << 'EOF'
+import json
+import boto3
+import time
+
+try:
+    secrets_client = boto3.client('secretsmanager', region_name='us-east-1')
+
+    # Get token from source secret
+    source_response = secrets_client.get_secret_value(SecretId='projectforce/api/credentials')
+    source_secret = json.loads(source_response['SecretString'])
+
+    access_token = source_secret.get('bearer_token', '')
+    client_id = source_secret.get('client_id', '09PF05VD')
+    customer_id = source_secret.get('user_id', '1646085')
+    api_url = source_secret.get('api_base_url', 'https://api-cx-portal.dev.projectsforce.com')
+
+    if access_token and len(access_token) > 100:
+        print(f"  ✅ Found token in source secret (length: {len(access_token)})")
+
+        # Update target secret
+        secret_value = {
+            "pf_token": access_token,
+            "client_id": client_id,
+            "customer_id": customer_id,
+            "api_url": api_url,
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "updated_by": "launch_webapp.sh",
+            "notes": "Synced from projectforce/api/credentials on startup"
+        }
+
+        secrets_client.put_secret_value(
+            SecretId='scheduling-agent/pf360/api-credentials',
+            SecretString=json.dumps(secret_value)
+        )
+
+        print(f"  ✅ Token synced to scheduling-agent/pf360/api-credentials")
+    else:
+        print(f"  ⚠️  No valid token found (length: {len(access_token)})")
+        print(f"  💡 Login via UI first, then restart to sync token")
+
+except Exception as e:
+    print(f"  ⚠️  Token sync failed: {e}")
+EOF
 
 # Start the HTTP server on port 8000
 echo "🌐 Starting HTTP server on port 8000..."
