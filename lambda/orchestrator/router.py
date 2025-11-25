@@ -283,14 +283,18 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             if not working_days:
                 return "Business hours not configured."
 
-            lines = ["Business Hours:\n"]
-            for day_info in working_days:
-                lines.append(f"- {day_info['day']}: {day_info['start']} - {day_info['end']}")
+            # Prepare structured data
+            result = {
+                "message": "Business Hours",
+                "workingDays": working_days,
+                "nonWorkingDays": non_working_days
+            }
 
-            if non_working_days:
-                lines.append(f"\nClosed: {', '.join(non_working_days)}")
+            # Generate conversational response using Claude
+            conversational = generate_conversational_response(action, user_message, result)
 
-            return "\n".join(lines)
+            # Return both conversational and structured
+            return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action in ['greet', 'help', 'general']:
             # Chitchat actions - return message directly
@@ -311,19 +315,23 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             appointment = response_body.get('appointment', {})
             if not appointment and response_body.get('success'):
                 # Handle simplified success response
-                result_data = {
+                result = {
                     'message': 'Appointment confirmed successfully!',
                     'status': 'confirmed',
                     'details': response_body
                 }
-                return f"```json\n{json.dumps(result_data, indent=2)}\n```"
+            else:
+                result = {
+                    "message": "✅ Appointment confirmed!",
+                    "appointment": appointment or response_body,
+                    "status": "confirmed"
+                }
 
-            result = {
-                "message": "✅ Appointment confirmed!",
-                "appointment": appointment or response_body,
-                "status": "confirmed"
-            }
-            return f"```json\n{json.dumps(result, indent=2)}\n```"
+            # Generate conversational response using Claude
+            conversational = generate_conversational_response(action, user_message, result)
+
+            # Return both conversational and structured
+            return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action == 'reschedule_appointment':
             # Check for errors first
@@ -343,7 +351,12 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 "appointment": appointment or response_body,
                 "status": "success"
             }
-            return f"```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Generate conversational response using Claude
+            conversational = generate_conversational_response(action, user_message, result)
+
+            # Return both conversational and structured
+            return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action == 'cancel_appointment':
             # Check for errors first
@@ -362,7 +375,12 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 "details": response_body,
                 "status": "success"
             }
-            return f"```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Generate conversational response using Claude
+            conversational = generate_conversational_response(action, user_message, result)
+
+            # Return both conversational and structured
+            return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action == 'get_weather':
             # Format weather data for UI rendering
@@ -401,7 +419,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     "precipitation": day.get('precipitation_probability', 0)
                 })
 
-            # Return JSON for UI to render as weather card
+            # Prepare structured data for UI
             result = {
                 "location": location_str,
                 "current": {
@@ -412,7 +430,12 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 },
                 "forecast": formatted_forecast
             }
-            return f"```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Generate conversational response using Claude
+            conversational = generate_conversational_response(action, user_message, result)
+
+            # Return both conversational and structured
+            return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
         else:
             # Fallback: return JSON for unknown actions
