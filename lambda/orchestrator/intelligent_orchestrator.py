@@ -22,6 +22,12 @@ from botocore.config import Config as BotoConfig
 from config import get_config
 from workflow_state import get_state_manager
 from router import call_lambda_directly, format_lambda_response
+from weather_aware_scheduling import (
+    is_outdoor_project,
+    find_forecast_for_date,
+    analyze_weather_suitability,
+    extract_location_from_context
+)
 
 logger = logging.getLogger()
 
@@ -261,6 +267,7 @@ Determine the next step:
 4. Should we update workflow state?
    - What stage are we at now?
    - What context should we save?
+   - IMPORTANT: Always save category, city, state, and address from project details/list responses for future use (e.g., weather checks)
 
 5. Is the workflow complete?
    - Set to true only after final confirmation
@@ -281,7 +288,10 @@ Respond with JSON only:
         "context": {{
             "project_id": "7751748",
             "date": "2025-11-27",
-            "request_id": "12345"  // Keep request_id for subsequent calls
+            "request_id": "12345",  // Keep request_id for subsequent calls
+            "category": "Decking",  // IMPORTANT: Extract from project details for weather checks
+            "city": "Minneapolis",  // IMPORTANT: Extract from address
+            "state": "MN"  // IMPORTANT: Extract from address
         }},
         "conversation_summary": "User wants to schedule project 7751748 on Nov 27, now showing time slots"
     }},
@@ -430,6 +440,69 @@ def orchestrate_intelligent_workflow(
                 response_body = json.loads(response_body_str)
             else:
                 response_body = response_body_str
+
+            # WEATHER-AWARE SCHEDULING: Check weather for outdoor projects when showing time slots
+            if lambda_action in ['get_time_slots', 'get_available_timeslots']:
+                # Get project category from workflow state
+                project_category = workflow_state.get('context', {}).get('category') if workflow_state else None
+
+                if project_category and is_outdoor_project(project_category):
+                    logger.info(f"🌤️  Outdoor project detected ({project_category}), checking weather...")
+
+                    # Extract location from workflow state
+                    location = extract_location_from_context(workflow_state)
+
+                    if location:
+                        try:
+                            # Get target date from params
+                            target_date = lambda_params.get('date')
+
+                            # Call weather API
+                            weather_params = {
+                                'location': location,
+                                'customer_id': customer_id,
+                                'client_id': client_id,
+                                'pf_bearer_token': pf_bearer_token
+                            }
+
+                            logger.info(f"🌤️  Fetching weather for {location} on {target_date}")
+                            weather_response = call_lambda_directly('get_weather', weather_params)
+
+                            # Extract weather data
+                            weather_data = weather_response.get('response', {})
+                            weather_function_response = weather_data.get('functionResponse', {})
+                            weather_body_wrapper = weather_function_response.get('responseBody', {})
+                            weather_text_wrapper = weather_body_wrapper.get('TEXT', {})
+                            weather_body_str = weather_text_wrapper.get('body', '{}')
+
+                            if isinstance(weather_body_str, str):
+                                weather_body = json.loads(weather_body_str)
+                            else:
+                                weather_body = weather_body_str
+
+                            # Find forecast for target date
+                            forecast = find_forecast_for_date(weather_body, target_date)
+
+                            if forecast:
+                                # Analyze weather suitability
+                                assessment = analyze_weather_suitability(
+                                    forecast,
+                                    project_category,
+                                    target_date
+                                )
+
+                                if not assessment['suitable']:
+                                    # Inject weather warning into response
+                                    logger.info(f"⚠️  Weather warning: {assessment['severity']} - {', '.join(assessment['warnings'])}")
+                                    response_body['weather_warning'] = assessment
+                                else:
+                                    logger.info(f"✅ Weather looks good for {project_category}")
+
+                        except Exception as weather_error:
+                            logger.warning(f"Weather check failed (non-fatal): {weather_error}")
+                            # Continue without weather warning - don't block the flow
+                    else:
+                        logger.warning(f"No location found in workflow state for weather check")
 
             # Format response for user (with conversational wrapper from Claude)
             formatted_response = format_lambda_response(lambda_action, response_body, message)

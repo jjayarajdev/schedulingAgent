@@ -270,6 +270,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 "slotCount": len(formatted_slots)
             }
 
+            # Add weather warning if present (from weather-aware scheduling)
+            if 'weather_warning' in response_body:
+                result['weatherWarning'] = response_body['weather_warning']
+                logger.info(f"⚠️  Including weather warning in time slots response")
+
             # Generate conversational response using Claude
             conversational = generate_conversational_response(action, user_message, result)
 
