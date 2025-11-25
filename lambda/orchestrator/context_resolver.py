@@ -483,8 +483,10 @@ def extract_entities_from_message(message: str) -> Dict[str, Any]:
         entities['time'] = time_matches[0]
 
     # Extract status filters
-    if re.search(r'\bscheduled\b', message, re.IGNORECASE):
+    if re.search(r'\bscheduled\b', message, re.IGNORECASE) and not re.search(r'\bready to schedule\b', message, re.IGNORECASE):
         entities['status'] = 'Scheduled'
+    elif re.search(r'\bready to schedule\b', message, re.IGNORECASE):
+        entities['status'] = 'Ready To Schedule'
     elif re.search(r'\bnew\b', message, re.IGNORECASE):
         entities['status'] = 'New'
     elif re.search(r'\bcompleted\b', message, re.IGNORECASE):

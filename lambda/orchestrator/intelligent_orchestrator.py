@@ -147,6 +147,7 @@ IMPORTANT RULES:
 5. If in an active workflow, determine what stage we're at
 6. Be intelligent about corrections: "actually, make it the 28th" means update the date
 7. For weather queries without explicit location, extract city/state from recent project addresses in conversation
+8. For list_projects with status filter: if user says "scheduled projects", "new projects", etc., extract status entity
 
 Examples:
 
@@ -245,10 +246,12 @@ Determine the next step:
    - For get_available_dates: need project_id (returns dates + request_id)
    - For get_time_slots: need project_id + date + request_id (request_id comes from get_available_dates)
    - For confirm_appointment: need project_id + date + time + request_id
-   - For list_projects: just need customer_id (already available)
+   - For list_projects: just need customer_id (already available), optional: status filter if user specified (e.g., "Scheduled", "New", "Customer Scheduled", "Ready To Schedule", "Awaiting Confirmation", "Pending Signature")
+   - For get_weather: need location as "City, State" format (e.g., "Minneapolis, MN") - combine city and state from entities
 
 2. If we can call Lambda:
    - Specify which action and what parameters
+   - IMPORTANT: Only include parameters that have actual values - do NOT include parameters with None/null values
    - The Lambda will return data (dates, times, confirmation, etc.)
 
 3. If we need more info from user:
@@ -292,6 +295,33 @@ OR if we need more info:
     "missing_info": ["time"],
     "update_workflow_state": {{...}},
     "workflow_complete": false
+}}
+
+EXAMPLES FOR LIST_PROJECTS:
+
+User says "list my projects" (NO status filter):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "list_projects",
+    "lambda_params": {{}}  // NO status parameter - return ALL projects
+}}
+
+User says "list my scheduled projects" (WITH status filter):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "list_projects",
+    "lambda_params": {{
+        "status": "Scheduled"  // Include status ONLY when user specifies it
+    }}
+}}
+
+User asks "what is the weather like" (after viewing project in Minneapolis):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "get_weather",
+    "lambda_params": {{
+        "location": "Minneapolis, MN"  // Combine city and state - do NOT pass city/state/address/zipcode separately
+    }}
 }}
 
 Respond ONLY with valid JSON."""

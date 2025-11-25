@@ -324,7 +324,8 @@ Analyze the current user message: "{message}"
 Step 1: Identify the intent (scheduling/information/chitchat)
 Step 2: Identify the action (list_projects/get_project_details/etc)
 Step 3: Extract ANY filters mentioned in the message:
-   - If "scheduled" is mentioned → add {{"status":"Scheduled"}} to params
+   - If "scheduled" is mentioned (but NOT "ready to schedule") → add {{"status":"Scheduled"}} to params
+   - If "ready to schedule" is mentioned → add {{"status":"Ready To Schedule"}} to params
    - If "new" is mentioned → add {{"status":"New"}} to params
    - If "completed" is mentioned → add {{"status":"Completed"}} to params
    - If "decking" is mentioned → add {{"category":"Decking"}} to params

@@ -18,6 +18,81 @@ echo "🚀 ProjectForce Web Application Launcher"
 echo "════════════════════════════════════════════════════════════════════════════"
 echo ""
 
+# Display AWS Account Information
+echo "☁️  AWS Account Information:"
+echo "────────────────────────────────────────────────────────────────────────────"
+if command -v aws &> /dev/null; then
+    # Get AWS caller identity
+    AWS_IDENTITY=$(aws sts get-caller-identity 2>/dev/null)
+    if [ $? -eq 0 ]; then
+        AWS_ACCOUNT=$(echo "$AWS_IDENTITY" | grep -o '"Account": "[^"]*"' | cut -d'"' -f4)
+        AWS_USER=$(echo "$AWS_IDENTITY" | grep -o '"Arn": "[^"]*"' | cut -d'"' -f4 | awk -F'/' '{print $NF}')
+        AWS_REGION=$(aws configure get region 2>/dev/null || echo "us-east-1")
+        AWS_PROFILE_NAME="${AWS_PROFILE:-default}"
+
+        echo "  • Account ID: $AWS_ACCOUNT"
+        echo "  • User/Role:  $AWS_USER"
+        echo "  • Region:     $AWS_REGION"
+        echo "  • Profile:    $AWS_PROFILE_NAME"
+    else
+        echo "  ⚠️  Unable to get AWS credentials. Please configure AWS CLI."
+        echo "  Run: aws configure"
+    fi
+else
+    echo "  ⚠️  AWS CLI not installed. Cannot verify AWS account."
+fi
+echo "────────────────────────────────────────────────────────────────────────────"
+echo ""
+
+# Update AWS Secrets Manager with current PF token
+echo "🔐 Updating AWS Secrets Manager..."
+echo "────────────────────────────────────────────────────────────────────────────"
+if command -v aws &> /dev/null; then
+    # Get current token from source secret
+    SOURCE_SECRET=$(aws secretsmanager get-secret-value \
+        --secret-id projectforce/api/credentials \
+        --query 'SecretString' --output text 2>/dev/null)
+
+    if [ $? -eq 0 ]; then
+        PF_TOKEN=$(echo "$SOURCE_SECRET" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data['bearer_token'])")
+        CLIENT_ID=$(echo "$SOURCE_SECRET" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data['client_id'])")
+        USER_ID=$(echo "$SOURCE_SECRET" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data['user_id'])")
+        API_URL=$(echo "$SOURCE_SECRET" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data['api_base_url'])")
+
+        # Create updated secret JSON
+        UPDATED_SECRET=$(python3 -c "import json, datetime; print(json.dumps({
+            'pf_token': '$PF_TOKEN',
+            'client_id': '$CLIENT_ID',
+            'customer_id': '$USER_ID',
+            'api_url': '$API_URL',
+            'updated_at': datetime.datetime.utcnow().isoformat() + 'Z',
+            'updated_by': '$(whoami)',
+            'notes': 'Auto-updated by launch_webapp.sh on startup'
+        }))")
+
+        # Update the target secret
+        aws secretsmanager put-secret-value \
+            --secret-id scheduling-agent/pf360/api-credentials \
+            --secret-string "$UPDATED_SECRET" \
+            > /dev/null 2>&1
+
+        if [ $? -eq 0 ]; then
+            echo "  ✅ Secret 'scheduling-agent/pf360/api-credentials' updated"
+            echo "  • Client ID: $CLIENT_ID"
+            echo "  • Customer ID: $USER_ID"
+            echo "  • Token Length: ${#PF_TOKEN} characters"
+        else
+            echo "  ⚠️  Failed to update secret (continuing anyway...)"
+        fi
+    else
+        echo "  ⚠️  Could not retrieve source secret (continuing anyway...)"
+    fi
+else
+    echo "  ⚠️  AWS CLI not available (skipping secret update)"
+fi
+echo "────────────────────────────────────────────────────────────────────────────"
+echo ""
+
 # Check if flask and flask-cors are installed
 if ! python3 -c "import flask" 2>/dev/null; then
     echo "⚠️  Flask not installed. Installing..."

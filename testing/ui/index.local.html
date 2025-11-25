@@ -406,8 +406,59 @@
             event.target.classList.add('active');
         }
 
+        // Credential Manager - Load saved credentials
+        function loadSavedCredentials() {
+            const savedCreds = localStorage.getItem('pf_credentials');
+            if (savedCreds) {
+                try {
+                    const creds = JSON.parse(savedCreds);
+                    accessToken = creds.accessToken;
+                    clientId = creds.clientId;
+                    userId = creds.userId;
+                    console.log('✅ Loaded saved credentials from localStorage');
+                    return true;
+                } catch (e) {
+                    console.error('Failed to parse saved credentials:', e);
+                    localStorage.removeItem('pf_credentials');
+                    return false;
+                }
+            }
+            return false;
+        }
+
+        // Credential Manager - Save credentials
+        function saveCredentials() {
+            const creds = {
+                accessToken: accessToken,
+                clientId: clientId,
+                userId: userId,
+                timestamp: Date.now()
+            };
+            localStorage.setItem('pf_credentials', JSON.stringify(creds));
+            console.log('💾 Credentials saved to localStorage');
+        }
+
+        // Credential Manager - Clear credentials (logout)
+        function clearCredentials() {
+            localStorage.removeItem('pf_credentials');
+            accessToken = null;
+            clientId = '09PF05VD';
+            userId = '1646085';
+            console.log('🗑️ Credentials cleared from localStorage');
+            // Reload page to force re-login
+            window.location.reload();
+        }
+
         // Auto-login on page load
         async function autoLogin() {
+            // Try to load saved credentials first
+            if (loadSavedCredentials()) {
+                document.getElementById('user-display').textContent = `User: ${userId} (cached)`;
+                loadProjects();
+                return;
+            }
+
+            // If no saved credentials, perform login
             try {
                 const response = await fetch(`${API_URL}/login`, {
                     method: 'POST',
@@ -427,6 +478,10 @@
                         userId = data.user.customer_id;
                     }
                     document.getElementById('user-display').textContent = `User: ${userId}`;
+
+                    // Save credentials to localStorage
+                    saveCredentials();
+
                     loadProjects();
                 }
             } catch (error) {
@@ -1349,13 +1404,29 @@
                 content = content.replace(/(Is there anything else)/g, '</div>$1');
             }
 
-            // 9. Format "Would you like..." questions
-            content = content.replace(/(Would you like[^?]+\?)/g,
-                '<div style="background: linear-gradient(135deg, #fff9e6 0%, #fff3cd 100%); padding: 16px 20px; border-radius: 10px; margin: 14px 0; border-left: 4px solid #ffc107; box-shadow: 0 2px 8px rgba(255,193,7,0.2);"><span style="font-size: 20px; margin-right: 10px;">💡</span><span style="color: #856404; font-weight: 500; font-size: 15px;">$1</span></div>');
+            // 9. Format error messages
+            content = content.replace(/(I encountered an error[^\.]+\.)/gi,
+                '<div style="background: linear-gradient(135deg, #fff0f0 0%, #ffe0e0 100%); padding: 16px 20px; border-radius: 10px; margin: 14px 0; border-left: 4px solid #dc3545; box-shadow: 0 2px 8px rgba(220,53,69,0.2);"><span style="font-size: 20px; margin-right: 10px;">⚠️</span><span style="color: #721c24; font-weight: 500; font-size: 14px;">$1</span></div>');
 
-            // 10. Highlight Project #XXXXX mentions in text (7-digit IDs)
+            // 10. Format "Would you like..." questions - Better styling
+            content = content.replace(/(Would you like[^?]+\?)/gi,
+                '<div style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 18px 22px; border-radius: 12px; margin: 16px 0; border-left: 4px solid #2196f3; box-shadow: 0 3px 10px rgba(33,150,243,0.25);"><div style="display: flex; align-items: center; gap: 12px;"><span style="font-size: 24px;">💬</span><span style="color: #0d47a1; font-weight: 600; font-size: 15px; line-height: 1.5;">$1</span></div></div>');
+
+            // 11. Format scheduling information responses
+            content = content.replace(/(this project is scheduled for|scheduled for) ([^\.]+\d{4}[^\.]*from \d{1,2}:\d{2} [AP]M to \d{1,2}:\d{2} [AP]M[^\.]*)/gi,
+                '<div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 20px 24px; border-radius: 12px; margin: 16px 0; border-left: 4px solid #4caf50; box-shadow: 0 3px 10px rgba(76,175,80,0.25);"><div style="display: flex; align-items: start; gap: 14px;"><span style="font-size: 28px;">📅</span><div style="flex: 1;"><div style="color: #1b5e20; font-weight: 600; font-size: 16px; margin-bottom: 8px;">Project Schedule</div><div style="color: #2e7d32; font-weight: 500; font-size: 15px; line-height: 1.6;">$2</div></div></div></div>');
+
+            // 12. Format technician information
+            content = content.replace(/(The technician assigned to this project is) ([^\.]+\.)/gi,
+                '<div style="background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); padding: 18px 22px; border-radius: 12px; margin: 16px 0; border-left: 4px solid #9c27b0; box-shadow: 0 3px 10px rgba(156,39,176,0.25);"><div style="display: flex; align-items: start; gap: 14px;"><span style="font-size: 28px;">👷</span><div style="flex: 1;"><div style="color: #4a148c; font-weight: 600; font-size: 15px; line-height: 1.6;">$2</div></div></div></div>');
+
+            // 13. Highlight Project #XXXXX mentions in text (7-digit IDs)
             content = content.replace(/#(\d{7})/g,
                 '<span style="background: #e8f4fd; padding: 4px 10px; border-radius: 6px; font-weight: 700; color: #0066cc; border: 1px solid #b3d9f2;">#$1</span>');
+
+            // 14. Improve paragraph spacing for plain text
+            content = content.replace(/\n\n/g, '<br><br>');
+            content = content.replace(/\n/g, '<br>');
 
             return content;
         }

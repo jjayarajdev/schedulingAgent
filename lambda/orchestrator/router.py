@@ -182,6 +182,74 @@ def format_lambda_response(action: str, response_body: Dict[str, Any]) -> str:
             # Chitchat actions - return message directly
             return response_body.get('message', "Hello! How can I help you today?")
 
+        elif action == 'confirm_appointment':
+            # Check for errors first
+            if 'error' in response_body:
+                error_message = response_body['error']
+                result = {
+                    "message": f"❌ Failed to confirm appointment: {error_message}",
+                    "status": "error",
+                    "details": response_body
+                }
+                return f"```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Format successful appointment confirmation response
+            appointment = response_body.get('appointment', {})
+            if not appointment and response_body.get('success'):
+                # Handle simplified success response
+                result_data = {
+                    'message': 'Appointment confirmed successfully!',
+                    'status': 'confirmed',
+                    'details': response_body
+                }
+                return f"```json\n{json.dumps(result_data, indent=2)}\n```"
+
+            result = {
+                "message": "✅ Appointment confirmed!",
+                "appointment": appointment or response_body,
+                "status": "confirmed"
+            }
+            return f"```json\n{json.dumps(result, indent=2)}\n```"
+
+        elif action == 'reschedule_appointment':
+            # Check for errors first
+            if 'error' in response_body:
+                error_message = response_body['error']
+                result = {
+                    "message": f"❌ Failed to reschedule appointment: {error_message}",
+                    "status": "error",
+                    "details": response_body
+                }
+                return f"```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Format successful reschedule confirmation response
+            appointment = response_body.get('appointment', {})
+            result = {
+                "message": "✅ Appointment rescheduled successfully!",
+                "appointment": appointment or response_body,
+                "status": "success"
+            }
+            return f"```json\n{json.dumps(result, indent=2)}\n```"
+
+        elif action == 'cancel_appointment':
+            # Check for errors first
+            if 'error' in response_body:
+                error_message = response_body['error']
+                result = {
+                    "message": f"❌ Failed to cancel appointment: {error_message}",
+                    "status": "error",
+                    "details": response_body
+                }
+                return f"```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Format successful cancellation confirmation response
+            result = {
+                "message": "✅ Appointment cancelled successfully!",
+                "details": response_body,
+                "status": "success"
+            }
+            return f"```json\n{json.dumps(result, indent=2)}\n```"
+
         elif action == 'get_weather':
             # Format weather data for UI rendering
             weather_data = response_body.get('weather', {})
@@ -273,17 +341,27 @@ def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         'get_project_details': config.scheduling_lambda,
         'get_available_dates': config.scheduling_lambda,
         'get_time_slots': config.scheduling_lambda,
-        'get_available_timeslots': config.scheduling_lambda  # Alias for get_time_slots
+        'get_available_timeslots': config.scheduling_lambda,  # Alias for get_time_slots
+        # Scheduling write actions
+        'confirm_appointment': config.scheduling_lambda,
+        'reschedule_appointment': config.scheduling_lambda,
+        'cancel_appointment': config.scheduling_lambda
     }
 
     function_name = lambda_functions.get(action)
     if not function_name:
         raise ValueError(f"Unknown action: {action}")
 
+    # Convert action name from underscore to kebab-case for apiPath
+    # (e.g., confirm_appointment -> confirm-appointment)
+    api_path = '/' + action.replace('_', '-')
+
     # Construct Lambda event (Bedrock agent format)
     event = {
         'actionGroup': 'scheduling-actions',
         'function': action,
+        'apiPath': api_path,  # Scheduling Lambda reads from apiPath
+        'httpMethod': 'POST',
         'parameters': [
             {'name': key, 'value': str(value)}
             for key, value in params.items()
