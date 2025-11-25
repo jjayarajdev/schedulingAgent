@@ -50,16 +50,103 @@ def get_bedrock_agent_client():
     return _bedrock_agent_client
 
 
-def format_lambda_response(action: str, response_body: Dict[str, Any]) -> str:
+_bedrock_runtime_client = None
+
+
+def get_bedrock_runtime_client():
+    """Get or create Bedrock runtime client for Claude API"""
+    global _bedrock_runtime_client
+    if _bedrock_runtime_client is None:
+        config = get_config()
+        boto_config = BotoConfig(
+            region_name=config.region,
+            retries={'max_attempts': 3, 'mode': 'adaptive'}
+        )
+        _bedrock_runtime_client = boto3.client('bedrock-runtime', config=boto_config)
+        logger.info("Bedrock runtime client created")
+    return _bedrock_runtime_client
+
+
+def generate_conversational_response(action: str, user_message: str, structured_data: Dict[str, Any]) -> str:
     """
-    Format Lambda response as human-readable text instead of raw JSON
+    Use Claude via Bedrock Converse API to generate conversational response
+
+    Args:
+        action: The action performed (list_projects, get_project_details, etc.)
+        user_message: Original user message
+        structured_data: Structured data from Lambda response
+
+    Returns:
+        Conversational response from Claude
+    """
+    try:
+        client = get_bedrock_runtime_client()
+
+        # Create prompt for Claude
+        system_prompt = """You are a helpful and friendly customer service assistant for a home services company.
+Your job is to provide warm, conversational responses to customers about their service appointments and projects.
+
+Guidelines:
+- Be friendly, professional, and helpful
+- Use natural, conversational language
+- Provide clear information without being overly formal
+- Show empathy and understanding
+- Keep responses concise but complete
+- Use proper formatting (line breaks, lists) when helpful
+- Never invent information - only use what's provided in the data"""
+
+        user_prompt = f"""The user asked: "{user_message}"
+
+I retrieved the following data from our system:
+{json.dumps(structured_data, indent=2)}
+
+Please write a friendly, conversational response that:
+1. Acknowledges their request
+2. Presents the information in a natural, easy-to-understand way
+3. Offers to help with next steps if applicable
+
+Keep your response concise (3-5 sentences) and friendly. Do NOT include the raw JSON data - I'll show that separately."""
+
+        # Call Claude via Bedrock Converse API
+        response = client.converse(
+            modelId="anthropic.claude-3-5-sonnet-20241022-v2:0",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [{"text": user_prompt}]
+                }
+            ],
+            system=[{"text": system_prompt}],
+            inferenceConfig={
+                "maxTokens": 500,
+                "temperature": 0.7,
+                "topP": 0.9
+            }
+        )
+
+        # Extract conversational text
+        conversational_text = response['output']['message']['content'][0]['text']
+        logger.info(f"✅ Generated conversational response ({len(conversational_text)} chars)")
+
+        return conversational_text.strip()
+
+    except Exception as e:
+        logger.error(f"Failed to generate conversational response: {e}")
+        # Fallback to simple message if Claude fails
+        return f"Here's the information you requested about {action.replace('_', ' ')}:"
+
+
+def format_lambda_response(action: str, response_body: Dict[str, Any], user_message: str = "") -> str:
+    """
+    Format Lambda response with conversational text + structured JSON
 
     Args:
         action: The action that was performed (list_projects, get_project_details, etc.)
         response_body: The Lambda response body (parsed JSON)
+        user_message: Original user message for context
 
     Returns:
-        Formatted human-readable text
+        Formatted response with conversational text and structured JSON
     """
     try:
         if action == 'list_projects':
@@ -67,24 +154,34 @@ def format_lambda_response(action: str, response_body: Dict[str, Any]) -> str:
             if not projects:
                 return "You have no projects matching your criteria."
 
-            # Return JSON for UI to render as a table
+            # Prepare structured data
             result = {
                 "message": f"Found {len(projects)} project(s):",
                 "projects": projects
             }
-            return f"```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Generate conversational response using Claude
+            conversational = generate_conversational_response(action, user_message, result)
+
+            # Return both conversational and structured
+            return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action == 'get_project_details':
             project = response_body.get('project', {})
             if not project:
                 return "Project details not found."
 
-            # Return JSON for UI to render as a detailed card
+            # Prepare structured data
             result = {
                 "message": f"Project #{project.get('id', 'Unknown')} Details",
                 "project": project
             }
-            return f"```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Generate conversational response using Claude
+            conversational = generate_conversational_response(action, user_message, result)
+
+            # Return both conversational and structured
+            return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action == 'get_available_dates':
             dates = response_body.get('available_dates', [])
@@ -106,13 +203,18 @@ def format_lambda_response(action: str, response_body: Dict[str, Any]) -> str:
                 except:
                     formatted_dates.append({"date": date_str, "monthDay": date_str})
 
-            # Return JSON for UI to render as date cards
+            # Prepare structured data
             result = {
                 "message": "Available dates for scheduling:",
                 "dates": formatted_dates,
                 "dateCount": len(formatted_dates)
             }
-            return f"```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Generate conversational response using Claude
+            conversational = generate_conversational_response(action, user_message, result)
+
+            # Return both conversational and structured
+            return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action in ['get_time_slots', 'get_available_timeslots']:
             # Try multiple field names for compatibility
@@ -149,7 +251,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any]) -> str:
                 except:
                     formatted_slots.append(slot)
 
-            # Return JSON for UI to render as time slot cards
+            # Prepare structured data
             result = {
                 "message": "Available time slots for this date:",
                 "timeSlots": formatted_slots,
@@ -160,7 +262,12 @@ def format_lambda_response(action: str, response_body: Dict[str, Any]) -> str:
                 },
                 "slotCount": len(formatted_slots)
             }
-            return f"```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Generate conversational response using Claude
+            conversational = generate_conversational_response(action, user_message, result)
+
+            # Return both conversational and structured
+            return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action == 'get_business_hours':
             working_days = response_body.get('working_days', [])
@@ -595,8 +702,8 @@ def route_request(
             else:
                 response_body = response_body_str
 
-            # Format response for UI - convert JSON to human-readable text
-            formatted_response = format_lambda_response(action, response_body)
+            # Format response for UI - conversational text + structured JSON
+            formatted_response = format_lambda_response(action, response_body, message)
             logger.debug(f"Formatted response: {formatted_response[:200]}...")
 
             logger.info(f"⏱️  Direct Lambda Performance: Total={timing['total']:.2f}s | "

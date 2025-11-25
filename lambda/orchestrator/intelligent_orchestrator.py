@@ -431,8 +431,8 @@ def orchestrate_intelligent_workflow(
             else:
                 response_body = response_body_str
 
-            # Format response for user
-            formatted_response = format_lambda_response(lambda_action, response_body)
+            # Format response for user (with conversational wrapper from Claude)
+            formatted_response = format_lambda_response(lambda_action, response_body, message)
 
             response_text = formatted_response
 
