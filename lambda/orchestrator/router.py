@@ -107,9 +107,9 @@ Please write a friendly, conversational response that:
 
 Keep your response concise (3-5 sentences) and friendly. Do NOT include the raw JSON data - I'll show that separately."""
 
-        # Call Claude via Bedrock Converse API
+        # Call Claude via Bedrock Converse API (using cross-region inference profile)
         response = client.converse(
-            modelId="anthropic.claude-3-5-sonnet-20241022-v2:0",
+            modelId="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
             messages=[
                 {
                     "role": "user",
