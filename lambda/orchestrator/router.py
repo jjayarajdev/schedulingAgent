@@ -93,7 +93,9 @@ Guidelines:
 - Show empathy and understanding
 - Keep responses concise but complete
 - Use proper formatting (line breaks, lists) when helpful
-- Never invent information - only use what's provided in the data"""
+- Never invent information - only use what's provided in the data
+- IMPORTANT: Do NOT ask follow-up questions or offer additional help
+- IMPORTANT: Just present the information in a friendly, informative way"""
 
         user_prompt = f"""The user asked: "{user_message}"
 
@@ -103,7 +105,12 @@ I retrieved the following data from our system:
 Please write a friendly, conversational response that:
 1. Acknowledges their request
 2. Presents the information in a natural, easy-to-understand way
-3. Offers to help with next steps if applicable
+3. Simply states the facts without asking follow-up questions
+
+IMPORTANT: Do NOT end with questions like "Would you like...", "Do you need...", "Can I help with...". Just present the information.
+
+Example of good response:
+"Just letting you know that your service appointment is all set. Your project (#7751746) is scheduled for November 26, 2025, from 8:00 AM to 9:00 AM. Our technician, Jay Installer1, will be visiting your place at 401 Chicago Avenue, Minneapolis, MN 55415."
 
 Keep your response concise (3-5 sentences) and friendly. Do NOT include the raw JSON data - I'll show that separately."""
 
