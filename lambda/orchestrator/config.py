@@ -40,8 +40,8 @@ class Config:
         self.enable_multi_agent_orchestration = os.environ.get('ENABLE_MULTI_AGENT_ORCHESTRATION', 'true').lower() == 'true'
         self.max_parallel_agents = int(os.environ.get('MAX_PARALLEL_AGENTS', '3'))
 
-        # Intelligent Orchestration with Sonnet 3.7
-        self.orchestrator_model = os.environ.get('ORCHESTRATOR_MODEL', 'us.anthropic.claude-3-7-sonnet-20250219-v1:0')
+        # Intelligent Orchestration with Sonnet 3.5 V2
+        self.orchestrator_model = os.environ.get('ORCHESTRATOR_MODEL', 'us.anthropic.claude-3-5-sonnet-20241022-v2:0')
         self.classification_cache_ttl = int(os.environ.get('CLASSIFICATION_CACHE_TTL', '300'))  # 5 min
 
         # DynamoDB table for workflow state management

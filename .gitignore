@@ -93,6 +93,7 @@ test*.json
 *-test.json
 *-result.json
 *-output.json
+*-response.json
 trust-policy.json
 secrets-policy.json
 orchestrator-permissions.json
@@ -140,3 +141,13 @@ testing/**/*.md
 # Voice testing temporary files
 testing/voice/15_voice_demo_questions.txt
 testing/voice/VOICE_DEMO_READY_10_QUESTIONS.txt
+
+# Local testing and utility scripts (environment-specific)
+testing/add_all_intents.py
+testing/check_voice_logs.py
+testing/create_orchestrator_role.py
+testing/fix_duplicate_utterances.py
+testing/update_token_everywhere.py
+testing/test_voice_orchestrator_routing.py
+testing/run_voice_tests.sh
+lambda/lex-fulfillment/create_zip.py

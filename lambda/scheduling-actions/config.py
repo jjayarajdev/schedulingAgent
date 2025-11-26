@@ -15,7 +15,7 @@ except ImportError:
     logging.warning("TokenManager not available, falling back to static token")
 
 # Environment variables
-USE_MOCK_API = os.getenv("USE_MOCK_API", "true").lower() == "true"
+USE_MOCK_API = os.getenv("USE_MOCK_API", "false").lower() == "true"
 ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
 
 # Real ProjectForce API endpoints (CX Portal API)

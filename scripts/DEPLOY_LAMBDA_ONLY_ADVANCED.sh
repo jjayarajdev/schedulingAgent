@@ -1,10 +1,16 @@
 #!/bin/bash
 
 ##############################################################################
-# DEPLOY_LAMBDA_ONLY.sh - Deploy Pure Lambda Architecture (No Bedrock)
+# DEPLOY_LAMBDA_ONLY_ADVANCED.sh - Advanced Lambda Deployment (Cross-Platform)
 #
 # Purpose: Deploy ProjectForce scheduling system using only AWS Lambda
-# Date: 2025-11-23
+# Date: 2025-11-26
+#
+# Improvements over original:
+#   - Forces Python zipfile module (no zip command dependency)
+#   - Properly handles existing IAM roles (deletes before creating)
+#   - Cross-platform compatible (Windows/Linux/Mac)
+#   - Continues deployment even if one lambda fails
 #
 # Deploys:
 #   1. pf-scheduling-actions (scheduling queries & workflows)
@@ -13,15 +19,13 @@
 #   4. pf-orchestrator (routing & workflow orchestration)
 #   5. DynamoDB tables for sessions and notes
 #
-# NO BEDROCK AGENTS - Everything runs via direct Lambda calls
-#
 # Prerequisites:
 #   - AWS CLI configured
-#   - Secrets Manager secret: projectforce/api/credentials
+#   - Python 3.x installed
 #
 # Usage:
-#   ./DEPLOY_LAMBDA_ONLY.sh
-#   ./DEPLOY_LAMBDA_ONLY.sh --profile pf-aws
+#   ./DEPLOY_LAMBDA_ONLY_ADVANCED.sh
+#   ./DEPLOY_LAMBDA_ONLY_ADVANCED.sh --profile pf-aws
 ##############################################################################
 
 set -e  # Exit on error
@@ -62,18 +66,109 @@ ENV="dev"
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
-echo "=========================================="
-echo "ProjectForce Lambda-Only Deployment"
-echo "=========================================="
+# Detect platform and set correct Python command
+if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
+    PYTHON_CMD="python"
+else
+    PYTHON_CMD="python3"
+fi
+
+echo "════════════════════════════════════════════════════════════════════════════"
+echo "🚀 ProjectForce Advanced Lambda Deployment"
+echo "════════════════════════════════════════════════════════════════════════════"
 echo ""
 echo "Region: $REGION"
 echo "Account: $ACCOUNT_ID"
 echo "Environment: $ENV"
 echo ""
-echo "🚀 Pure Lambda Architecture - No Bedrock agents!"
+echo "✨ Features:"
+echo "  • Cross-platform Python-only packaging (no zip command needed)"
+echo "  • Proper IAM role management"
+echo "  • Error-resilient deployment"
 echo ""
+
+##############################################################################
+# Helper: Delete IAM Role with Proper Policy Detachment
+##############################################################################
+
+delete_iam_role_if_exists() {
+    local ROLE_NAME=$1
+
+    if ! aws_cmd iam get-role --role-name "$ROLE_NAME" &>/dev/null; then
+        return 0
+    fi
+
+    echo "  → Deleting existing IAM role: $ROLE_NAME"
+
+    # Detach all attached managed policies
+    ATTACHED_POLICIES=$(aws_cmd iam list-attached-role-policies --role-name "$ROLE_NAME" --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || echo "")
+    for POLICY_ARN in $ATTACHED_POLICIES; do
+        echo "    • Detaching $POLICY_ARN"
+        aws_cmd iam detach-role-policy --role-name "$ROLE_NAME" --policy-arn "$POLICY_ARN" &>/dev/null || true
+    done
+
+    # Delete all inline policies
+    INLINE_POLICIES=$(aws_cmd iam list-role-policies --role-name "$ROLE_NAME" --query 'PolicyNames[]' --output text 2>/dev/null || echo "")
+    for POLICY_NAME in $INLINE_POLICIES; do
+        echo "    • Deleting inline policy $POLICY_NAME"
+        aws_cmd iam delete-role-policy --role-name "$ROLE_NAME" --policy-name "$POLICY_NAME" &>/dev/null || true
+    done
+
+    # Delete the role
+    aws_cmd iam delete-role --role-name "$ROLE_NAME" &>/dev/null || true
+    echo "    ✓ Role deleted"
+}
+n##############################################################################
+# Helper: Fix KMS Encryption Issues by Re-encrypting Environment Variables
+##############################################################################
+
+fix_kms_encryption() {
+    local FUNCTION_NAME=$1
+    
+    echo ""
+    echo "Fixing KMS encryption for: $FUNCTION_NAME"
+    
+    # Check if function exists
+    if ! aws_cmd lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" &>/dev/null; then
+        echo "  ⚠️  Function $FUNCTION_NAME not found, skipping KMS fix"
+        return 0
+    fi
+    
+    # Get current environment variables
+    echo "  → Getting current environment variables..."
+    local ENV_VARS=$(aws_cmd lambda get-function-configuration \n        --function-name "$FUNCTION_NAME" \n        --region "$REGION" \n        --query 'Environment.Variables' \n        --output json 2>/dev/null)
+    
+    if [[ "$ENV_VARS" == "null" ]] || [[ -z "$ENV_VARS" ]]; then
+        echo "  → No environment variables to fix"
+        return 0
+    fi
+    
+    echo "  → Clearing environment variables (forces re-encryption)..."
+    aws_cmd lambda update-function-configuration \n        --function-name "$FUNCTION_NAME" \n        --environment 'Variables={}' \n        --region "$REGION" &>/dev/null
+    
+    # Wait for update to complete
+    echo "  → Waiting for Lambda update..."
+    sleep 5
+    aws_cmd lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION" 2>/dev/null || sleep 10
+    
+    # Restore environment variables
+    echo "  → Restoring environment variables with AWS-managed encryption..."
+    local ENV_JSON_FILE="./kms-fix-${FUNCTION_NAME}.json"
+    echo "{"Variables":$ENV_VARS}" > "$ENV_JSON_FILE"
+    
+    aws_cmd lambda update-function-configuration \n        --function-name "$FUNCTION_NAME" \n        --environment "file://$ENV_JSON_FILE" \n        --region "$REGION" &>/dev/null
+    
+    # Wait for final update
+    echo "  → Waiting for final update..."
+    sleep 5
+    aws_cmd lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION" 2>/dev/null || sleep 10
+    
+    rm -f "$ENV_JSON_FILE"
+    echo -e "  ${GREEN}✅ KMS encryption fixed for $FUNCTION_NAME${NC}"
+}
 
 ##############################################################################
 # Step 1: ProjectForce API Credentials
@@ -225,47 +320,74 @@ deploy_lambda() {
     echo "Deploying: $FUNCTION_NAME"
 
     local LAMBDA_DIR="$PROJECT_DIR/lambda/${FUNCTION_NAME#pf-}"
-    local ROLE_NAME="${FUNCTION_NAME}-role-${ENV}"
+    local ROLE_NAME="${FUNCTION_NAME}-role"
 
     if [[ ! -d "$LAMBDA_DIR" ]]; then
-        echo "  ⚠️  Directory not found: $LAMBDA_DIR"
+        echo -e "  ${RED}⚠️  Directory not found: $LAMBDA_DIR${NC}"
         return 1
     fi
 
     cd "$LAMBDA_DIR"
 
-    # Package
-    echo "  → Packaging..."
+    # Package using Python zipfile (cross-platform, no zip command needed)
+    echo "  → Packaging with Python zipfile module..."
     rm -f function.zip
 
-    # Check if zip command exists (may not exist in Git Bash on Windows)
-    if command -v zip &> /dev/null; then
-        # Use native zip command (Linux/Mac or Windows with zip installed)
-        if [[ -f requirements.txt ]]; then
-            rm -rf package && mkdir -p package
-            pip3 install -r requirements.txt -t package/ --quiet 2>&1 | grep -v "dependency conflicts" || true
-            cd package && zip -r ../function.zip . --quiet && cd ..
-            zip -g function.zip *.py --quiet
-        else
-            zip -r function.zip . -x "*.pyc" -x "__pycache__/*" -x "*.zip" &>/dev/null
-        fi
+    if [[ -f requirements.txt ]]; then
+        # Lambda with dependencies
+        rm -rf package && mkdir -p package
+        $PYTHON_CMD -m pip install -r requirements.txt -t package/ --quiet 2>&1 | grep -v "dependency conflicts" || true
+
+        # Create zip with dependencies
+        $PYTHON_CMD -c "
+import zipfile
+import os
+
+with zipfile.ZipFile('function.zip', 'w', zipfile.ZIP_DEFLATED) as z:
+    # Add all files from package directory
+    for root, dirs, files in os.walk('package'):
+        for file in files:
+            file_path = os.path.join(root, file)
+            arcname = os.path.relpath(file_path, 'package')
+            z.write(file_path, arcname)
+
+    # Add all .py files from current directory
+    for file in os.listdir('.'):
+        if file.endswith('.py'):
+            z.write(file)
+"
     else
-        # Fallback to Python zipfile (Git Bash on Windows)
-        if [[ -f requirements.txt ]]; then
-            rm -rf package && mkdir -p package
-            pip3 install -r requirements.txt -t package/ --quiet 2>&1 | grep -v "dependency conflicts" || true
-            python -c "import zipfile, os; z=zipfile.ZipFile('function.zip','w',zipfile.ZIP_DEFLATED); [z.write(os.path.join(r,f),os.path.relpath(os.path.join(r,f),'package')) for r,_,fs in os.walk('package') for f in fs]; z.close()"
-            python -c "import zipfile, os; z=zipfile.ZipFile('function.zip','a',zipfile.ZIP_DEFLATED); [z.write(f) for f in os.listdir('.') if f.endswith('.py')]; z.close()"
-        else
-            python -c "import zipfile, os; z=zipfile.ZipFile('function.zip','w',zipfile.ZIP_DEFLATED); [z.write(os.path.join(r,f),os.path.relpath(os.path.join(r,f),'.')) for r,_,fs in os.walk('.') for f in fs if not f.endswith('.pyc') and '__pycache__' not in r and not f.endswith('.zip')]; z.close()"
-        fi
+        # Lambda without dependencies
+        $PYTHON_CMD -c "
+import zipfile
+import os
+
+with zipfile.ZipFile('function.zip', 'w', zipfile.ZIP_DEFLATED) as z:
+    for root, dirs, files in os.walk('.'):
+        # Skip __pycache__, .pyc files, and the zip file itself
+        if '__pycache__' in root:
+            continue
+        for file in files:
+            if file.endswith('.pyc') or file.endswith('.zip'):
+                continue
+            file_path = os.path.join(root, file)
+            arcname = os.path.relpath(file_path, '.')
+            z.write(file_path, arcname)
+"
     fi
 
-    # IAM Role
-    if ! aws_cmd iam get-role --role-name "$ROLE_NAME" &>/dev/null; then
-        echo "  → Creating IAM role..."
+    echo "  ✓ Package created: function.zip"
 
-        cat > /tmp/trust-policy.json <<EOF
+    # Delete existing IAM role if it exists (prevents hanging issues)
+    delete_iam_role_if_exists "$ROLE_NAME"
+
+    # Create IAM role
+    echo "  → Creating IAM role..."
+
+    # Use current directory for temp files instead of /tmp for Windows compatibility
+    local TRUST_POLICY_FILE="./trust-policy-${ROLE_NAME}.json"
+
+    cat > "$TRUST_POLICY_FILE" <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [{
@@ -276,23 +398,33 @@ deploy_lambda() {
 }
 EOF
 
-        aws_cmd iam create-role \
-            --role-name "$ROLE_NAME" \
-            --assume-role-policy-document file:///tmp/trust-policy.json &>/dev/null
+    echo "  → Executing: iam create-role --role-name $ROLE_NAME"
+    if ! aws_cmd iam create-role \
+        --role-name "$ROLE_NAME" \
+        --assume-role-policy-document "file://${TRUST_POLICY_FILE}" 2>&1 | tee "./iam-create-$ROLE_NAME.log"; then
+        echo "  ❌ Failed to create IAM role $ROLE_NAME"
+        echo "  See: ./iam-create-$ROLE_NAME.log"
+        rm -f "$TRUST_POLICY_FILE"
+        return 1
+    fi
+    rm -f "$TRUST_POLICY_FILE"
 
+    echo "  → Attaching basic execution policy..."
+    if ! aws_cmd iam attach-role-policy \
+        --role-name "$ROLE_NAME" \
+        --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole" 2>&1; then
+        echo "  ⚠️  Warning: Failed to attach basic execution policy"
+    fi
+
+    # Add DynamoDB permissions for scheduling and orchestrator
+    if [[ "$FUNCTION_NAME" =~ (scheduling|orchestrator) ]]; then
         aws_cmd iam attach-role-policy \
             --role-name "$ROLE_NAME" \
-            --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole" &>/dev/null
+            --policy-arn "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess" &>/dev/null
+    fi
 
-        # Add DynamoDB permissions for scheduling and orchestrator
-        if [[ "$FUNCTION_NAME" =~ (scheduling|orchestrator) ]]; then
-            aws_cmd iam attach-role-policy \
-                --role-name "$ROLE_NAME" \
-                --policy-arn "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess" &>/dev/null
-        fi
-
-        # Add Secrets Manager permissions
-        cat > /tmp/secrets-policy.json <<EOF
+    # Add Secrets Manager permissions
+    cat > ./secrets-policy.json <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [{
@@ -303,14 +435,14 @@ EOF
 }
 EOF
 
-        aws_cmd iam put-role-policy \
-            --role-name "$ROLE_NAME" \
-            --policy-name "SecretsAccess" \
-            --policy-document file:///tmp/secrets-policy.json &>/dev/null
+    aws_cmd iam put-role-policy \
+        --role-name "$ROLE_NAME" \
+        --policy-name "SecretsAccess" \
+        --policy-document file://./secrets-policy.json &>/dev/null
 
-        # Add Lambda invoke permissions and Bedrock access for orchestrator
-        if [[ "$FUNCTION_NAME" == "pf-orchestrator" ]]; then
-            cat > /tmp/orchestrator-permissions.json <<EOF
+    # Add Lambda invoke permissions and Bedrock access for orchestrator
+    if [[ "$FUNCTION_NAME" == "pf-orchestrator" ]]; then
+        cat > ./orchestrator-permissions.json <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -349,16 +481,50 @@ EOF
 }
 EOF
 
-            aws_cmd iam put-role-policy \
-                --role-name "$ROLE_NAME" \
-                --policy-name "OrchestratorPermissions" \
-                --policy-document file:///tmp/orchestrator-permissions.json &>/dev/null
-        fi
-
-        sleep 10
+        aws_cmd iam put-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-name "OrchestratorPermissions" \
+            --policy-document file://./orchestrator-permissions.json &>/dev/null
     fi
 
+    echo "  ✓ IAM role created"
+    echo "  → Waiting for IAM role to propagate..."
+
     local ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
+
+    # Poll for role propagation with 60 second max timeout
+    local MAX_WAIT=60
+    local POLL_INTERVAL=10
+    local ELAPSED=0
+    local ROLE_READY=false
+
+    while [[ $ELAPSED -lt $MAX_WAIT ]]; do
+        echo "  → Poll attempt at ${ELAPSED}s: checking role $ROLE_NAME..."
+
+        if aws_cmd iam get-role --role-name "$ROLE_NAME" 2>&1 | grep -q "Role"; then
+            echo "  → Role exists, checking trust policy..."
+            TRUST_POLICY=$(aws_cmd iam get-role --role-name "$ROLE_NAME" --query 'Role.AssumeRolePolicyDocument' 2>&1)
+            if [[ -n "$TRUST_POLICY" ]] && [[ "$TRUST_POLICY" != "null" ]]; then
+                ROLE_READY=true
+                echo "  ✓ IAM role fully propagated after ${ELAPSED}s"
+                break
+            else
+                echo "  → Trust policy not ready yet (got: ${TRUST_POLICY:0:50}...)"
+            fi
+        else
+            echo "  → Role not found yet in IAM"
+        fi
+
+        sleep $POLL_INTERVAL
+        ELAPSED=$((ELAPSED + POLL_INTERVAL))
+    done
+
+    if [[ "$ROLE_READY" != "true" ]]; then
+        echo "  ❌ ERROR: IAM role not propagated after ${MAX_WAIT}s"
+        echo "  → Checking if role actually exists..."
+        aws_cmd iam get-role --role-name "$ROLE_NAME" 2>&1 | head -20
+        return 1
+    fi
 
     # Create or update Lambda
     if aws_cmd lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" &>/dev/null; then
@@ -379,10 +545,10 @@ EOF
             --memory-size "$MEMORY" \
             --region "$REGION" &>/dev/null
 
-        echo "  ✅ Lambda updated: $FUNCTION_NAME"
+        echo -e "  ${GREEN}✅ Lambda updated: $FUNCTION_NAME${NC}"
     else
         echo "  → Creating new function..."
-        aws_cmd lambda create-function \
+        if aws_cmd lambda create-function \
             --function-name "$FUNCTION_NAME" \
             --runtime python3.11 \
             --role "$ROLE_ARN" \
@@ -390,17 +556,21 @@ EOF
             --zip-file fileb://function.zip \
             --timeout "$TIMEOUT" \
             --memory-size "$MEMORY" \
-            --region "$REGION" &>/dev/null
-
-        echo "  ✅ Lambda created: $FUNCTION_NAME"
+            --region "$REGION" 2>&1 | tee ./lambda-create-$FUNCTION_NAME.log; then
+            echo -e "  ${GREEN}✅ Lambda created: $FUNCTION_NAME${NC}"
+        else
+            echo -e "  ${RED}❌ Lambda creation FAILED: $FUNCTION_NAME${NC}"
+            echo "  See error log: ./lambda-create-$FUNCTION_NAME.log"
+            return 1
+        fi
     fi
 }
 
-# Deploy all Lambda functions
-deploy_lambda "pf-scheduling-actions" "handler.lambda_handler" 30 1769
-deploy_lambda "pf-information-actions" "handler.lambda_handler" 30 512
-deploy_lambda "pf-chitchat-actions" "handler.lambda_handler" 30 256
-deploy_lambda "pf-orchestrator" "handler.lambda_handler" 120 512
+# Deploy all Lambda functions (continue even if one fails)
+deploy_lambda "pf-scheduling-actions" "handler.lambda_handler" 30 1769 || echo -e "${RED}⚠️  pf-scheduling-actions deployment failed${NC}"
+deploy_lambda "pf-information-actions" "handler.lambda_handler" 30 512 || echo -e "${RED}⚠️  pf-information-actions deployment failed${NC}"
+deploy_lambda "pf-chitchat-actions" "handler.lambda_handler" 30 256 || echo -e "${RED}⚠️  pf-chitchat-actions deployment failed${NC}"
+deploy_lambda "pf-orchestrator" "handler.lambda_handler" 120 512 || echo -e "${RED}⚠️  pf-orchestrator deployment failed${NC}"
 
 ##############################################################################
 # Step 4.5: Configure Scheduling Actions Environment Variables
@@ -413,7 +583,7 @@ echo "=========================================="
 
 echo "  → Setting USE_MOCK_API=false for real API calls..."
 
-cat > /tmp/scheduling-env.json <<EOF
+cat > ./scheduling-env.json <<EOF
 {
   "Variables": {
     "USE_MOCK_API": "false",
@@ -425,14 +595,14 @@ EOF
 
 aws_cmd lambda update-function-configuration \
     --function-name pf-scheduling-actions \
-    --environment file:///tmp/scheduling-env.json \
+    --environment file://./scheduling-env.json \
     --region "$REGION" &>/dev/null
 
 # Wait for configuration update
 echo "  → Waiting for configuration update..."
 sleep 5
 
-rm -f /tmp/scheduling-env.json
+rm -f ./scheduling-env.json
 echo "  ✅ Scheduling actions configured for REAL API mode"
 
 ##############################################################################
@@ -476,13 +646,13 @@ if [[ $WAIT_COUNT -ge $MAX_WAIT ]]; then
 fi
 
 # Create environment configuration
-cat > /tmp/orchestrator-env.json <<EOF
+cat > ./orchestrator-env.json <<EOF
 {
   "Variables": {
     "SCHEDULING_LAMBDA": "pf-scheduling-actions",
     "INFORMATION_LAMBDA": "pf-information-actions",
     "CHITCHAT_LAMBDA": "pf-chitchat-actions",
-    "ORCHESTRATOR_MODEL": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "ORCHESTRATOR_MODEL": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
     "DYNAMODB_TABLE": "pf-sessions-dev",
     "WORKFLOW_STATE_TABLE": "pf-workflow-states-dev",
     "REGION": "$REGION",
@@ -497,7 +667,7 @@ EOF
 echo "  → Setting environment variables..."
 aws_cmd lambda update-function-configuration \
     --function-name pf-orchestrator \
-    --environment file:///tmp/orchestrator-env.json \
+    --environment file://./orchestrator-env.json \
     --region "$REGION" &>/dev/null
 
 # Wait for configuration update to complete
@@ -541,15 +711,36 @@ else
     echo "  ⚠️  SCHEDULING_LAMBDA=$SCHEDULING_LAMBDA (expected: pf-scheduling-actions)"
 fi
 
-rm -f /tmp/orchestrator-env.json
+rm -f ./orchestrator-env.json
 
 ##############################################################################
+##############################################################################
+# Step 6: Fix KMS Encryption (Prevents KMSAccessDeniedException)
+##############################################################################
+
+echo ""
+echo "=========================================="
+echo "Step 6: KMS Encryption Fix"
+echo "=========================================="
+echo "  Re-encrypting Lambda environment variables with AWS-managed keys..."
+echo ""
+
+# Fix KMS for all deployed lambdas
+fix_kms_encryption "pf-scheduling-actions" || echo -e "${YELLOW}⚠️  KMS fix failed for pf-scheduling-actions${NC}"
+fix_kms_encryption "pf-information-actions" || echo -e "${YELLOW}⚠️  KMS fix failed for pf-information-actions${NC}"
+fix_kms_encryption "pf-chitchat-actions" || echo -e "${YELLOW}⚠️  KMS fix failed for pf-chitchat-actions${NC}"
+fix_kms_encryption "pf-orchestrator" || echo -e "${YELLOW}⚠️  KMS fix failed for pf-orchestrator${NC}"
+
+echo ""
+echo -e "${GREEN}✅ KMS encryption fix completed for all Lambdas${NC}"
+
+
 # Summary
 ##############################################################################
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "✅ Deployment Complete!"
+echo -e "${GREEN}✅ Deployment Complete!${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "Deployed Resources:"
@@ -574,13 +765,10 @@ echo "  ⚡ Fast response times with context retention"
 echo "  💰 Lower costs (no Bedrock agent charges)"
 echo ""
 echo "Test the system:"
-echo "  1. Start UI proxy:"
-echo "     cd testing/ui && python3 pf_proxy.py"
+echo "  1. Start UI:"
+echo "     cd testing/ui && ./launch_webapp.sh"
 echo ""
-echo "  2. Open browser:"
-echo "     http://localhost:5003"
-echo ""
-echo "  3. Try these queries:"
+echo "  2. Try these queries:"
 echo "     • Hi"
 echo "     • List my projects"
 echo "     • Details for 7751748"

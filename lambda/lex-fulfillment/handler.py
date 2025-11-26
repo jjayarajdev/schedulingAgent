@@ -23,6 +23,32 @@ from datetime import datetime
 import logging
 from decimal import Decimal
 
+# Simple credentials helper - read from Secrets Manager with env fallback
+def get_credentials_from_secrets():
+    """Get all credentials from Secrets Manager (bearer_token, client_id, user_id)"""
+    try:
+        secrets_client = boto3.client('secretsmanager', region_name=os.getenv('AWS_REGION', 'us-east-1'))
+        response = secrets_client.get_secret_value(SecretId='projectforce/api/credentials')
+        secret = json.loads(response['SecretString'])
+
+        credentials = {
+            'bearer_token': secret.get('bearer_token', ''),
+            'client_id': secret.get('client_id', '09PF05VD'),
+            'user_id': secret.get('user_id', '1646085')
+        }
+
+        logger.info(f"Using credentials from Secrets Manager - client_id: {credentials['client_id']}, user_id: {credentials['user_id']}")
+        return credentials
+    except Exception as e:
+        logger.warning(f"Failed to get credentials from Secrets Manager: {e}, using fallback values")
+
+        # Fallback to environment variables or defaults
+        return {
+            'bearer_token': os.environ.get('BEARER_TOKEN', ''),
+            'client_id': os.environ.get('PF_CLIENT_ID', '09PF05VD'),
+            'user_id': os.environ.get('PF_USER_ID', '1646085')
+        }
+
 # Pydantic models removed for simplicity - using raw dictionaries
 # from models import (
 #     LexEvent, LexResponse, Message, CustomerInfo,
@@ -45,9 +71,13 @@ lambda_client = boto3.client('lambda')
 DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE', 'pf-sessions-dev')
 SCHEDULING_LAMBDA = os.environ.get('SCHEDULING_LAMBDA', 'pf-scheduling-actions')
 INFORMATION_LAMBDA = os.environ.get('INFORMATION_LAMBDA', 'pf-information-actions')
+ORCHESTRATOR_LAMBDA = os.environ.get('ORCHESTRATOR_LAMBDA', 'pf-orchestrator')
 VOICE_BRIDGE_LAMBDA = os.environ.get('VOICE_BRIDGE_LAMBDA', 'pf-voice-bedrock-bridge-dev')
 CUSTOMER_LOOKUP_LAMBDA = os.environ.get('CUSTOMER_LOOKUP_LAMBDA', 'pf-customer-lookup-dev')
 DEFAULT_CUSTOMER_ID = os.environ.get('DEFAULT_CUSTOMER_ID')
+
+# Feature flag: Use orchestrator for complex voice queries instead of voice-bridge
+USE_ORCHESTRATOR_FOR_VOICE = os.environ.get('USE_ORCHESTRATOR_FOR_VOICE', 'true').lower() == 'true'
 MAX_RESPONSE_LENGTH = int(os.environ.get('MAX_VOICE_RESPONSE_LENGTH', '500'))
 
 # DynamoDB table
@@ -170,6 +200,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         elif intent_name == "CheckAvailability":
             response = handle_check_availability(event, session_id, customer_id)
 
+        elif intent_name == "WeatherInquiry":
+            response = handle_weather_inquiry(event, session_id, customer_id)
+
         elif intent_name in ["ScheduleAppointment", "UrgentRequest", "FallbackIntent"]:
             response = hand_off_to_bedrock(event, session_id, customer_id, input_transcript)
 
@@ -261,36 +294,39 @@ def handle_project_inquiry(
     Returns:
         Lex response with project list or error
     """
-    # Use default customer ID if not provided
-    if not customer_id and DEFAULT_CUSTOMER_ID:
-        customer_id = DEFAULT_CUSTOMER_ID
-        logger.info(f"Using default customer ID: {customer_id}")
+    # Get credentials from Secrets Manager
+    credentials = get_credentials_from_secrets()
+
+    # Use user_id from Secrets Manager if customer_id not provided
+    if not customer_id:
+        customer_id = credentials['user_id']
+        logger.info(f"Using customer ID from Secrets Manager: {customer_id}")
 
     logger.info(f"Handling ProjectInquiry for customer {customer_id}")
-
-    if not customer_id:
-        return LexResponseBuilder.build_response(
-            event,
-            "I'll need your customer ID to look up your projects. What's your customer ID?"
-        )
 
     # Extract status filter from slots if provided
     slots = event.get('sessionState', {}).get('intent', {}).get('slots', {})
     status_filter = slots.get('status', {}).get('value', {}).get('interpretedValue') if slots.get('status') else None
 
     try:
-        # Get client_id from environment variable
-        client_id = os.environ.get('PF_CLIENT_ID', '09PF05VD')
+        # Get credentials from Secrets Manager
+        client_id = credentials['client_id']
+        pf_token = credentials['bearer_token']
 
         # Build Lambda invocation request
         payload = {
             'apiPath': '/list_projects',
             'httpMethod': 'POST',
             'requestContext': {'authorizer': {}},
-            'sessionAttributes': {'customer_id': customer_id},
+            'sessionAttributes': {
+                'customer_id': customer_id,
+                'client_id': client_id,
+                'pf_bearer_token': pf_token
+            },
             'parameters': [
                 {'name': 'customer_id', 'value': customer_id},
-                {'name': 'client_id', 'value': client_id}
+                {'name': 'client_id', 'value': client_id},
+                {'name': 'pf_token', 'value': pf_token}
             ]
         }
 
@@ -324,8 +360,23 @@ def handle_project_inquiry(
             else:
                 response_data = response_body
 
+            # Store project IDs in session for follow-up questions
+            projects = response_data.get('projects', [])
+            project_ids = [str(p.get('id', '')) for p in projects if p.get('id')]
+
+            # Get existing session attributes
+            session_attributes = event.get('sessionState', {}).get('sessionAttributes', {}) or {}
+            # Store project IDs as comma-separated string
+            session_attributes['last_project_ids'] = ','.join(project_ids)
+
             message = _format_projects_for_voice(response_data)
-            return LexResponseBuilder.build_response(event, message)
+
+            # Build response with updated session attributes
+            response = LexResponseBuilder.build_response(event, message)
+            if 'sessionState' in response:
+                response['sessionState']['sessionAttributes'] = session_attributes
+
+            return response
 
         else:
             logger.error(f"Invalid response from scheduling Lambda: {result}")
@@ -443,10 +494,13 @@ def handle_project_status_inquiry(
     """
     Handle ProjectStatusInquiry intent - Get status of a specific project
 
-    Utterances: "What's the status of project 123", "Status of my project"
+    Utterances: "What's the status of project 123", "Status of my project",
+                "Tell me about the first project", "Who is the technician for second project"
     Slots: project_id (optional), status_filter (optional)
+
+    Supports ordinal references (first, second, third, etc.) using session memory
     """
-    session_attributes = event.get('sessionState', {}).get('sessionAttributes', {})
+    session_attributes = event.get('sessionState', {}).get('sessionAttributes', {}) or {}
     slots = event.get('sessionState', {}).get('intent', {}).get('slots', {})
 
     # Use default customer ID if not provided
@@ -461,104 +515,182 @@ def handle_project_status_inquiry(
         )
 
     # Extract project_id and status filter from slots
-    project_id = slots.get('project_id', {}).get('value', {}).get('interpretedValue') if slots.get('project_id') else None
+    project_id_raw = slots.get('project_id', {}).get('value', {}).get('interpretedValue') if slots.get('project_id') else None
     status_filter = slots.get('status', {}).get('value', {}).get('interpretedValue') if slots.get('status') else None
 
     try:
-        # Get client_id from environment variable
-        client_id = os.environ.get('PF_CLIENT_ID', '09PF05VD')
+        # Resolve ordinal references (first, second, third, etc.)
+        project_id = None
+        if project_id_raw:
+            ordinal_map = {
+                'first': 0, '1st': 0, 'one': 0,
+                'second': 1, '2nd': 1, 'two': 1,
+                'third': 2, '3rd': 2, 'three': 2,
+                'fourth': 3, '4th': 3, 'four': 3,
+                'fifth': 4, '5th': 4, 'five': 4,
+                'sixth': 5, '6th': 5, 'six': 5,
+                'seventh': 6, '7th': 6, 'seven': 6,
+                'eighth': 7, '8th': 7, 'eight': 7,
+            }
 
-        # Build Lambda invocation request
-        payload = {
-            'apiPath': '/list_projects',
-            'httpMethod': 'POST',
-            'requestContext': {'authorizer': {}},
-            'sessionAttributes': {'customer_id': customer_id},
-            'parameters': [
-                {'name': 'customer_id', 'value': customer_id},
-                {'name': 'client_id', 'value': client_id}
-            ]
-        }
-
-        # Add filters if provided
-        if status_filter:
-            payload['parameters'].append({'name': 'status', 'value': status_filter})
-
-        logger.debug(f"Invoking {SCHEDULING_LAMBDA} for project status")
-
-        # Call scheduling-actions Lambda
-        response = lambda_client.invoke(
-            FunctionName=SCHEDULING_LAMBDA,
-            InvocationType='RequestResponse',
-            Payload=json.dumps(payload)
-        )
-
-        result = json.loads(response['Payload'].read())
-        response_obj = result.get('response', {})
-        http_status = response_obj.get('httpStatusCode')
-
-        if http_status == 200:
-            response_body = response_obj.get('responseBody', {}).get('application/json', {}).get('body', '{}')
-            if isinstance(response_body, str):
-                response_body = json.loads(response_body)
-
-            projects = response_body.get('projects', [])
-
-            # If project_id specified, find that specific project
-            if project_id:
-                matching = [p for p in projects if project_id.lower() in p.get('project_id', '').lower() or project_id.lower() in p.get('projectNumber', '').lower()]
-
-                if matching:
-                    project = matching[0]
-                    message = f"Project {project.get('projectNumber', project_id)} is currently {project.get('status', 'unknown')}. "
-                    if project.get('scheduledDate'):
-                        message += f"It's scheduled for {project.get('scheduledDate')}. "
-                    message += "Would you like to make any changes?"
-                else:
-                    message = f"I couldn't find project {project_id}. Would you like me to list all your projects?"
-
-            # If status filter specified, filter and report
-            elif status_filter:
-                filtered = [p for p in projects if status_filter.lower() in p.get('status', '').lower()]
-                if filtered:
-                    message = f"You have {len(filtered)} {status_filter} projects. "
-                    if len(filtered) <= 5:
-                        for i, p in enumerate(filtered, 1):
-                            message += f"{i}. {p.get('category')} project {p.get('projectNumber')}, {p.get('status')}. "
+            project_id_lower = project_id_raw.lower()
+            if project_id_lower in ordinal_map:
+                # Get stored project IDs from session
+                last_project_ids = session_attributes.get('last_project_ids', '')
+                if last_project_ids:
+                    ids_list = last_project_ids.split(',')
+                    index = ordinal_map[project_id_lower]
+                    if index < len(ids_list):
+                        project_id = ids_list[index]
+                        logger.info(f"Resolved '{project_id_raw}' to project ID: {project_id}")
                     else:
-                        for i, p in enumerate(filtered[:3], 1):
-                            message += f"{i}. {p.get('category')} project, {p.get('status')}. "
-                        message += f"You have {len(filtered) - 3} more {status_filter} projects. "
-                    message += "Would you like to schedule one?"
+                        return LexResponseBuilder.build_response(
+                            event,
+                            f"You only have {len(ids_list)} projects. Please ask about a valid project."
+                        )
                 else:
-                    message = f"You don't have any {status_filter} projects right now."
-
-            # No filters - provide summary
+                    return LexResponseBuilder.build_response(
+                        event,
+                        "I don't have your project list in memory. Could you ask me to list your projects first?"
+                    )
             else:
-                if not projects:
-                    message = "You don't have any projects in the system right now."
-                else:
-                    status_counts = {}
-                    for p in projects:
-                        status = p.get('status', 'Unknown')
-                        status_counts[status] = status_counts.get(status, 0) + 1
+                # Direct project ID or number
+                project_id = project_id_raw
 
-                    parts = [f"{count} {status}" for status, count in status_counts.items()]
-                    message = f"You have {len(projects)} projects: {', '.join(parts)}. Which status would you like to know about?"
+        # Get credentials from Secrets Manager
+        credentials = get_credentials_from_secrets()
+        client_id = credentials['client_id']
+        pf_token = credentials['bearer_token']
 
-            return LexResponseBuilder.build_response(event, message)
+        # If we have a specific project ID, get details
+        if project_id:
+            payload = {
+                'apiPath': f'/project_details/{project_id}',
+                'httpMethod': 'GET',
+                'requestContext': {'authorizer': {}},
+                'sessionAttributes': {
+                    'customer_id': customer_id,
+                    'client_id': client_id,
+                    'pf_bearer_token': pf_token
+                },
+                'parameters': [
+                    {'name': 'project_id', 'value': project_id},
+                    {'name': 'client_id', 'value': client_id}
+                ]
+            }
 
-        else:
-            return LexResponseBuilder.build_response(
-                event,
-                "I'm having trouble accessing your project information right now. Please try again."
+            logger.debug(f"Getting details for project {project_id}")
+
+            # Call scheduling-actions Lambda
+            response = lambda_client.invoke(
+                FunctionName=SCHEDULING_LAMBDA,
+                InvocationType='RequestResponse',
+                Payload=json.dumps(payload)
             )
+
+            result = json.loads(response['Payload'].read())
+            response_obj = result.get('response', {})
+            http_status = response_obj.get('httpStatusCode')
+
+            if http_status == 200:
+                response_body = response_obj.get('responseBody', {}).get('application/json', {}).get('body', '{}')
+                if isinstance(response_body, str):
+                    response_body = json.loads(response_body)
+
+                project = response_body.get('project', {})
+
+                # Format detailed response
+                message = f"Project {project.get('projectNumber', project_id)} is {project.get('status', 'unknown')}. "
+                message += f"It's a {project.get('category', 'general')} project"
+
+                if project.get('scheduledDate'):
+                    message += f" scheduled for {project.get('scheduledDate')}"
+
+                installer = project.get('installer', {})
+                if installer and installer.get('name'):
+                    message += f". The technician is {installer.get('name')}"
+
+                address = project.get('address', {})
+                if address and address.get('address1'):
+                    message += f". Location: {address.get('address1')}, {address.get('city', '')} {address.get('state', '')}"
+
+                message += ". Would you like to make any changes?"
+
+                return LexResponseBuilder.build_response(event, message)
+            else:
+                return LexResponseBuilder.build_response(
+                    event,
+                    f"I couldn't find details for project {project_id}. Would you like me to list all your projects?"
+                )
+
+        # Otherwise, list projects with optional status filter
+        else:
+            payload = {
+                'apiPath': '/list_projects',
+                'httpMethod': 'POST',
+                'requestContext': {'authorizer': {}},
+                'sessionAttributes': {
+                    'customer_id': customer_id,
+                    'client_id': client_id,
+                    'pf_bearer_token': pf_token
+                },
+                'parameters': [
+                    {'name': 'customer_id', 'value': customer_id},
+                    {'name': 'client_id', 'value': client_id}
+                ]
+            }
+
+            # Add filters if provided
+            if status_filter:
+                payload['parameters'].append({'name': 'status', 'value': status_filter})
+
+            logger.debug(f"Listing projects with status filter: {status_filter}")
+
+            # Call scheduling-actions Lambda
+            response = lambda_client.invoke(
+                FunctionName=SCHEDULING_LAMBDA,
+                InvocationType='RequestResponse',
+                Payload=json.dumps(payload)
+            )
+
+            result = json.loads(response['Payload'].read())
+            response_obj = result.get('response', {})
+            http_status = response_obj.get('httpStatusCode')
+
+            if http_status == 200:
+                response_body = response_obj.get('responseBody', {}).get('application/json', {}).get('body', '{}')
+                if isinstance(response_body, str):
+                    response_body = json.loads(response_body)
+
+                projects = response_body.get('projects', [])
+
+                # If status filter specified, filter and report
+                if status_filter:
+                    filtered = [p for p in projects if status_filter.lower() in p.get('status', '').lower()]
+                    if filtered:
+                        message = f"You have {len(filtered)} {status_filter} projects. "
+                        if len(filtered) <= 5:
+                            for i, p in enumerate(filtered, 1):
+                                message += f"{i}. {p.get('category')} project {p.get('projectNumber')}, {p.get('status')}. "
+                        else:
+                            message += "Would you like me to list them all?"
+                    else:
+                        message = f"You don't have any {status_filter} projects right now."
+                else:
+                    message = f"You have {len(projects)} total projects. Would you like details on a specific one?"
+
+                return LexResponseBuilder.build_response(event, message)
+            else:
+                return LexResponseBuilder.build_error_response(
+                    event,
+                    "I'm having trouble accessing your projects. Please try again."
+                )
 
     except Exception as e:
         logger.exception("Error in project status inquiry")
         return LexResponseBuilder.build_error_response(
             event,
-            "I encountered an error looking up project status. Please try again."
+            "I encountered an error. Please try again."
         )
 
 
@@ -586,15 +718,21 @@ def handle_appointment_inquiry(
         )
 
     try:
-        # Get client_id from environment variable
-        client_id = os.environ.get('PF_CLIENT_ID', '09PF05VD')
+        # Get credentials from Secrets Manager
+        credentials = get_credentials_from_secrets()
+        client_id = credentials['client_id']
+        pf_token = credentials['bearer_token']
 
         # Build Lambda invocation request with status filter for "Scheduled"
         payload = {
             'apiPath': '/list_projects',
             'httpMethod': 'POST',
             'requestContext': {'authorizer': {}},
-            'sessionAttributes': {'customer_id': customer_id},
+            'sessionAttributes': {
+                'customer_id': customer_id,
+                'client_id': client_id,
+                'pf_bearer_token': pf_token
+            },
             'parameters': [
                 {'name': 'customer_id', 'value': customer_id},
                 {'name': 'client_id', 'value': client_id},
@@ -652,6 +790,79 @@ def handle_appointment_inquiry(
         )
 
 
+def handle_weather_inquiry(
+    event: Dict[str, Any],
+    session_id: str,
+    customer_id: Optional[str]
+) -> Dict[str, Any]:
+    """
+    Handle WeatherInquiry intent - Get weather forecast
+
+    Utterances: "What's the weather", "How's the weather tomorrow", "Weather forecast"
+    """
+    try:
+        # Extract location from slots if provided
+        slots = event.get('sessionState', {}).get('intent', {}).get('slots', {})
+
+        # Get bearer token from Secrets Manager
+        credentials = get_credentials_from_secrets()
+        pf_token = credentials['bearer_token']
+
+        # Call information-actions Lambda for weather
+        payload = {
+            'apiPath': '/get-weather',
+            'httpMethod': 'POST',
+            'requestContext': {'authorizer': {}},
+            'sessionAttributes': {
+                'pf_bearer_token': pf_token
+            },
+            'parameters': []
+        }
+
+        logger.debug(f"Invoking information-actions Lambda for weather")
+
+        response = lambda_client.invoke(
+            FunctionName=INFORMATION_LAMBDA,
+            InvocationType='RequestResponse',
+            Payload=json.dumps(payload)
+        )
+
+        result = json.loads(response['Payload'].read())
+        logger.info(f"Weather Lambda response: httpStatusCode={result.get('statusCode')}")
+
+        if result.get('statusCode') == 200:
+            body = json.loads(result['body']) if isinstance(result.get('body'), str) else result.get('body', {})
+            weather = body.get('weather', {})
+            current = weather.get('current', {})
+
+            # Format weather for voice
+            location = weather.get('location', 'your area')
+            temp = current.get('temp_f', 'unknown')
+            condition = current.get('condition', 'unknown')
+
+            message = f"The current temperature in {location} is {temp} degrees Fahrenheit with {condition} conditions."
+
+            # Add forecast if available
+            forecast = weather.get('forecast', [])
+            if forecast:
+                tomorrow = forecast[0]
+                message += f" Tomorrow's forecast: high of {tomorrow.get('high_f')} degrees, low of {tomorrow.get('low_f')} degrees, {tomorrow.get('condition')}."
+
+            return LexResponseBuilder.build_response(event, message)
+        else:
+            return LexResponseBuilder.build_response(
+                event,
+                "I'm having trouble getting the weather right now. Please try again."
+            )
+
+    except Exception as e:
+        logger.exception("Error in weather inquiry")
+        return LexResponseBuilder.build_error_response(
+            event,
+            "I encountered an error checking the weather. Please try again."
+        )
+
+
 def hand_off_to_bedrock(
     event: Dict[str, Any],
     session_id: str,
@@ -659,7 +870,10 @@ def hand_off_to_bedrock(
     input_text: str
 ) -> Dict[str, Any]:
     """
-    Hand off complex queries to Bedrock bridge Lambda
+    Hand off complex queries to intelligent orchestrator (Claude-based routing)
+
+    ARCHITECTURE CHANGE: Now routes through pf-orchestrator instead of pf-voice-bedrock-bridge
+    This gives voice queries the same intelligent Claude Sonnet 3.7 routing as chat queries.
 
     Used for: ScheduleAppointment, UrgentRequest, FallbackIntent
 
@@ -670,50 +884,104 @@ def hand_off_to_bedrock(
         input_text: User's spoken input
 
     Returns:
-        Lex response with Bedrock agent's response
+        Lex response with orchestrator's response
     """
-    logger.info(f"Handing off to Bedrock bridge for session {session_id}")
+    logger.info(f"Routing complex query through orchestrator for session {session_id}")
 
     try:
-        # Get session attributes
-        session_attributes = event.get('sessionState', {}).get('sessionAttributes', {})
+        # Get all credentials from Secrets Manager
+        credentials = get_credentials_from_secrets()
+        pf_client_id = credentials['client_id']
+        pf_token = credentials['bearer_token']
 
-        # Build handoff request
-        payload = {
-            'session_id': session_id,
-            'customer_id': customer_id,
-            'input_text': input_text,
-            'channel': 'voice',
-            'lex_event': event,
-            'session_attributes': session_attributes
-        }
+        # Decide which routing to use based on feature flag
+        if USE_ORCHESTRATOR_FOR_VOICE:
+            # NEW: Route through intelligent orchestrator (Claude-based)
+            logger.info(f"Routing through pf-orchestrator (intelligent Claude routing)")
 
-        logger.debug(f"Invoking {VOICE_BRIDGE_LAMBDA}")
+            # Build orchestrator payload
+            payload = {
+                'body': json.dumps({
+                    'message': input_text,
+                    'session_id': session_id,
+                    'pf_token': pf_token,
+                    'pf_client_id': pf_client_id,
+                    'pf_user_id': customer_id or '0',
+                    'channel': 'voice'
+                })
+            }
 
-        # Invoke voice-bedrock-bridge Lambda
-        response = lambda_client.invoke(
-            FunctionName=VOICE_BRIDGE_LAMBDA,
-            InvocationType='RequestResponse',
-            Payload=json.dumps(payload)
-        )
-
-        result = json.loads(response['Payload'].read())
-        logger.info(f"Bedrock bridge response: status={result.get('statusCode')}")
-
-        # Parse response
-        if result.get('statusCode') == 200:
-            bedrock_message = result.get('response', 'I can help you with that. Let me check...')
-            return LexResponseBuilder.build_response(event, bedrock_message)
-
-        else:
-            logger.error(f"Bedrock bridge returned error: {result}")
-            return LexResponseBuilder.build_error_response(
-                event,
-                "I'm experiencing technical difficulties. Please try again."
+            # Invoke pf-orchestrator Lambda
+            response = lambda_client.invoke(
+                FunctionName=ORCHESTRATOR_LAMBDA,
+                InvocationType='RequestResponse',
+                Payload=json.dumps(payload)
             )
 
+            result = json.loads(response['Payload'].read())
+            logger.info(f"Orchestrator response: status={result.get('statusCode')}")
+
+            # Parse orchestrator response
+            if result.get('statusCode') == 200:
+                body = result.get('body', '{}')
+                if isinstance(body, str):
+                    body = json.loads(body)
+
+                orchestrator_message = body.get('response', 'I can help you with that.')
+
+                # Strip any JSON code blocks for voice (orchestrator returns markdown-wrapped JSON)
+                if '```json' in orchestrator_message:
+                    # Extract just the user-facing message
+                    import re
+                    match = re.search(r'```json\s*({.*?})\s*```', orchestrator_message, re.DOTALL)
+                    if match:
+                        json_content = json.loads(match.group(1))
+                        orchestrator_message = json_content.get('message', orchestrator_message)
+
+                return LexResponseBuilder.build_response(event, orchestrator_message)
+            else:
+                logger.error(f"Orchestrator returned error: {result}")
+                return LexResponseBuilder.build_error_response(
+                    event,
+                    "I'm experiencing technical difficulties. Please try again."
+                )
+
+        else:
+            # OLD: Route through voice-bedrock-bridge (keyword matching) - DEPRECATED
+            logger.warning(f"Using legacy voice-bridge routing (keyword matching)")
+
+            session_attributes = event.get('sessionState', {}).get('sessionAttributes', {})
+
+            payload = {
+                'session_id': session_id,
+                'customer_id': customer_id,
+                'input_text': input_text,
+                'channel': 'voice',
+                'lex_event': event,
+                'session_attributes': session_attributes
+            }
+
+            response = lambda_client.invoke(
+                FunctionName=VOICE_BRIDGE_LAMBDA,
+                InvocationType='RequestResponse',
+                Payload=json.dumps(payload)
+            )
+
+            result = json.loads(response['Payload'].read())
+            logger.info(f"Voice bridge response: status={result.get('statusCode')}")
+
+            if result.get('statusCode') == 200:
+                bridge_message = result.get('response', 'I can help you with that.')
+                return LexResponseBuilder.build_response(event, bridge_message)
+            else:
+                logger.error(f"Voice bridge returned error: {result}")
+                return LexResponseBuilder.build_error_response(
+                    event,
+                    "I'm experiencing technical difficulties. Please try again."
+                )
+
     except Exception as e:
-        logger.exception("Error calling Bedrock bridge")
+        logger.exception("Error in complex query routing")
         return LexResponseBuilder.build_error_response(
             event,
             "I'm experiencing technical difficulties. Please try again in a moment."

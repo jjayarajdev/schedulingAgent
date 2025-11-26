@@ -336,46 +336,54 @@ Step 3: Extract ANY filters mentioned in the message:
 Respond ONLY with the JSON object, nothing else."""
 
     try:
+        logger.info(f"🔍 CLASSIFIER START: message='{message}', model={config.orchestrator_model}")
+
         bedrock_runtime = get_bedrock_client()
 
-        # Use Sonnet 3.7 for superior classification accuracy
+        request_body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 500,
+            "temperature": 0.0,
+            "messages": [{"role": "user", "content": prompt}]
+        }
+        logger.info(f"🔍 Bedrock request: modelId={config.orchestrator_model}")
+
         response = bedrock_runtime.invoke_model(
             modelId=config.orchestrator_model,
-            body=json.dumps({
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 500,  # More tokens for complex reasoning
-                "temperature": 0.0,
-                "messages": [{"role": "user", "content": prompt}]
-            })
+            body=json.dumps(request_body)
         )
+        logger.info(f"🔍 Bedrock response received, status: {response['ResponseMetadata']['HTTPStatusCode']}")
 
         response_body = json.loads(response['body'].read())
-        classification_text = response_body['content'][0]['text'].strip()
+        logger.info(f"🔍 Response body keys: {response_body.keys()}")
 
-        logger.info(f"Raw classification response: {classification_text}")
+        classification_text = response_body['content'][0]['text'].strip()
+        logger.info(f"🔍 RAW CLASSIFICATION TEXT: {classification_text}")
 
         # Parse JSON response
         classification = json.loads(classification_text)
-
-        logger.info(f"✅ Classification: {classification} for message: '{message[:50]}...'")
+        logger.info(f"✅ PARSED CLASSIFICATION: {json.dumps(classification)}")
+        logger.info(f"✅ Classification: intent={classification.get('intent')}, action={classification.get('action')}, can_call_direct={classification.get('can_call_direct')}")
         return classification
 
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse classification JSON: {e}")
-        logger.error(f"Classification text: {classification_text if 'classification_text' in locals() else 'N/A'}")
+        logger.error(f"❌ JSON DECODE ERROR: {e}")
+        logger.error(f"❌ Classification text was: {classification_text if 'classification_text' in locals() else 'N/A'}")
         # Fallback: chitchat intent, requires agent
         return {
             'intent': 'chitchat',
-            'action': None,
+            'action': 'unknown',
             'can_call_direct': False,
             'params': None
         }
     except Exception as e:
-        logger.error(f"Classification error: {e}")
+        logger.error(f"❌ CLASSIFICATION ERROR: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(f"❌ TRACEBACK: {traceback.format_exc()}")
         # Fallback: chitchat intent, requires agent
         return {
             'intent': 'chitchat',
-            'action': None,
+            'action': 'unknown',
             'can_call_direct': False,
             'params': None
         }

@@ -421,6 +421,9 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
         res.raise_for_status()
         api_duration = (time.time() - api_start) * 1000
         logger.info(f"API call took {api_duration:.2f}ms")
+        logger.info(f"Response status: {res.status_code}")
+        logger.info(f"Response headers: {dict(res.headers)}")
+        logger.info(f"Response text (first 500 chars): {res.text[:500]}")
 
         response = res.json()
 

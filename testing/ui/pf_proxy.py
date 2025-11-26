@@ -20,8 +20,15 @@ CORS(app)  # Enable CORS for all routes
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ProjectForce API base URL
-PF_API_BASE = "https://api-cx-portal.dev.projectsforce.com"
+# Environment-based API URLs (matches lambda/scheduling-actions/config.py)
+ENVIRONMENT = os.getenv('ENVIRONMENT', 'dev')
+API_BASE_URLS = {
+    "dev": "https://api-cx-portal.dev.projectsforce.com",
+    "staging": "https://api-cx-portal.staging.projectsforce.com",
+    "prod": "https://api-cx-portal.projectsforce.com"
+}
+PF_API_BASE = API_BASE_URLS.get(ENVIRONMENT, API_BASE_URLS["dev"])
+logger.info(f"🌍 Environment: {ENVIRONMENT} | API Base: {PF_API_BASE}")
 
 # ============================================================================
 # Conversation History Management
@@ -658,25 +665,157 @@ def get_session_history(session_id):
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    """Proxy for login endpoint"""
-    try:
-        data = request.json
-        logger.info(f"Login request for: {data.get('email', 'unknown')}")
+    """
+    Proxy for login endpoint with token validation and refresh
 
-        # Use the correct authentication endpoint
-        response = requests.post(
-            f"{PF_API_BASE}/authentication/login?identifier=projectsforce-validation",
-            json=data,
-            headers={"Content-Type": "application/json"}
+    SINGLE SOURCE OF TRUTH: Secrets Manager
+    1. Load bearer_token from Secrets Manager
+    2. Validate the token (check if it works)
+    3. If expired, perform fresh login with password
+    4. Save fresh token back to Secrets Manager
+    5. Return valid token to UI
+    """
+    try:
+        import boto3
+        import time
+
+        data = request.json
+        email = data.get('email', '')
+        password = data.get('password', '')
+        logger.info(f"Login request for: {email}")
+
+        secrets_client = boto3.client('secretsmanager', region_name='us-east-1')
+
+        # Step 1: Try to load existing token from Secrets Manager
+        try:
+            secret_response = secrets_client.get_secret_value(SecretId='projectforce/api/credentials')
+            credentials = json.loads(secret_response['SecretString'])
+
+            client_id = credentials.get('client_id', '09PF05VD')
+            user_id = credentials.get('user_id', '1646085')
+            bearer_token = credentials.get('bearer_token', '')
+
+            logger.info(f"✓ Loaded credentials from Secrets Manager: client_id={client_id}, user_id={user_id}")
+            logger.info(f"✓ Bearer token loaded (length: {len(bearer_token)})")
+
+            # Step 2: Validate the token - try to use it
+            if bearer_token and len(bearer_token) > 100:
+                logger.info("⏳ Validating existing token...")
+                validation_response = requests.get(
+                    f"{PF_API_BASE}/authentication/token/{user_id}",
+                    params={"identifier": "projectsforce-validation"},
+                    headers={
+                        "Authorization": f"Bearer {bearer_token}",
+                        "Content-Type": "application/json"
+                    },
+                    timeout=5
+                )
+
+                if validation_response.status_code == 200:
+                    logger.info("✓ Token is valid, returning existing token")
+                    result = {
+                        "accesstoken": bearer_token,  # UI expects "accesstoken" not "token"
+                        "user": {
+                            "customer_id": str(user_id),
+                            "client_id": client_id
+                        },
+                        "email": email,
+                        "success": True
+                    }
+                    return jsonify(result), 200
+                else:
+                    logger.warning(f"⚠️  Token validation failed (status: {validation_response.status_code}), need to refresh")
+
+        except Exception as load_err:
+            logger.warning(f"Could not load/validate existing token: {load_err}")
+
+        # Step 3: Token expired or not found - perform fresh login
+        logger.info("🔄 Performing fresh login with password...")
+
+        # Try actual PF360 login API
+        login_response = requests.post(
+            f"{PF_API_BASE}/authentication/login",
+            params={"identifier": "projectsforce-validation"},
+            json={
+                "email": email,
+                "password": password
+            },
+            headers={"Content-Type": "application/json"},
+            timeout=10
         )
 
-        logger.info(f"Login response status: {response.status_code}")
+        logger.info(f"Login response status: {login_response.status_code}")
+        logger.info(f"Login response Content-Type: {login_response.headers.get('Content-Type', 'unknown')}")
 
-        # Return the response
-        return jsonify(response.json()), response.status_code
+        # Check if we got JSON back (not HTML)
+        content_type = login_response.headers.get('Content-Type', '')
+        if 'application/json' not in content_type:
+            logger.error(f"PF360 login API returned non-JSON: {content_type}")
+            return jsonify({
+                "error": "Login API returned invalid response",
+                "details": "PF360 API is not returning JSON. Please contact support."
+            }), 500
+
+        if login_response.status_code == 200:
+            login_data = login_response.json()
+            fresh_token = login_data.get('access_token', login_data.get('token', ''))
+
+            if not fresh_token or len(fresh_token) < 100:
+                logger.error(f"Login successful but no valid token in response: {login_data}")
+                return jsonify({
+                    "error": "Login succeeded but no valid token received",
+                    "details": str(login_data)
+                }), 500
+
+            logger.info(f"✓ Fresh login successful (token length: {len(fresh_token)})")
+
+            # Step 4: Save fresh token to Secrets Manager
+            try:
+                # Get client_id and user_id from login response or use defaults
+                response_client_id = login_data.get('client_id', credentials.get('client_id', '09PF05VD'))
+                response_user_id = login_data.get('user_id', login_data.get('customer_id', credentials.get('user_id', '1646085')))
+
+                secret_value = {
+                    "bearer_token": fresh_token,
+                    "client_id": response_client_id,
+                    "user_id": str(response_user_id),
+                    "api_base_url": PF_API_BASE,
+                    "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "updated_by": "pf_proxy.py login"
+                }
+
+                secrets_client.put_secret_value(
+                    SecretId='projectforce/api/credentials',
+                    SecretString=json.dumps(secret_value)
+                )
+                logger.info("✓ Fresh token saved to Secrets Manager")
+            except Exception as save_err:
+                logger.error(f"Failed to save token to Secrets Manager: {save_err}")
+                # Continue anyway - UI can still use the token
+
+            # Step 5: Return fresh token to UI (match UI field names!)
+            result = {
+                "accesstoken": fresh_token,  # UI expects "accesstoken" not "token"
+                "user": {
+                    "customer_id": str(response_user_id),
+                    "client_id": response_client_id
+                },
+                "email": email,
+                "success": True
+            }
+            logger.info("✓ Login successful, returning fresh token to UI")
+            return jsonify(result), 200
+        else:
+            logger.error(f"Login failed: {login_response.status_code}")
+            logger.error(f"Response: {login_response.text[:500]}")
+            return jsonify({
+                "error": "Login failed",
+                "status_code": login_response.status_code,
+                "details": login_response.text[:200]
+            }), login_response.status_code
 
     except Exception as e:
-        logger.error(f"Login error: {str(e)}")
+        logger.error(f"Login error: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -736,7 +875,9 @@ def save_token_to_secrets():
         import time
 
         secrets_client = boto3.client('secretsmanager', region_name='us-east-1')
-        api_url = "https://api-cx-portal.dev.projectsforce.com"
+        # Use environment-aware URL
+        api_url = PF_API_BASE
+        logger.info(f"📝 Using API URL for {ENVIRONMENT}: {api_url}")
 
         # Update target secret
         secret_value = {
