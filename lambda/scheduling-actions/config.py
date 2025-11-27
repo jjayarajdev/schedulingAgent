@@ -67,38 +67,52 @@ def get_api_config(client_id: str = None, env: str = None) -> Dict[str, str]:
 def get_auth_headers(authorization: str = None, client_id: str = None) -> Dict[str, str]:
     """
     Generate authentication headers for ProjectForce API
-    Uses dynamic token management via TokenManager when available,
-    falls back to static BEARER_TOKEN from environment variables.
+    Uses provided authorization token OR reads from AWS Secrets Manager
+
+    Architecture (Phase 1+2):
+    - If valid authorization provided, use it (from session attributes)
+    - Otherwise, use TokenManager to read from Secrets Manager
+    - Supports auto-refresh on 401/403 (handled in handler.py)
+
+    Args:
+        authorization: Optional Bearer token (if provided, skips Secrets Manager)
+        client_id: ProjectForce client ID
 
     Real API requires:
     - Authorization: Bearer TOKEN
-    - Client_Id: 09PF05VD (note: capital C and I)
+    - client_id: 09PF05VD (lowercase to match portal headers)
     """
     if client_id is None:
         client_id = DEFAULT_CLIENT_ID
 
-    # Use provided authorization or get token dynamically
-    if not authorization:
-        # Try to use TokenManager for dynamic token retrieval
-        if TOKEN_MANAGER_AVAILABLE:
-            try:
-                token = get_bearer_token()
-                authorization = f"Bearer {token}"
-                logging.info("Using dynamic token from TokenManager")
-            except Exception as e:
-                logging.warning(f"Failed to get token from TokenManager: {e}")
-                # Fall back to static token
-                authorization = f"Bearer {BEARER_TOKEN}" if BEARER_TOKEN else ""
-                if BEARER_TOKEN:
-                    logging.info("Falling back to static BEARER_TOKEN")
+    # Use provided authorization if valid, otherwise fetch from Secrets Manager
+    auth_header = ""
+
+    if authorization and len(authorization) > 100:
+        # Valid token provided - use it directly
+        if not authorization.startswith("Bearer "):
+            auth_header = f"Bearer {authorization}"
         else:
-            # Fall back to static token if TokenManager not available
-            authorization = f"Bearer {BEARER_TOKEN}" if BEARER_TOKEN else ""
-    elif not authorization.startswith("Bearer "):
-        authorization = f"Bearer {authorization}"
+            auth_header = authorization
+        logging.info(f" Using provided authorization token")
+    elif TOKEN_MANAGER_AVAILABLE:
+        # No valid token provided - fetch from Secrets Manager
+        try:
+            token = get_bearer_token()
+            auth_header = f"Bearer {token}"
+            logging.info(f" Using token from AWS Secrets Manager (single source of truth)")
+        except Exception as e:
+            logging.error(f" Failed to get token from Secrets Manager: {e}")
+            # NO fallback - if Secrets Manager fails, request should fail
+            raise Exception(f"Cannot retrieve token from AWS Secrets Manager: {e}")
+    else:
+        # TokenManager not available - this is a critical error
+        error_msg = "TokenManager not available - cannot proceed without Secrets Manager access"
+        logging.error(f" {error_msg}")
+        raise Exception(error_msg)
 
     return {
-        "Authorization": authorization,
+        "Authorization": auth_header,
         "Accept": "application/json, text/plain, */*",
         "Content-Type": "application/json",
         "client_id": client_id  # Lowercase to match real portal headers
@@ -106,8 +120,8 @@ def get_auth_headers(authorization: str = None, client_id: str = None) -> Dict[s
 
 # Mock mode notification
 if USE_MOCK_API:
-    print(f"⚠️ MOCK API MODE ENABLED (USE_MOCK_API=true)")
+    print(f" MOCK API MODE ENABLED (USE_MOCK_API=true)")
     print(f"   To enable real API calls, set USE_MOCK_API=false")
 else:
-    print(f"✅ REAL API MODE ENABLED (USE_MOCK_API=false)")
+    print(f" REAL API MODE ENABLED (USE_MOCK_API=false)")
     print(f"   API Base URL: {CUSTOMER_SCHEDULER_BASE_API_URL}")

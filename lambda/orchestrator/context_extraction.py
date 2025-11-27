@@ -55,7 +55,7 @@ def extract_location_from_history(conversation_history: List[Dict]) -> Optional[
                     logger.debug(f"Address type: {type(addr)}, keys: {addr.keys() if isinstance(addr, dict) else 'N/A'}")
                     if isinstance(addr, dict) and 'city' in addr:
                         city = addr['city']
-                        logger.info(f"✅ Extracted city from project address: {city}")
+                        logger.info(f" Extracted city from project address: {city}")
                         return city
 
         except (json.JSONDecodeError, KeyError, IndexError, AttributeError) as e:
@@ -196,7 +196,7 @@ def extract_pronoun_reference(message: str, conversation_history: List[Dict]) ->
             if 'project' in data and isinstance(data['project'], dict):
                 project_id = data['project'].get('id')
                 if project_id:
-                    logger.info(f"✅ Resolved pronoun to project ID: {project_id} (from project details)")
+                    logger.info(f" Resolved pronoun to project ID: {project_id} (from project details)")
                     return {
                         'project_id': str(project_id),
                         'project_info': data['project'],
@@ -209,7 +209,7 @@ def extract_pronoun_reference(message: str, conversation_history: List[Dict]) ->
                 last_project = data['projects'][-1]
                 project_id = last_project.get('id')
                 if project_id:
-                    logger.info(f"✅ Resolved pronoun to project ID: {project_id} (last project in list)")
+                    logger.info(f" Resolved pronoun to project ID: {project_id} (last project in list)")
                     return {
                         'project_id': str(project_id),
                         'project_info': last_project,

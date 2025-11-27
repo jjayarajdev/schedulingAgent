@@ -133,7 +133,7 @@ Keep your response concise (3-5 sentences) and friendly. Do NOT include the raw 
 
         # Extract conversational text
         conversational_text = response['output']['message']['content'][0]['text']
-        logger.info(f"✅ Generated conversational response ({len(conversational_text)} chars)")
+        logger.info(f" Generated conversational response ({len(conversational_text)} chars)")
 
         return conversational_text.strip()
 
@@ -273,7 +273,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             # Add weather warning if present (from weather-aware scheduling)
             if 'weather_warning' in response_body:
                 result['weatherWarning'] = response_body['weather_warning']
-                logger.info(f"⚠️  Including weather warning in time slots response")
+                logger.info(f"  Including weather warning in time slots response")
 
             # Generate conversational response using Claude
             conversational = generate_conversational_response(action, user_message, result)
@@ -310,7 +310,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             if 'error' in response_body:
                 error_message = response_body['error']
                 result = {
-                    "message": f"❌ Failed to confirm appointment: {error_message}",
+                    "message": f" Failed to confirm appointment: {error_message}",
                     "status": "error",
                     "details": response_body
                 }
@@ -327,7 +327,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 }
             else:
                 result = {
-                    "message": "✅ Appointment confirmed!",
+                    "message": " Appointment confirmed!",
                     "appointment": appointment or response_body,
                     "status": "confirmed"
                 }
@@ -343,7 +343,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             if 'error' in response_body:
                 error_message = response_body['error']
                 result = {
-                    "message": f"❌ Failed to reschedule appointment: {error_message}",
+                    "message": f" Failed to reschedule appointment: {error_message}",
                     "status": "error",
                     "details": response_body
                 }
@@ -352,7 +352,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             # Format successful reschedule confirmation response
             appointment = response_body.get('appointment', {})
             result = {
-                "message": "✅ Appointment rescheduled successfully!",
+                "message": " Appointment rescheduled successfully!",
                 "appointment": appointment or response_body,
                 "status": "success"
             }
@@ -368,7 +368,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             if 'error' in response_body:
                 error_message = response_body['error']
                 result = {
-                    "message": f"❌ Failed to cancel appointment: {error_message}",
+                    "message": f" Failed to cancel appointment: {error_message}",
                     "status": "error",
                     "details": response_body
                 }
@@ -376,7 +376,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
 
             # Format successful cancellation confirmation response
             result = {
-                "message": "✅ Appointment cancelled successfully!",
+                "message": " Appointment cancelled successfully!",
                 "details": response_body,
                 "status": "success"
             }
@@ -499,6 +499,16 @@ def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
     api_path = '/' + action.replace('_', '-')
 
     # Construct Lambda event (Bedrock agent format)
+    # Only include pf_bearer_token in sessionAttributes if provided (Phase 1+2: tokens come from Secrets Manager)
+    session_attributes = {
+        'customer_id': params.get('customer_id', ''),
+        'client_id': params.get('client_id', '')
+    }
+
+    # Only add pf_bearer_token if explicitly provided
+    if 'pf_bearer_token' in params and params['pf_bearer_token']:
+        session_attributes['pf_bearer_token'] = params['pf_bearer_token']
+
     event = {
         'actionGroup': 'scheduling-actions',
         'function': action,
@@ -509,14 +519,10 @@ def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
             for key, value in params.items()
             if key not in ['customer_id', 'client_id', 'pf_bearer_token']
         ],
-        'sessionAttributes': {
-            'customer_id': params.get('customer_id', ''),
-            'client_id': params.get('client_id', ''),
-            'pf_bearer_token': params.get('pf_bearer_token', '')
-        }
+        'sessionAttributes': session_attributes
     }
 
-    logger.info(f"⚡ Calling Lambda directly: {function_name}.{action}")
+    logger.info(f" Calling Lambda directly: {function_name}.{action}")
     logger.debug(f"Lambda event: {json.dumps(event, indent=2)}")
 
     try:
@@ -527,7 +533,7 @@ def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         payload = json.loads(response['Payload'].read())
-        logger.info(f"✅ Lambda direct call successful")
+        logger.info(f" Lambda direct call successful")
         return payload
 
     except Exception as e:
@@ -579,7 +585,7 @@ def route_request(
     session_id: str,
     customer_id: str,
     client_id: str,
-    pf_bearer_token: str,
+    pf_bearer_token: str = None,
     conversation_history: Optional[list] = None
 ) -> Dict[str, Any]:
     """
@@ -591,7 +597,7 @@ def route_request(
         session_id: Session identifier
         customer_id: Customer ID
         client_id: Client ID
-        pf_bearer_token: ProjectForce API bearer token
+        pf_bearer_token: ProjectForce API bearer token (optional - uses Secrets Manager if not provided)
         conversation_history: Previous conversation for context
 
     Returns:
@@ -607,7 +613,7 @@ def route_request(
 
     # NEW: Use multi-agent orchestration if enabled
     if config.enable_multi_agent_orchestration:
-        logger.info("🎯 Using multi-agent orchestration")
+        logger.info(" Using multi-agent orchestration")
 
         try:
             from multi_agent_router import route_with_multi_agent_orchestration
@@ -626,7 +632,7 @@ def route_request(
             logger.error(f"Multi-agent routing error: {e}, falling back to standard routing")
 
     # FALLBACK: Use standard routing
-    logger.info("📍 Using standard routing")
+    logger.info(" Using standard routing")
 
     timing = {}
     start_time = time.time()
@@ -638,9 +644,9 @@ def route_request(
 
     # Log context resolution
     if resolved_message != message:
-        logger.info(f"🔗 Context resolved: '{message}' → '{resolved_message}'")
+        logger.info(f" Context resolved: '{message}'  '{resolved_message}'")
     if resolved_entities:
-        logger.info(f"📎 Resolved entities: {resolved_entities}")
+        logger.info(f" Resolved entities: {resolved_entities}")
 
     # Use resolved message for classification
     classification = classify_intent_and_action(resolved_message, conversation_history)
@@ -654,17 +660,20 @@ def route_request(
 
     timing['classification'] = time.time() - start_time
 
-    logger.info(f"📋 Classification: intent={intent}, action={action}, can_call_direct={can_call_direct}")
-    logger.info(f"📋 Extracted params: {extracted_params}")
+    logger.info(f" Classification: intent={intent}, action={action}, can_call_direct={can_call_direct}")
+    logger.info(f" Extracted params: {extracted_params}")
     if resolved_entities:
-        logger.info(f"📋 Merged params (with resolved entities): {merged_params}")
+        logger.info(f" Merged params (with resolved entities): {merged_params}")
 
-    # Session attributes for agent calls
+    # Session attributes for agent calls (only include pf_bearer_token if provided)
     session_attributes = {
         'customer_id': customer_id,
-        'client_id': client_id,
-        'pf_bearer_token': pf_bearer_token
+        'client_id': client_id
     }
+
+    # Only add pf_bearer_token if explicitly provided (Phase 1+2: tokens come from Secrets Manager)
+    if pf_bearer_token:
+        session_attributes['pf_bearer_token'] = pf_bearer_token
 
     # INTELLIGENT ORCHESTRATION: Use Sonnet 3.5 for ALL workflow decisions
     # NO hardcoding, NO regex - pure intelligence!
@@ -681,7 +690,7 @@ def route_request(
     )
 
     if needs_intelligent_orchestration:
-        logger.info(f"🧠 INTELLIGENT ORCHESTRATION: Using Sonnet 3.7 for workflow decisions")
+        logger.info(f" INTELLIGENT ORCHESTRATION: Using Sonnet 3.7 for workflow decisions")
 
         try:
             from intelligent_orchestrator import orchestrate_intelligent_workflow
@@ -703,18 +712,22 @@ def route_request(
 
     # OPTIMIZATION: Call Lambda directly for simple data retrieval
     if config.allow_direct_lambda and can_call_direct and action:
-        logger.info(f"⚡ DIRECT LAMBDA CALL: {action} (bypassing Bedrock)")
+        logger.info(f" DIRECT LAMBDA CALL: {action} (bypassing Bedrock)")
 
         try:
             lambda_start = time.time()
 
             # Prepare Lambda parameters (merge session params with merged params)
+            # Only include pf_bearer_token if provided (Phase 1+2: tokens come from Secrets Manager)
             lambda_params = {
                 'customer_id': customer_id,
                 'client_id': client_id,
-                'pf_bearer_token': pf_bearer_token,
                 **merged_params  # Add merged params (extracted + resolved entities)
             }
+
+            # Only add pf_bearer_token if explicitly provided
+            if pf_bearer_token:
+                lambda_params['pf_bearer_token'] = pf_bearer_token
 
             # Call Lambda directly
             lambda_response = call_lambda_directly(action, lambda_params)
@@ -741,7 +754,7 @@ def route_request(
             formatted_response = format_lambda_response(action, response_body, message)
             logger.debug(f"Formatted response: {formatted_response[:200]}...")
 
-            logger.info(f"⏱️  Direct Lambda Performance: Total={timing['total']:.2f}s | "
+            logger.info(f"  Direct Lambda Performance: Total={timing['total']:.2f}s | "
                         f"Lambda={timing['lambda_direct']:.2f}s | "
                         f"Classification={timing['classification']:.3f}s")
 
@@ -767,7 +780,7 @@ def route_request(
             }
 
     # NO BEDROCK FALLBACK - All actions should be handled by direct Lambda or workflow
-    logger.warning(f"⚠️ No handler found for: intent={intent}, action={action}, can_call_direct={can_call_direct}")
+    logger.warning(f" No handler found for: intent={intent}, action={action}, can_call_direct={can_call_direct}")
 
     timing['total'] = time.time() - start_time
     return {

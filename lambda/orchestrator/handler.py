@@ -58,17 +58,19 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if not message:
             return create_error_response(400, "Missing required parameter: message")
 
-        if not pf_token or not pf_client_id or not pf_user_id:
-            return create_error_response(400, "Missing authentication parameters")
+        # Phase 1+2 Architecture: pf_token is now optional (tokens come from Secrets Manager)
+        # Only client_id and user_id are required
+        if not pf_client_id or not pf_user_id:
+            return create_error_response(400, "Missing authentication parameters: pf_client_id and pf_user_id required")
 
-        logger.info(f"🚀 Request: session_id={session_id}, message='{message[:50]}...'")
+        logger.info(f" Request: session_id={session_id}, message='{message[:50]}...'")
 
         # Get conversation manager
         conversation_manager = get_conversation_manager()
 
         # Get conversation history for this session
         conversation_history = conversation_manager.get_conversation_history(session_id)
-        logger.info(f"📚 Session {session_id} has {len(conversation_history)} messages in history")
+        logger.info(f" Session {session_id} has {len(conversation_history)} messages in history")
 
         # Add user message to history
         conversation_manager.add_to_conversation_history(session_id, 'user', message)
@@ -91,7 +93,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         direct_call = result['direct_call']
         timing = result['timing']
 
-        logger.info(f"✅ Response: agent={agent_name}, intent={intent}, direct={direct_call}, timing={timing.get('total', 0):.2f}s")
+        logger.info(f" Response: agent={agent_name}, intent={intent}, direct={direct_call}, timing={timing.get('total', 0):.2f}s")
 
         # Add assistant response to conversation history
         conversation_manager.add_to_conversation_history(

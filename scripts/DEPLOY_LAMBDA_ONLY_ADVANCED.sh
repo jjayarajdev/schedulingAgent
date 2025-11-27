@@ -28,30 +28,219 @@
 #   ./DEPLOY_LAMBDA_ONLY_ADVANCED.sh --profile pf-aws
 ##############################################################################
 
-set -e  # Exit on error
+# Error handling - DO NOT use set -e (causes zombie processes)
+# Instead, we handle errors explicitly with || true or proper checks
 
-# AWS Profile Support
-AWS_PROFILE="${AWS_PROFILE:-}"
+# Track temp files for cleanup
+TEMP_FILES=()
+CLEANUP_NEEDED=false
 
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --profile)
-            AWS_PROFILE="$2"
-            shift 2
-            ;;
-        *)
-            shift
-            ;;
-    esac
-done
+# Cleanup function - called on exit
+cleanup_on_exit() {
+    local EXIT_CODE=$?
 
-# AWS CLI wrapper
-aws_cmd() {
-    if [[ -n "$AWS_PROFILE" ]]; then
-        aws --profile "$AWS_PROFILE" "$@"
-    else
-        aws "$@"
+    if [[ "$CLEANUP_NEEDED" == "true" ]]; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🧹 Cleaning up temp files..."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+        # Clean up tracked temp files
+        for file in "${TEMP_FILES[@]}"; do
+            if [[ -f "$file" ]]; then
+                rm -f "$file"
+                echo "  → Removed: $file"
+            fi
+        done
+
+        # Clean up common temp file patterns
+        find "$PROJECT_DIR" -name "trust-policy-*.json" -delete 2>/dev/null || true
+        find "$PROJECT_DIR" -name "secrets-policy.json" -delete 2>/dev/null || true
+        find "$PROJECT_DIR" -name "orchestrator-permissions.json" -delete 2>/dev/null || true
+        find "$PROJECT_DIR" -name "scheduling-env.json" -delete 2>/dev/null || true
+        find "$PROJECT_DIR" -name "orchestrator-env.json" -delete 2>/dev/null || true
+        find "$PROJECT_DIR" -name "iam-create-*.log" -delete 2>/dev/null || true
+        find "$PROJECT_DIR" -name "lambda-create-*.log" -delete 2>/dev/null || true
+        find "$PROJECT_DIR" -name "kms-fix-*.json" -delete 2>/dev/null || true
+
+        echo "  ✓ Cleanup complete"
     fi
+
+    if [[ $EXIT_CODE -ne 0 ]]; then
+        echo ""
+        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${RED}❌ Deployment failed with exit code: $EXIT_CODE${NC}"
+        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+        echo "To clean up resources, run:"
+        echo "  ./scripts/CLEANUP_ADVANCED.sh"
+        echo ""
+    fi
+
+    exit $EXIT_CODE
+}
+
+# Register cleanup trap
+trap cleanup_on_exit EXIT INT TERM
+
+# Colors (defined early for profile selection UI)
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# ============================================================================
+# AWS ACCOUNT SELECTION - Smart account detection and configuration
+# ============================================================================
+
+echo "════════════════════════════════════════════════════════════════════════════"
+echo -e "${CYAN}🔐 AWS ACCOUNT SELECTION${NC}"
+echo "════════════════════════════════════════════════════════════════════════════"
+echo ""
+
+# Get current/default profile
+CURRENT_PROFILE="${AWS_PROFILE:-default}"
+CURRENT_ACCOUNT=$(aws sts get-caller-identity --profile "$CURRENT_PROFILE" --query Account --output text 2>/dev/null || echo "N/A")
+
+echo -e "Current Profile: ${YELLOW}${CURRENT_PROFILE}${NC}"
+echo -e "Current Account: ${YELLOW}${CURRENT_ACCOUNT}${NC}"
+echo ""
+
+# Ask if this is correct
+echo -e "${YELLOW}Is this the correct AWS account?${NC}"
+echo ""
+echo "  [1] Yes, proceed with account ${CURRENT_ACCOUNT}"
+echo "  [2] No, I want to use a different account"
+echo ""
+read -p "Enter choice (1 or 2): " ACCOUNT_CHOICE
+
+if [[ "$ACCOUNT_CHOICE" == "1" ]]; then
+    # Use current profile
+    AWS_PROFILE="$CURRENT_PROFILE"
+    ACCOUNT_ID="$CURRENT_ACCOUNT"
+    echo ""
+    echo -e "${GREEN}✓ Using account: ${ACCOUNT_ID}${NC}"
+else
+    # User wants different account
+    echo ""
+    echo -e "${YELLOW}Enter the AWS Account ID you want to use:${NC}"
+    read -p "Account ID (12 digits): " TARGET_ACCOUNT_ID
+
+    # Validate account ID format
+    if ! [[ "$TARGET_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+        echo -e "${RED}Invalid account ID format. Must be 12 digits.${NC}"
+        exit 1
+    fi
+
+    echo ""
+    echo "Searching existing profiles for account ${TARGET_ACCOUNT_ID}..."
+
+    # Search all profiles for matching account ID
+    FOUND_PROFILE=""
+    while IFS= read -r profile; do
+        if [[ -n "$profile" ]]; then
+            PROFILE_ACCOUNT=$(aws sts get-caller-identity --profile "$profile" --query Account --output text 2>/dev/null || echo "")
+            if [[ "$PROFILE_ACCOUNT" == "$TARGET_ACCOUNT_ID" ]]; then
+                FOUND_PROFILE="$profile"
+                break
+            fi
+        fi
+    done < <(aws configure list-profiles 2>/dev/null)
+
+    if [[ -n "$FOUND_PROFILE" ]]; then
+        echo -e "${GREEN}✓ Found existing profile '${FOUND_PROFILE}' with account ${TARGET_ACCOUNT_ID}${NC}"
+        AWS_PROFILE="$FOUND_PROFILE"
+        ACCOUNT_ID="$TARGET_ACCOUNT_ID"
+    else
+        echo -e "${YELLOW}No existing profile found for account ${TARGET_ACCOUNT_ID}${NC}"
+        echo ""
+        echo -e "${CYAN}Let's configure AWS credentials for this account:${NC}"
+        echo ""
+
+        # Ask for profile name
+        read -p "Profile name (e.g., pf-${TARGET_ACCOUNT_ID}): " NEW_PROFILE_NAME
+        if [[ -z "$NEW_PROFILE_NAME" ]]; then
+            NEW_PROFILE_NAME="pf-${TARGET_ACCOUNT_ID}"
+        fi
+
+        echo ""
+        echo -e "${YELLOW}Enter AWS credentials for account ${TARGET_ACCOUNT_ID}:${NC}"
+        echo ""
+
+        # Get Access Key ID
+        read -p "AWS Access Key ID: " AWS_ACCESS_KEY_ID
+        if [[ -z "$AWS_ACCESS_KEY_ID" ]]; then
+            echo -e "${RED}Access Key ID is required. Aborting.${NC}"
+            exit 1
+        fi
+
+        # Get Secret Access Key (visible for paste compatibility on Windows)
+        echo -e "${YELLOW}AWS Secret Access Key (will be visible - clear screen after):${NC}"
+        read -p "> " AWS_SECRET_ACCESS_KEY
+        if [[ -z "$AWS_SECRET_ACCESS_KEY" ]]; then
+            echo -e "${RED}Secret Access Key is required. Aborting.${NC}"
+            exit 1
+        fi
+        # Clear the line for security (works on most terminals)
+        echo -e "\033[1A\033[2K> ********** (hidden)"
+
+        # Configure the new profile
+        echo ""
+        echo "Configuring profile '${NEW_PROFILE_NAME}'..."
+
+        aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile "$NEW_PROFILE_NAME"
+        aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile "$NEW_PROFILE_NAME"
+        aws configure set region "us-east-1" --profile "$NEW_PROFILE_NAME"
+        aws configure set output "json" --profile "$NEW_PROFILE_NAME"
+
+        # Verify the new profile works
+        echo "Verifying credentials..."
+        VERIFY_ACCOUNT=$(aws sts get-caller-identity --profile "$NEW_PROFILE_NAME" --query Account --output text 2>/dev/null || echo "ERROR")
+
+        if [[ "$VERIFY_ACCOUNT" == "$TARGET_ACCOUNT_ID" ]]; then
+            echo -e "${GREEN}✓ Profile '${NEW_PROFILE_NAME}' configured successfully!${NC}"
+            echo -e "${GREEN}✓ Verified account: ${VERIFY_ACCOUNT}${NC}"
+            AWS_PROFILE="$NEW_PROFILE_NAME"
+            ACCOUNT_ID="$TARGET_ACCOUNT_ID"
+        else
+            echo -e "${RED}❌ Credentials verification failed!${NC}"
+            echo "   Expected account: $TARGET_ACCOUNT_ID"
+            echo "   Got account: $VERIFY_ACCOUNT"
+            echo ""
+            echo "Please check your credentials and try again."
+            exit 1
+        fi
+    fi
+fi
+
+echo ""
+
+# Final confirmation
+echo -e "${YELLOW}Confirm deployment:${NC}"
+echo ""
+echo "  Profile:    $AWS_PROFILE"
+echo "  Account:    $ACCOUNT_ID"
+echo "  Region:     us-east-1"
+echo ""
+read -p "Type 'yes' to proceed: " FINAL_CONFIRM
+
+if [[ "$FINAL_CONFIRM" != "yes" ]]; then
+    echo -e "${RED}Deployment aborted.${NC}"
+    exit 0
+fi
+
+echo ""
+echo -e "${GREEN}✓ Proceeding with deployment...${NC}"
+echo ""
+
+# Export for use throughout script
+export AWS_PROFILE
+
+# AWS CLI wrapper (uses selected profile)
+aws_cmd() {
+    aws --profile "$AWS_PROFILE" "$@"
 }
 
 # Determine paths
@@ -59,15 +248,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 REGION="us-east-1"
-ACCOUNT_ID=$(aws_cmd sts get-caller-identity --query Account --output text)
 ENV="dev"
-
-# Colors
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
 
 # Detect platform and set correct Python command
 if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
@@ -121,7 +302,8 @@ delete_iam_role_if_exists() {
     aws_cmd iam delete-role --role-name "$ROLE_NAME" &>/dev/null || true
     echo "    ✓ Role deleted"
 }
-n##############################################################################
+
+##############################################################################
 # Helper: Fix KMS Encryption Issues by Re-encrypting Environment Variables
 ##############################################################################
 
@@ -157,15 +339,16 @@ fix_kms_encryption() {
     # Restore environment variables
     echo "  → Restoring environment variables with AWS-managed encryption..."
     local ENV_JSON_FILE="./kms-fix-${FUNCTION_NAME}.json"
+    TEMP_FILES+=("$ENV_JSON_FILE")
     echo "{"Variables":$ENV_VARS}" > "$ENV_JSON_FILE"
-    
+
     aws_cmd lambda update-function-configuration \n        --function-name "$FUNCTION_NAME" \n        --environment "file://$ENV_JSON_FILE" \n        --region "$REGION" &>/dev/null
-    
+
     # Wait for final update
     echo "  → Waiting for final update..."
     sleep 5
     aws_cmd lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION" 2>/dev/null || sleep 10
-    
+
     rm -f "$ENV_JSON_FILE"
     echo -e "  ${GREEN}✅ KMS encryption fixed for $FUNCTION_NAME${NC}"
 }
@@ -179,25 +362,38 @@ echo -e "${BLUE}ProjectForce API Credentials${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-read -p "Client ID (e.g., 09PF05VD): " PF_CLIENT_ID
-while [[ -z "$PF_CLIENT_ID" ]]; do
-    echo -e "${YELLOW}Client ID is required${NC}"
-    read -p "Client ID: " PF_CLIENT_ID
-done
+# Support environment variables for non-interactive mode
+if [[ -n "$PF_CLIENT_ID" ]]; then
+    echo "  Using PF_CLIENT_ID from environment: $PF_CLIENT_ID"
+else
+    read -p "Client ID (e.g., 09PF05VD): " PF_CLIENT_ID
+    while [[ -z "$PF_CLIENT_ID" ]]; do
+        echo -e "${YELLOW}Client ID is required${NC}"
+        read -p "Client ID: " PF_CLIENT_ID
+    done
+fi
 
-read -p "User ID (e.g., 1646085): " PF_USER_ID
-while [[ -z "$PF_USER_ID" ]]; do
-    echo -e "${YELLOW}User ID is required${NC}"
-    read -p "User ID: " PF_USER_ID
-done
+if [[ -n "$PF_USER_ID" ]]; then
+    echo "  Using PF_USER_ID from environment: $PF_USER_ID"
+else
+    read -p "User ID (e.g., 1646085): " PF_USER_ID
+    while [[ -z "$PF_USER_ID" ]]; do
+        echo -e "${YELLOW}User ID is required${NC}"
+        read -p "User ID: " PF_USER_ID
+    done
+fi
 
-echo ""
-echo "Bearer Token (paste from Local Storage 'accesstoken'):"
-read -p "> " PF_BEARER_TOKEN
-while [[ -z "$PF_BEARER_TOKEN" ]]; do
-    echo -e "${YELLOW}Bearer Token is required${NC}"
-    read -p "Bearer Token: " PF_BEARER_TOKEN
-done
+# Bearer token is OPTIONAL - Phase 1+2 architecture uses Secrets Manager with auto-refresh
+if [[ -z "$PF_BEARER_TOKEN" ]]; then
+    echo ""
+    echo -e "${CYAN}Bearer Token is OPTIONAL (Phase 1+2 auto-refresh architecture)${NC}"
+    echo "Press ENTER to skip, or paste token if you have one:"
+    read -p "> " PF_BEARER_TOKEN
+    if [[ -z "$PF_BEARER_TOKEN" ]]; then
+        echo "  → Skipping bearer token (will use auto-refresh)"
+        PF_BEARER_TOKEN="PENDING_AUTO_REFRESH"
+    fi
+fi
 
 echo ""
 echo -e "${GREEN}✓ Credentials captured${NC}"
@@ -218,7 +414,8 @@ SECRET_VALUE=$(cat <<EOF
   "bearer_token": "$PF_BEARER_TOKEN",
   "client_id": "$PF_CLIENT_ID",
   "user_id": "$PF_USER_ID",
-  "api_base_url": "https://api-cx-portal.dev.projectsforce.com"
+  "api_base_url": "https://api-cx-portal.dev.projectsforce.com",
+  "REFRESH_TOKEN": "true"
 }
 EOF
 )
@@ -386,6 +583,8 @@ with zipfile.ZipFile('function.zip', 'w', zipfile.ZIP_DEFLATED) as z:
 
     # Use current directory for temp files instead of /tmp for Windows compatibility
     local TRUST_POLICY_FILE="./trust-policy-${ROLE_NAME}.json"
+    TEMP_FILES+=("$TRUST_POLICY_FILE")
+    CLEANUP_NEEDED=true
 
     cat > "$TRUST_POLICY_FILE" <<EOF
 {
@@ -404,7 +603,7 @@ EOF
         --assume-role-policy-document "file://${TRUST_POLICY_FILE}" 2>&1 | tee "./iam-create-$ROLE_NAME.log"; then
         echo "  ❌ Failed to create IAM role $ROLE_NAME"
         echo "  See: ./iam-create-$ROLE_NAME.log"
-        rm -f "$TRUST_POLICY_FILE"
+        TEMP_FILES+=("./iam-create-$ROLE_NAME.log")
         return 1
     fi
     rm -f "$TRUST_POLICY_FILE"
@@ -424,6 +623,7 @@ EOF
     fi
 
     # Add Secrets Manager permissions
+    TEMP_FILES+=("./secrets-policy.json")
     cat > ./secrets-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -442,17 +642,19 @@ EOF
 
     # Add Lambda invoke permissions and Bedrock access for orchestrator
     if [[ "$FUNCTION_NAME" == "pf-orchestrator" ]]; then
+        TEMP_FILES+=("./orchestrator-permissions.json")
         cat > ./orchestrator-permissions.json <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": ["bedrock:InvokeModel"],
+      "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
       "Resource": [
-        "arn:aws:bedrock:${REGION}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
-        "arn:aws:bedrock:${REGION}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0",
-        "arn:aws:bedrock:*::foundation-model/*"
+        "arn:aws:bedrock:${REGION}::foundation-model/anthropic.claude-*",
+        "arn:aws:bedrock:${REGION}:${ACCOUNT_ID}:inference-profile/us.anthropic.claude-*",
+        "arn:aws:bedrock:*::foundation-model/*",
+        "arn:aws:bedrock:*:${ACCOUNT_ID}:inference-profile/*"
       ]
     },
     {
@@ -583,6 +785,7 @@ echo "=========================================="
 
 echo "  → Setting USE_MOCK_API=false for real API calls..."
 
+TEMP_FILES+=("./scheduling-env.json")
 cat > ./scheduling-env.json <<EOF
 {
   "Variables": {
@@ -646,6 +849,7 @@ if [[ $WAIT_COUNT -ge $MAX_WAIT ]]; then
 fi
 
 # Create environment configuration
+TEMP_FILES+=("./orchestrator-env.json")
 cat > ./orchestrator-env.json <<EOF
 {
   "Variables": {

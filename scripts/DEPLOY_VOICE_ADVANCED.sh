@@ -8,7 +8,57 @@
 # Platform: Windows (Git Bash), Linux, macOS
 # ============================================================================
 
-set -e
+# Error handling - DO NOT use set -e (causes zombie processes)
+# Instead, we handle errors explicitly with || true or proper checks
+
+# Track temp files for cleanup
+TEMP_FILES=()
+CLEANUP_NEEDED=false
+
+# Cleanup function - called on exit
+cleanup_on_exit() {
+    local EXIT_CODE=$?
+
+    if [[ "$CLEANUP_NEEDED" == "true" ]]; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🧹 Cleaning up temp files..."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+        # Clean up tracked temp files
+        for file in "${TEMP_FILES[@]}"; do
+            if [[ -f "$file" ]]; then
+                rm -f "$file"
+                echo "  → Removed: $file"
+            fi
+        done
+
+        # Clean up common temp file patterns
+        find . -name "trust-policy-*.json" -delete 2>/dev/null || true
+        find . -name "policy-*.json" -delete 2>/dev/null || true
+        find . -name "iam-*.log" -delete 2>/dev/null || true
+        find . -name "lambda-*.log" -delete 2>/dev/null || true
+        find . -name "pip-install-*.log" -delete 2>/dev/null || true
+
+        echo "  ✓ Cleanup complete"
+    fi
+
+    if [[ $EXIT_CODE -ne 0 ]]; then
+        echo ""
+        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${RED}❌ Deployment failed with exit code: $EXIT_CODE${NC}"
+        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+        echo "To clean up resources, run:"
+        echo "  ./scripts/CLEANUP_VOICE_ADVANCED.sh"
+        echo ""
+    fi
+
+    exit $EXIT_CODE
+}
+
+# Register cleanup trap
+trap cleanup_on_exit EXIT INT TERM
 
 # ============================================================================
 # Colors
@@ -21,6 +71,123 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # ============================================================================
+# AWS ACCOUNT SELECTION - Smart account detection and configuration
+# ============================================================================
+
+echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════${NC}"
+echo -e "${CYAN}🔐 AWS ACCOUNT SELECTION${NC}"
+echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════${NC}"
+echo ""
+
+# Get current/default profile
+CURRENT_PROFILE="${AWS_PROFILE:-default}"
+CURRENT_ACCOUNT=$(aws sts get-caller-identity --profile "$CURRENT_PROFILE" --query Account --output text 2>/dev/null || echo "N/A")
+
+echo -e "Current Profile: ${YELLOW}${CURRENT_PROFILE}${NC}"
+echo -e "Current Account: ${YELLOW}${CURRENT_ACCOUNT}${NC}"
+echo ""
+
+# Ask if this is correct
+echo -e "${YELLOW}Is this the correct AWS account?${NC}"
+echo ""
+echo "  [1] Yes, proceed with account ${CURRENT_ACCOUNT}"
+echo "  [2] No, I want to use a different account"
+echo ""
+read -p "Enter choice (1 or 2): " ACCOUNT_CHOICE
+
+if [[ "$ACCOUNT_CHOICE" == "1" ]]; then
+    AWS_PROFILE="$CURRENT_PROFILE"
+    SELECTED_ACCOUNT_ID="$CURRENT_ACCOUNT"
+    echo ""
+    echo -e "${GREEN}✓ Using account: ${SELECTED_ACCOUNT_ID}${NC}"
+else
+    echo ""
+    echo -e "${YELLOW}Enter the AWS Account ID you want to use:${NC}"
+    read -p "Account ID (12 digits): " TARGET_ACCOUNT_ID
+
+    if ! [[ "$TARGET_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+        echo -e "${RED}Invalid account ID format. Must be 12 digits.${NC}"
+        exit 1
+    fi
+
+    echo ""
+    echo "Searching existing profiles for account ${TARGET_ACCOUNT_ID}..."
+
+    FOUND_PROFILE=""
+    while IFS= read -r profile; do
+        if [[ -n "$profile" ]]; then
+            PROFILE_ACCOUNT=$(aws sts get-caller-identity --profile "$profile" --query Account --output text 2>/dev/null || echo "")
+            if [[ "$PROFILE_ACCOUNT" == "$TARGET_ACCOUNT_ID" ]]; then
+                FOUND_PROFILE="$profile"
+                break
+            fi
+        fi
+    done < <(aws configure list-profiles 2>/dev/null)
+
+    if [[ -n "$FOUND_PROFILE" ]]; then
+        echo -e "${GREEN}✓ Found existing profile '${FOUND_PROFILE}' with account ${TARGET_ACCOUNT_ID}${NC}"
+        AWS_PROFILE="$FOUND_PROFILE"
+        SELECTED_ACCOUNT_ID="$TARGET_ACCOUNT_ID"
+    else
+        echo -e "${YELLOW}No existing profile found for account ${TARGET_ACCOUNT_ID}${NC}"
+        echo ""
+        echo -e "${CYAN}Let's configure AWS credentials for this account:${NC}"
+        echo ""
+
+        read -p "Profile name (e.g., pf-${TARGET_ACCOUNT_ID}): " NEW_PROFILE_NAME
+        if [[ -z "$NEW_PROFILE_NAME" ]]; then
+            NEW_PROFILE_NAME="pf-${TARGET_ACCOUNT_ID}"
+        fi
+
+        echo ""
+        echo -e "${YELLOW}Enter AWS credentials for account ${TARGET_ACCOUNT_ID}:${NC}"
+        echo ""
+
+        read -p "AWS Access Key ID: " AWS_ACCESS_KEY_ID
+        if [[ -z "$AWS_ACCESS_KEY_ID" ]]; then
+            echo -e "${RED}Access Key ID is required. Aborting.${NC}"
+            exit 1
+        fi
+
+        echo -e "${YELLOW}AWS Secret Access Key (will be visible - clear screen after):${NC}"
+        read -p "> " AWS_SECRET_ACCESS_KEY
+        if [[ -z "$AWS_SECRET_ACCESS_KEY" ]]; then
+            echo -e "${RED}Secret Access Key is required. Aborting.${NC}"
+            exit 1
+        fi
+        echo -e "\033[1A\033[2K> ********** (hidden)"
+
+        echo ""
+        echo "Configuring profile '${NEW_PROFILE_NAME}'..."
+
+        aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile "$NEW_PROFILE_NAME"
+        aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile "$NEW_PROFILE_NAME"
+        aws configure set region "us-east-1" --profile "$NEW_PROFILE_NAME"
+        aws configure set output "json" --profile "$NEW_PROFILE_NAME"
+
+        echo "Verifying credentials..."
+        VERIFY_ACCOUNT=$(aws sts get-caller-identity --profile "$NEW_PROFILE_NAME" --query Account --output text 2>/dev/null || echo "ERROR")
+
+        if [[ "$VERIFY_ACCOUNT" == "$TARGET_ACCOUNT_ID" ]]; then
+            echo -e "${GREEN}✓ Profile '${NEW_PROFILE_NAME}' configured successfully!${NC}"
+            echo -e "${GREEN}✓ Verified account: ${VERIFY_ACCOUNT}${NC}"
+            AWS_PROFILE="$NEW_PROFILE_NAME"
+            SELECTED_ACCOUNT_ID="$TARGET_ACCOUNT_ID"
+        else
+            echo -e "${RED}❌ Credentials verification failed!${NC}"
+            echo "   Expected account: $TARGET_ACCOUNT_ID"
+            echo "   Got account: $VERIFY_ACCOUNT"
+            exit 1
+        fi
+    fi
+fi
+
+echo ""
+
+# Export for use throughout script
+export AWS_PROFILE
+
+# ============================================================================
 # Configuration
 # ============================================================================
 REGION="${AWS_REGION:-us-east-1}"
@@ -30,14 +197,20 @@ PREFIX="pf"
 # Lambda function names
 LEX_FULFILLMENT_FUNCTION="pf-lex-fulfillment-${ENVIRONMENT}"
 VOICE_BRIDGE_FUNCTION="pf-voice-bedrock-bridge-${ENVIRONMENT}"
+CUSTOMER_LOOKUP_FUNCTION="pf-customer-lookup-${ENVIRONMENT}"
 
 # Lambda source directories
 LEX_FULFILLMENT_DIR="lambda/lex-fulfillment"
 VOICE_BRIDGE_DIR="lambda/voice-bedrock-bridge"
+CUSTOMER_LOOKUP_DIR="lambda/customer-lookup"
 
 # IAM role names
 LEX_FULFILLMENT_ROLE="pf-lex-fulfillment-role-${ENVIRONMENT}"
 VOICE_BRIDGE_ROLE="pf-voice-bedrock-bridge-role-${ENVIRONMENT}"
+CUSTOMER_LOOKUP_ROLE="pf-customer-lookup-role-${ENVIRONMENT}"
+
+# DynamoDB Tables
+CUSTOMER_TABLE="pf-customers-${ENVIRONMENT}"
 
 # ============================================================================
 # Platform Detection & Python Command
@@ -82,6 +255,8 @@ create_iam_role() {
 
     # Create trust policy file (using current directory instead of /tmp/)
     local TRUST_POLICY_FILE="./trust-policy-${ROLE_NAME}.json"
+    TEMP_FILES+=("$TRUST_POLICY_FILE")
+    CLEANUP_NEEDED=true
 
     cat > "$TRUST_POLICY_FILE" <<EOF
 {
@@ -166,6 +341,7 @@ create_inline_policy() {
 
     # Write policy document to file (using current directory)
     local POLICY_FILE="./policy-${ROLE_NAME}-${POLICY_NAME}.json"
+    TEMP_FILES+=("$POLICY_FILE")
     echo "$POLICY_DOCUMENT" > "$POLICY_FILE"
 
     if ! aws_cmd iam put-role-policy \
@@ -179,6 +355,41 @@ create_inline_policy() {
 
     rm -f "$POLICY_FILE"
     echo "  ✓ Inline policy created"
+    return 0
+}
+
+# Create DynamoDB table
+create_dynamodb_table() {
+    local TABLE_NAME=$1
+    local PARTITION_KEY=$2
+    local PARTITION_KEY_TYPE=$3
+
+    echo "  → Creating DynamoDB table: $TABLE_NAME"
+
+    # Check if table already exists
+    if aws_cmd dynamodb describe-table --table-name "$TABLE_NAME" --region "$REGION" &>/dev/null; then
+        echo "  ℹ️  DynamoDB table already exists: $TABLE_NAME"
+        return 0
+    fi
+
+    # Create the table
+    if ! aws_cmd dynamodb create-table \
+        --table-name "$TABLE_NAME" \
+        --attribute-definitions "AttributeName=${PARTITION_KEY},AttributeType=${PARTITION_KEY_TYPE}" \
+        --key-schema "AttributeName=${PARTITION_KEY},KeyType=HASH" \
+        --billing-mode PAY_PER_REQUEST \
+        --region "$REGION" 2>&1 | tee "./dynamodb-create-$TABLE_NAME.log"; then
+        echo "  ❌ Failed to create DynamoDB table $TABLE_NAME"
+        return 1
+    fi
+
+    echo "  ✓ DynamoDB table created: $TABLE_NAME"
+
+    # Wait for table to become active
+    echo "  → Waiting for table to become active..."
+    aws_cmd dynamodb wait table-exists --table-name "$TABLE_NAME" --region "$REGION" 2>/dev/null || true
+    echo "  ✓ Table is active"
+
     return 0
 }
 
@@ -326,15 +537,19 @@ deploy_lambda() {
 }
 
 # ============================================================================
-# Main Deployment
+# Main Deployment - Profile Selection happens first at script start
 # ============================================================================
+
+# Move profile selection to the beginning of the script before helper functions
+# Profile selection happens at line ~23 after colors are defined
 
 echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════${NC}"
 echo -e "${BLUE}🚀 ProjectForce Advanced Voice Lambda Deployment${NC}"
 echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════${NC}"
 echo ""
 echo "Region: $REGION"
-echo "Account: $(get_account_id)"
+echo "Account: $SELECTED_ACCOUNT_ID"
+echo "Profile: $AWS_PROFILE"
 echo "Environment: $ENVIRONMENT"
 echo "Platform: $PLATFORM"
 echo "Python: $PYTHON_CMD"
@@ -343,6 +558,19 @@ echo "✨ Features:"
 echo "  • Cross-platform Python-only packaging (no zip command needed)"
 echo "  • Proper IAM role management"
 echo "  • Error-resilient deployment"
+echo ""
+
+# Final confirmation
+echo -e "${YELLOW}Confirm deployment to this account?${NC}"
+read -p "Type 'yes' to proceed: " FINAL_CONFIRM
+
+if [[ "$FINAL_CONFIRM" != "yes" ]]; then
+    echo -e "${RED}Deployment aborted.${NC}"
+    exit 0
+fi
+
+echo ""
+echo -e "${GREEN}✓ Proceeding with deployment...${NC}"
 echo ""
 
 # ============================================================================
@@ -387,7 +615,10 @@ LEX_FULFILLMENT_POLICY=$(cat <<EOF
       "Sid": "LambdaInvoke",
       "Effect": "Allow",
       "Action": "lambda:InvokeFunction",
-      "Resource": "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-voice-bedrock-bridge-${ENVIRONMENT}"
+      "Resource": [
+        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-voice-bedrock-bridge-${ENVIRONMENT}",
+        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-customer-lookup-${ENVIRONMENT}"
+      ]
     },
     {
       "Sid": "SecretsManagerAccess",
@@ -451,6 +682,54 @@ create_inline_policy "$VOICE_BRIDGE_ROLE" "VoiceBridgePolicy" "$VOICE_BRIDGE_POL
 
 echo ""
 
+# Create Customer Lookup Role
+create_iam_role "$CUSTOMER_LOOKUP_ROLE" "lambda.amazonaws.com" "Role for customer lookup Lambda function"
+
+# Attach managed policies
+attach_managed_policy "$CUSTOMER_LOOKUP_ROLE" "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+
+# Create inline policy for Customer Lookup
+CUSTOMER_LOOKUP_POLICY=$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DynamoDBAccess",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:Query",
+        "dynamodb:Scan"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/${CUSTOMER_TABLE}",
+        "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/${CUSTOMER_TABLE}/index/*"
+      ]
+    }
+  ]
+}
+EOF
+)
+
+create_inline_policy "$CUSTOMER_LOOKUP_ROLE" "CustomerLookupPolicy" "$CUSTOMER_LOOKUP_POLICY"
+
+echo ""
+
+# ============================================================================
+# Step 1.5: Create DynamoDB Tables
+# ============================================================================
+
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}Step 1.5: Creating DynamoDB Tables${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+create_dynamodb_table "$CUSTOMER_TABLE" "customer_id" "S"
+
+echo ""
+
 # ============================================================================
 # Step 2: Deploy Lambda Functions
 # ============================================================================
@@ -476,6 +755,15 @@ deploy_lambda \
     "handler.lambda_handler" \
     "python3.11" \
     "Voice to Bedrock agent bridge for voice integration"
+
+# Deploy Customer Lookup Lambda
+deploy_lambda \
+    "$CUSTOMER_LOOKUP_FUNCTION" \
+    "$CUSTOMER_LOOKUP_ROLE" \
+    "$CUSTOMER_LOOKUP_DIR" \
+    "handler.lambda_handler" \
+    "python3.11" \
+    "Customer lookup service for voice integration"
 
 echo ""
 
@@ -544,11 +832,17 @@ echo ""
 echo "Deployed Lambda Functions:"
 echo "  ✅ $LEX_FULFILLMENT_FUNCTION (python3.11)"
 echo "  ✅ $VOICE_BRIDGE_FUNCTION (python3.11)"
+echo "  ✅ $CUSTOMER_LOOKUP_FUNCTION (python3.11)"
 echo ""
 
 echo "IAM Roles Created:"
 echo "  ✅ $LEX_FULFILLMENT_ROLE"
 echo "  ✅ $VOICE_BRIDGE_ROLE"
+echo "  ✅ $CUSTOMER_LOOKUP_ROLE"
+echo ""
+
+echo "DynamoDB Tables Created:"
+echo "  ✅ $CUSTOMER_TABLE"
 echo ""
 
 echo "Permissions Granted:"

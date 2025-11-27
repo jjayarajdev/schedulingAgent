@@ -7,7 +7,8 @@
 # Features: Proper IAM policy detachment, safe deletion, cross-platform
 # ============================================================================
 
-set -e
+# Error handling - DO NOT use set -e (causes immediate exit)
+# Using explicit error handling with || true
 
 # ============================================================================
 # Colors
@@ -20,6 +21,125 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # ============================================================================
+# AWS ACCOUNT SELECTION - Smart account detection and configuration
+# ============================================================================
+
+echo -e "${RED}════════════════════════════════════════════════════════════════════════════${NC}"
+echo -e "${RED}🧹 ProjectForce Advanced Voice Cleanup Script${NC}"
+echo -e "${RED}════════════════════════════════════════════════════════════════════════════${NC}"
+echo ""
+echo -e "${CYAN}🔐 AWS ACCOUNT SELECTION${NC}"
+echo ""
+
+# Get current/default profile
+CURRENT_PROFILE="${AWS_PROFILE:-default}"
+CURRENT_ACCOUNT=$(aws sts get-caller-identity --profile "$CURRENT_PROFILE" --query Account --output text 2>/dev/null || echo "N/A")
+
+echo -e "Current Profile: ${YELLOW}${CURRENT_PROFILE}${NC}"
+echo -e "Current Account: ${YELLOW}${CURRENT_ACCOUNT}${NC}"
+echo ""
+
+# Ask if this is correct
+echo -e "${YELLOW}Is this the correct AWS account?${NC}"
+echo ""
+echo "  [1] Yes, proceed with account ${CURRENT_ACCOUNT}"
+echo "  [2] No, I want to use a different account"
+echo ""
+read -p "Enter choice (1 or 2): " ACCOUNT_CHOICE
+
+if [[ "$ACCOUNT_CHOICE" == "1" ]]; then
+    AWS_PROFILE="$CURRENT_PROFILE"
+    SELECTED_ACCOUNT_ID="$CURRENT_ACCOUNT"
+    echo ""
+    echo -e "${GREEN}✓ Using account: ${SELECTED_ACCOUNT_ID}${NC}"
+else
+    echo ""
+    echo -e "${YELLOW}Enter the AWS Account ID you want to use:${NC}"
+    read -p "Account ID (12 digits): " TARGET_ACCOUNT_ID
+
+    if ! [[ "$TARGET_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+        echo -e "${RED}Invalid account ID format. Must be 12 digits.${NC}"
+        exit 1
+    fi
+
+    echo ""
+    echo "Searching existing profiles for account ${TARGET_ACCOUNT_ID}..."
+
+    FOUND_PROFILE=""
+    while IFS= read -r profile; do
+        if [[ -n "$profile" ]]; then
+            PROFILE_ACCOUNT=$(aws sts get-caller-identity --profile "$profile" --query Account --output text 2>/dev/null || echo "")
+            if [[ "$PROFILE_ACCOUNT" == "$TARGET_ACCOUNT_ID" ]]; then
+                FOUND_PROFILE="$profile"
+                break
+            fi
+        fi
+    done < <(aws configure list-profiles 2>/dev/null)
+
+    if [[ -n "$FOUND_PROFILE" ]]; then
+        echo -e "${GREEN}✓ Found existing profile '${FOUND_PROFILE}' with account ${TARGET_ACCOUNT_ID}${NC}"
+        AWS_PROFILE="$FOUND_PROFILE"
+        SELECTED_ACCOUNT_ID="$TARGET_ACCOUNT_ID"
+    else
+        echo -e "${YELLOW}No existing profile found for account ${TARGET_ACCOUNT_ID}${NC}"
+        echo ""
+        echo -e "${CYAN}Let's configure AWS credentials for this account:${NC}"
+        echo ""
+
+        read -p "Profile name (e.g., pf-${TARGET_ACCOUNT_ID}): " NEW_PROFILE_NAME
+        if [[ -z "$NEW_PROFILE_NAME" ]]; then
+            NEW_PROFILE_NAME="pf-${TARGET_ACCOUNT_ID}"
+        fi
+
+        echo ""
+        echo -e "${YELLOW}Enter AWS credentials for account ${TARGET_ACCOUNT_ID}:${NC}"
+        echo ""
+
+        read -p "AWS Access Key ID: " AWS_ACCESS_KEY_ID
+        if [[ -z "$AWS_ACCESS_KEY_ID" ]]; then
+            echo -e "${RED}Access Key ID is required. Aborting.${NC}"
+            exit 1
+        fi
+
+        echo -e "${YELLOW}AWS Secret Access Key (will be visible - clear screen after):${NC}"
+        read -p "> " AWS_SECRET_ACCESS_KEY
+        if [[ -z "$AWS_SECRET_ACCESS_KEY" ]]; then
+            echo -e "${RED}Secret Access Key is required. Aborting.${NC}"
+            exit 1
+        fi
+        echo -e "\033[1A\033[2K> ********** (hidden)"
+
+        echo ""
+        echo "Configuring profile '${NEW_PROFILE_NAME}'..."
+
+        aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile "$NEW_PROFILE_NAME"
+        aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile "$NEW_PROFILE_NAME"
+        aws configure set region "us-east-1" --profile "$NEW_PROFILE_NAME"
+        aws configure set output "json" --profile "$NEW_PROFILE_NAME"
+
+        echo "Verifying credentials..."
+        VERIFY_ACCOUNT=$(aws sts get-caller-identity --profile "$NEW_PROFILE_NAME" --query Account --output text 2>/dev/null || echo "ERROR")
+
+        if [[ "$VERIFY_ACCOUNT" == "$TARGET_ACCOUNT_ID" ]]; then
+            echo -e "${GREEN}✓ Profile '${NEW_PROFILE_NAME}' configured successfully!${NC}"
+            echo -e "${GREEN}✓ Verified account: ${VERIFY_ACCOUNT}${NC}"
+            AWS_PROFILE="$NEW_PROFILE_NAME"
+            SELECTED_ACCOUNT_ID="$TARGET_ACCOUNT_ID"
+        else
+            echo -e "${RED}❌ Credentials verification failed!${NC}"
+            echo "   Expected account: $TARGET_ACCOUNT_ID"
+            echo "   Got account: $VERIFY_ACCOUNT"
+            exit 1
+        fi
+    fi
+fi
+
+echo ""
+
+# Export for use throughout script
+export AWS_PROFILE
+
+# ============================================================================
 # Configuration
 # ============================================================================
 REGION="${AWS_REGION:-us-east-1}"
@@ -29,14 +149,20 @@ PREFIX="pf"
 # Lambda function names
 LEX_FULFILLMENT_FUNCTION="pf-lex-fulfillment-${ENVIRONMENT}"
 VOICE_BRIDGE_FUNCTION="pf-voice-bedrock-bridge-${ENVIRONMENT}"
+CUSTOMER_LOOKUP_FUNCTION="pf-customer-lookup-${ENVIRONMENT}"
 
 # IAM role names
 LEX_FULFILLMENT_ROLE="pf-lex-fulfillment-role-${ENVIRONMENT}"
 VOICE_BRIDGE_ROLE="pf-voice-bedrock-bridge-role-${ENVIRONMENT}"
+CUSTOMER_LOOKUP_ROLE="pf-customer-lookup-role-${ENVIRONMENT}"
 
 # CloudWatch Log Groups
 LEX_FULFILLMENT_LOG_GROUP="/aws/lambda/${LEX_FULFILLMENT_FUNCTION}"
 VOICE_BRIDGE_LOG_GROUP="/aws/lambda/${VOICE_BRIDGE_FUNCTION}"
+CUSTOMER_LOOKUP_LOG_GROUP="/aws/lambda/${CUSTOMER_LOOKUP_FUNCTION}"
+
+# DynamoDB Tables
+CUSTOMER_TABLE="pf-customers-${ENVIRONMENT}"
 
 # ============================================================================
 # Helper Functions
@@ -164,21 +290,38 @@ delete_log_group() {
     fi
 }
 
+# Delete DynamoDB Table
+delete_dynamodb_table() {
+    local TABLE_NAME=$1
+
+    echo -n "  → Checking $TABLE_NAME... "
+
+    # Check if table exists
+    if aws_cmd dynamodb describe-table --table-name "$TABLE_NAME" --region "$REGION" &>/dev/null; then
+        echo ""
+        echo "  → Deleting $TABLE_NAME..."
+
+        if aws_cmd dynamodb delete-table \
+            --table-name "$TABLE_NAME" \
+            --region "$REGION" 2>&1 | tee "./dynamodb-delete-$TABLE_NAME.log"; then
+            echo -e "  ${GREEN}✓${NC} Deleted $TABLE_NAME"
+        else
+            echo -e "  ${RED}⊘${NC} Failed to delete $TABLE_NAME"
+        fi
+    else
+        echo -e "${CYAN}⊘${NC} does not exist"
+    fi
+}
+
 # ============================================================================
-# Main Cleanup
+# Main Cleanup - Confirmation
 # ============================================================================
 
-echo -e "${RED}════════════════════════════════════════════════════════════════════════════${NC}"
-echo -e "${RED}🧹 ProjectForce Advanced Voice Cleanup Script${NC}"
-echo -e "${RED}════════════════════════════════════════════════════════════════════════════${NC}"
-echo ""
-echo "Account: $(get_account_id)"
-echo "Region: $REGION"
-echo ""
 echo -e "${YELLOW}WARNING: This will delete:${NC}"
-echo "  - Lambda functions: $LEX_FULFILLMENT_FUNCTION, $VOICE_BRIDGE_FUNCTION"
-echo "  - IAM roles: $LEX_FULFILLMENT_ROLE, $VOICE_BRIDGE_ROLE"
-echo "  - CloudWatch Log Groups for both functions"
+echo "  - Lambda functions: $LEX_FULFILLMENT_FUNCTION, $VOICE_BRIDGE_FUNCTION, $CUSTOMER_LOOKUP_FUNCTION"
+echo "  - IAM roles: $LEX_FULFILLMENT_ROLE, $VOICE_BRIDGE_ROLE, $CUSTOMER_LOOKUP_ROLE"
+echo "  - DynamoDB tables: $CUSTOMER_TABLE"
+echo "  - CloudWatch Log Groups for all functions"
 echo ""
 echo -e "${RED}This action cannot be undone!${NC}"
 echo ""
@@ -201,6 +344,7 @@ echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━�
 
 delete_lambda_function "$LEX_FULFILLMENT_FUNCTION"
 delete_lambda_function "$VOICE_BRIDGE_FUNCTION"
+delete_lambda_function "$CUSTOMER_LOOKUP_FUNCTION"
 
 echo ""
 
@@ -214,6 +358,7 @@ echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━�
 
 delete_iam_role "$LEX_FULFILLMENT_ROLE"
 delete_iam_role "$VOICE_BRIDGE_ROLE"
+delete_iam_role "$CUSTOMER_LOOKUP_ROLE"
 
 echo ""
 
@@ -227,6 +372,19 @@ echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━�
 
 delete_log_group "$LEX_FULFILLMENT_LOG_GROUP"
 delete_log_group "$VOICE_BRIDGE_LOG_GROUP"
+delete_log_group "$CUSTOMER_LOOKUP_LOG_GROUP"
+
+echo ""
+
+# ============================================================================
+# Step 3.5: Delete DynamoDB Tables
+# ============================================================================
+
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}Step 3.5: Deleting DynamoDB Tables${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+delete_dynamodb_table "$CUSTOMER_TABLE"
 
 echo ""
 
@@ -253,6 +411,12 @@ if [ -d "lambda/voice-bedrock-bridge" ]; then
     echo "  ✓ Removed: lambda/voice-bedrock-bridge/function.zip"
 fi
 
+if [ -d "lambda/customer-lookup" ]; then
+    rm -f lambda/customer-lookup/function.zip
+    rm -rf lambda/customer-lookup/package
+    echo "  ✓ Removed: lambda/customer-lookup/function.zip"
+fi
+
 # Remove log files from current directory
 echo "  → Removing log files..."
 rm -f ./lambda-*.log
@@ -262,6 +426,12 @@ rm -f ./pip-install-*.log
 rm -f ./trust-policy-*.json
 rm -f ./policy-*.json
 echo "  ✓ Removed: All cleanup log files"
+
+# Clean up temp files from deployment (if any remain)
+echo "  → Cleaning deployment temp files..."
+find . -name "trust-policy-*.json" -delete 2>/dev/null || true
+find . -name "policy-*.json" -delete 2>/dev/null || true
+echo "  ✓ Removed: All temp policy files"
 
 echo ""
 
@@ -275,17 +445,23 @@ echo -e "${BLUE}═════════════════════�
 echo ""
 
 echo "What was deleted:"
-echo "  ✅ Lambda Functions (2):"
+echo "  ✅ Lambda Functions (3):"
 echo "     - $LEX_FULFILLMENT_FUNCTION"
 echo "     - $VOICE_BRIDGE_FUNCTION"
+echo "     - $CUSTOMER_LOOKUP_FUNCTION"
 echo ""
-echo "  ✅ IAM Roles (2):"
+echo "  ✅ IAM Roles (3):"
 echo "     - $LEX_FULFILLMENT_ROLE"
 echo "     - $VOICE_BRIDGE_ROLE"
+echo "     - $CUSTOMER_LOOKUP_ROLE"
 echo ""
-echo "  ✅ CloudWatch Log Groups (2):"
+echo "  ✅ DynamoDB Tables (1):"
+echo "     - $CUSTOMER_TABLE"
+echo ""
+echo "  ✅ CloudWatch Log Groups (3):"
 echo "     - $LEX_FULFILLMENT_LOG_GROUP"
 echo "     - $VOICE_BRIDGE_LOG_GROUP"
+echo "     - $CUSTOMER_LOOKUP_LOG_GROUP"
 echo ""
 echo "  ✅ Local deployment files and logs"
 echo ""
@@ -294,7 +470,6 @@ echo -e "${CYAN}What remains unchanged:${NC}"
 echo "  ✅ Lex bot configuration (if deployed)"
 echo "  ✅ AWS Connect instance (if deployed)"
 echo "  ✅ Phone number configuration (if claimed)"
-echo "  ✅ DynamoDB tables"
 echo "  ✅ Secrets Manager secrets"
 echo ""
 

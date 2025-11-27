@@ -21,7 +21,7 @@ def resolve_context_references(
     - Position references: "the second one", "3rd project", "last one"
     - Pronoun references: "it", "that", "this one"
     - Temporal references: "that day", "then", "at that time"
-    - Implicit references: "schedule it" → extract project from previous turn
+    - Implicit references: "schedule it"  extract project from previous turn
 
     Args:
         message: Current user message with potential references
@@ -78,12 +78,12 @@ def resolve_context_references(
         scheduling_keywords = ['date', 'time', 'slot', 'available', 'schedule', 'book', 'reschedule', 'appointment', 'when']
         if any(keyword in message.lower() for keyword in scheduling_keywords):
             entities['project_id'] = context['last_project']
-            logger.info(f"📎 Implicit continuation: Using last_project={context['last_project']} (no explicit reference)")
+            logger.info(f" Implicit continuation: Using last_project={context['last_project']} (no explicit reference)")
 
     if references:
-        logger.info(f"📎 Resolved {len(references)} reference(s) in message")
+        logger.info(f" Resolved {len(references)} reference(s) in message")
         for ref in references:
-            logger.debug(f"  - {ref['type']}: '{ref['original']}' → '{ref['resolved']}'")
+            logger.debug(f"  - {ref['type']}: '{ref['original']}'  '{ref['resolved']}'")
 
     return {
         'resolved_message': resolved_message,
@@ -232,7 +232,7 @@ def _extract_context_from_history(conversation_history: List[Dict]) -> Dict[str,
         # If this message has MULTIPLE projects (likely a list), save for positional refs
         if len(project_ids_found) > 1 and context['last_displayed_list'] is None:
             context['last_displayed_list'] = project_ids_found.copy()
-            logger.debug(f"📋 Found list with {len(project_ids_found)} projects for positional refs")
+            logger.debug(f" Found list with {len(project_ids_found)} projects for positional refs")
 
         # Track all individual project mentions (chronological order, newest first)
         for pid in project_ids_found:
@@ -282,16 +282,16 @@ def _extract_context_from_history(conversation_history: List[Dict]) -> Dict[str,
     # Use last_displayed_list if available, otherwise use all mentions
     if context['last_displayed_list']:
         context['project_ids'] = context['last_displayed_list']
-        logger.debug(f"✅ Using last displayed list ({len(context['project_ids'])} projects) for positional refs")
+        logger.debug(f" Using last displayed list ({len(context['project_ids'])} projects) for positional refs")
     else:
         context['project_ids'] = all_project_mentions
-        logger.debug(f"⚠️  No list found, using all mentions ({len(all_project_mentions)} projects)")
+        logger.debug(f"  No list found, using all mentions ({len(all_project_mentions)} projects)")
 
     # Set last_project for pronoun references ("it", "schedule it")
     # This is the most recently mentioned single project (chronologically)
     if all_project_mentions:
         context['last_project'] = all_project_mentions[0]  # First in reversed list = most recent
-        logger.debug(f"📌 last_project for pronouns: {context['last_project']}")
+        logger.debug(f" last_project for pronouns: {context['last_project']}")
 
     # Set last date/time
     if context['dates']:
@@ -354,7 +354,7 @@ def _resolve_position_references(message: str, context: Dict) -> tuple:
                     'entity_type': 'project_id'
                 })
 
-                logger.debug(f"Resolved position reference: '{match.group(0)}' → project {project_id}")
+                logger.debug(f"Resolved position reference: '{match.group(0)}'  project {project_id}")
 
                 break  # Only resolve first match
 
@@ -393,7 +393,7 @@ def _resolve_pronoun_references(message: str, context: Dict) -> tuple:
                     'entity_type': 'project_id'
                 })
 
-                logger.debug(f"Resolved pronoun: '{match.group(0)}' → project {project_id}")
+                logger.debug(f"Resolved pronoun: '{match.group(0)}'  project {project_id}")
 
                 break  # Only resolve first match
 
@@ -432,7 +432,7 @@ def _resolve_temporal_references(message: str, context: Dict) -> tuple:
                     'entity_type': 'date'
                 })
 
-                logger.debug(f"Resolved temporal reference: '{match.group(0)}' → {date}")
+                logger.debug(f"Resolved temporal reference: '{match.group(0)}'  {date}")
 
             elif 'time' in match.group(0).lower() and context.get('last_time'):
                 time = context['last_time']
@@ -445,7 +445,7 @@ def _resolve_temporal_references(message: str, context: Dict) -> tuple:
                     'entity_type': 'time'
                 })
 
-                logger.debug(f"Resolved temporal reference: '{match.group(0)}' → {time}")
+                logger.debug(f"Resolved temporal reference: '{match.group(0)}'  {time}")
 
             break  # Only resolve first match
 

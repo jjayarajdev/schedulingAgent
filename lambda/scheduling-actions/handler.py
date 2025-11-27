@@ -40,9 +40,20 @@ from mock_data import (
     get_mock_business_hours
 )
 
+# Configure logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
 # Import TokenManager for cache invalidation on auth failures
 try:
     from token_manager import get_token_manager
+    try:
+        from token_refresh import get_refresh_manager
+        TOKEN_REFRESH_AVAILABLE = True
+    except ImportError:
+        TOKEN_REFRESH_AVAILABLE = False
+        logger.warning("TokenRefreshManager not available - auto-refresh disabled")
+
     TOKEN_MANAGER_AVAILABLE = True
 except ImportError:
     TOKEN_MANAGER_AVAILABLE = False
@@ -155,16 +166,28 @@ def make_api_request_with_retry(
     method: str,
     url: str,
     headers: Dict[str, str],
+    client_id: str = None,
+    user_id: str = None,
+    environment: str = 'dev',
     **kwargs
 ) -> requests.Response:
     """
-    OPTIMIZED: Make API request with connection pooling and automatic token refresh on 401 errors
+    OPTIMIZED: Make API request with connection pooling and automatic token refresh on 401/403 errors
     Uses module-level session object for TCP connection reuse (100-300ms savings)
+
+    Phase 2 Architecture:
+    - On 401/403 errors, calls token_refresh.auto_refresh_on_failure()
+    - Regenerates token via ProjectForce regenerate-token API
+    - Updates AWS Secrets Manager with fresh token
+    - Retries request once with new token
 
     Args:
         method: HTTP method (GET, POST, etc.)
         url: Request URL
         headers: Request headers (including Authorization)
+        client_id: ProjectForce client ID (required for auto-refresh)
+        user_id: ProjectForce user/customer ID (required for auto-refresh)
+        environment: Environment (dev/staging/prod)
         **kwargs: Additional arguments for requests (json, timeout, etc.)
 
     Returns:
@@ -184,31 +207,69 @@ def make_api_request_with_retry(
         return response
 
     except requests.HTTPError as e:
-        # If 401 Unauthorized, try once more with fresh token
-        if e.response.status_code == 401 and TOKEN_MANAGER_AVAILABLE:
-            logger.warning("Received 401 Unauthorized, invalidating token cache and retrying...")
+        # If 401/403 (Unauthorized/Forbidden), try Phase 2 auto-refresh
+        if e.response.status_code in [401, 403]:
+            logger.warning(f"Received {e.response.status_code} error, attempting auto-refresh...")
 
-            # Invalidate cached token
-            token_manager = get_token_manager()
-            token_manager.invalidate_cache()
+            # Phase 2: Auto-refresh token via regenerate-token API
+            if TOKEN_REFRESH_AVAILABLE and client_id and user_id:
+                logger.info(" Phase 2: Attempting auto-refresh via regenerate-token API")
 
-            # Get fresh auth headers
-            fresh_headers = get_auth_headers()
+                refresh_manager = get_refresh_manager()
+                success, new_token = refresh_manager.auto_refresh_on_failure(
+                    client_id=client_id,
+                    user_id=user_id,
+                    environment=environment
+                )
 
-            # Merge with original headers (preserve client_id, etc.)
-            headers.update(fresh_headers)
+                if success and new_token:
+                    logger.info(" Token refreshed successfully, retrying request")
 
-            # Retry once with fresh token (using session)
-            try:
-                response = session.request(method, url, headers=headers, **kwargs)
-                response.raise_for_status()
-                logger.info("Request succeeded after token refresh")
-                return response
-            except requests.HTTPError as retry_error:
-                logger.error(f"Request failed even after token refresh: {retry_error}")
+                    # Update Authorization header with fresh token
+                    headers['Authorization'] = f"Bearer {new_token}"
+
+                    # Retry once with fresh token (using session)
+                    try:
+                        response = session.request(method, url, headers=headers, **kwargs)
+                        response.raise_for_status()
+                        logger.info(" Request succeeded after Phase 2 auto-refresh")
+                        return response
+                    except requests.HTTPError as retry_error:
+                        logger.error(f" Request failed even after auto-refresh: {retry_error}")
+                        raise
+                else:
+                    logger.error(" Auto-refresh failed, cannot retry request")
+                    raise
+
+            # Fallback to Phase 1 (cache invalidation) if Phase 2 not available
+            elif TOKEN_MANAGER_AVAILABLE:
+                logger.warning(" Phase 2 not available, falling back to Phase 1 (cache invalidation)")
+
+                # Invalidate cached token
+                token_manager = get_token_manager()
+                token_manager.invalidate_cache()
+
+                # Get fresh auth headers
+                fresh_headers = get_auth_headers()
+
+                # Merge with original headers (preserve client_id, etc.)
+                headers.update(fresh_headers)
+
+                # Retry once with fresh token (using session)
+                try:
+                    response = session.request(method, url, headers=headers, **kwargs)
+                    response.raise_for_status()
+                    logger.info("Request succeeded after Phase 1 token refresh")
+                    return response
+                except requests.HTTPError as retry_error:
+                    logger.error(f"Request failed even after Phase 1 token refresh: {retry_error}")
+                    raise
+            else:
+                # No refresh mechanism available
+                logger.error(" No token refresh mechanism available")
                 raise
         else:
-            # Not a 401 or TokenManager not available, re-raise original error
+            # Not a 401/403, re-raise original error
             raise
 
 def format_success_response(event: Dict, action: str, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -384,8 +445,8 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
     4. Uses connection pooling + compression
     5. Supports filtering by status, category, and projectType
 
-    Before: ~2000 lines to agent → agent formats → ~200 lines to UI
-    After: ~200 lines to agent (already formatted) → pass-through to UI
+    Before: ~2000 lines to agent  agent formats  ~200 lines to UI
+    After: ~200 lines to agent (already formatted)  pass-through to UI
     """
     customer_id = params.get('customer_id')
     client_id = params.get('client_id', 'default')
@@ -411,21 +472,32 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
         url = f"{config['dashboard_url']}/{client_id}/{customer_id}"
         logger.info(f"Making API request to: {url}")
 
-        # OPTIMIZATION: Use session with compression, longer timeout
+        # OPTIMIZATION: Use make_api_request_with_retry for auto-refresh on 401/403
         api_start = time.time()
-        res = session.get(
-            url,
-            headers={**auth_headers, 'Accept-Encoding': 'gzip, deflate'},
-            timeout=(5, 45)  # (connect timeout, read timeout) - increased to 45s
-        )
-        res.raise_for_status()
-        api_duration = (time.time() - api_start) * 1000
-        logger.info(f"API call took {api_duration:.2f}ms")
-        logger.info(f"Response status: {res.status_code}")
-        logger.info(f"Response headers: {dict(res.headers)}")
-        logger.info(f"Response text (first 500 chars): {res.text[:500]}")
-
-        response = res.json()
+        try:
+            res = make_api_request_with_retry(
+                "GET",
+                url,
+                {**auth_headers, 'Accept-Encoding': 'gzip, deflate'},
+                client_id=client_id,
+                user_id=customer_id,
+                timeout=(5, 45)  # (connect timeout, read timeout) - increased to 45s
+            )
+            api_duration = (time.time() - api_start) * 1000
+            logger.info(f"API call took {api_duration:.2f}ms")
+            logger.info(f"Response status: {res.status_code}")
+            logger.info(f"Response headers: {dict(res.headers)}")
+            logger.info(f"Response text (first 500 chars): {res.text[:500]}")
+            response = res.json()
+        except requests.HTTPError as e:
+            api_duration = (time.time() - api_start) * 1000
+            logger.error(f"HTTP error fetching projects after {api_duration:.2f}ms: {e}")
+            if e.response.status_code == 401:
+                raise ValueError("Authentication failed - token expired and auto-refresh failed")
+            elif e.response.status_code == 403:
+                raise ValueError("Access denied - insufficient permissions")
+            else:
+                raise ValueError(f"Failed to fetch projects: HTTP {e.response.status_code}")
 
     # OPTIMIZATION: Extract and format projects efficiently
     processing_start = time.time()
@@ -507,8 +579,15 @@ def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -
         url = f"{config['dashboard_url']}/{client_id}/{customer_id}"
         logger.info(f"Making API request to: {url}")
 
-        res = requests.get(url, headers=auth_headers, timeout=30)
-        res.raise_for_status()
+        # Use make_api_request_with_retry for auto-refresh on 401/403
+        res = make_api_request_with_retry(
+            "GET",
+            url,
+            auth_headers,
+            client_id=client_id,
+            user_id=customer_id,
+            timeout=30
+        )
         response = res.json()
 
         # Extract projects from response
@@ -698,6 +777,7 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
     """
     project_id = params.get('project_id')
     client_id = params.get('client_id')
+    customer_id = params.get('customer_id')
 
     if not project_id:
         raise ValueError("Missing required parameter: project_id")
@@ -722,7 +802,7 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
 
         try:
             # Use retry logic with automatic token refresh on 401
-            res = make_api_request_with_retry("GET", url, auth_headers, timeout=30)
+            res = make_api_request_with_retry("GET", url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
             response = res.json()
             logger.info(f"Available dates retrieved successfully")
         except requests.HTTPError as e:
@@ -789,6 +869,8 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
     client_id = params.get('client_id')
     date = params.get('date')
     request_id = params.get('request_id')
+    customer_id = params.get('customer_id')
+    
 
     if not all([project_id, date, request_id]):
         raise ValueError("Missing required parameters: project_id, date, request_id")
@@ -810,7 +892,7 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
 
         try:
             # Use retry logic with automatic token refresh on 401
-            res = make_api_request_with_retry("GET", url, auth_headers, timeout=30)
+            res = make_api_request_with_retry("GET", url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
             response = res.json()
             logger.info(f"Time slots retrieved successfully: {len(response.get('data', {}).get('slots', []))} slots")
         except requests.HTTPError as e:
@@ -904,6 +986,7 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
     time = params.get('time')
     request_id = params.get('request_id')
     client_id = params.get('client_id')  # Extract client_id from parameters
+    customer_id = params.get('customer_id')
 
     if not all([project_id, date, time, request_id]):
         raise ValueError("Missing required parameters: project_id, date, time, request_id")
@@ -940,7 +1023,7 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
 
         try:
             # Use retry logic with automatic token refresh on 401
-            res = make_api_request_with_retry("POST", url, auth_headers, json=payload, timeout=30)
+            res = make_api_request_with_retry("POST", url, auth_headers, client_id=client_id, user_id=customer_id, json=payload, timeout=30)
             response = res.json()
             logger.info(f"Confirmation successful: {response}")
         except requests.HTTPError as e:
@@ -1034,7 +1117,7 @@ def handle_reschedule_appointment(params: Dict, config: Dict, auth_headers: Dict
     # Step 1: Cancel existing appointment - DISABLED (cancel endpoint not available)
     # NOTE: For now, reschedule only creates a new appointment without canceling the old one
     # Users should manually cancel via support if needed
-    logger.warning("⚠️ Cancel step skipped - cancel endpoint not yet available. Only scheduling new appointment.")
+    logger.warning(" Cancel step skipped - cancel endpoint not yet available. Only scheduling new appointment.")
     cancel_result = {
         "status": "skipped",
         "message": "Cancel endpoint not available. Creating new appointment only."
@@ -1092,7 +1175,7 @@ def handle_cancel_appointment(params: Dict, config: Dict, auth_headers: Dict) ->
     """
     project_id = params.get('project_id')
 
-    logger.warning(f"⚠️ Cancel appointment feature is currently disabled for project {project_id}")
+    logger.warning(f" Cancel appointment feature is currently disabled for project {project_id}")
 
     return {
         "action": "cancel_appointment",
@@ -1171,6 +1254,7 @@ def handle_get_business_hours(params: Dict, config: Dict, auth_headers: Dict) ->
     Required Parameters: client_id
     """
     client_id = params.get('client_id')
+    customer_id = params.get('customer_id')
 
     if not client_id:
         raise ValueError("Missing required parameter: client_id")
@@ -1188,7 +1272,7 @@ def handle_get_business_hours(params: Dict, config: Dict, auth_headers: Dict) ->
 
         try:
             # Use retry logic with automatic token refresh on 401
-            res = make_api_request_with_retry("GET", url, auth_headers, timeout=30)
+            res = make_api_request_with_retry("GET", url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
             response = res.json()
             logger.info(f"Business hours retrieved successfully")
         except requests.HTTPError as e:

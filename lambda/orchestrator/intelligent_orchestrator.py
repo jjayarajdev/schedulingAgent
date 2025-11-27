@@ -189,7 +189,7 @@ Respond ONLY with valid JSON."""
     try:
         # Parse JSON response
         classification = json.loads(response_text)
-        logger.info(f"🧠 Sonnet classification: {classification}")
+        logger.info(f" Sonnet classification: {classification}")
         return classification
 
     except json.JSONDecodeError as e:
@@ -340,7 +340,7 @@ Respond ONLY with valid JSON."""
 
     try:
         decision = json.loads(response_text)
-        logger.info(f"🎯 Sonnet decision: call_lambda={decision.get('should_call_lambda')}, action={decision.get('lambda_action')}")
+        logger.info(f" Sonnet decision: call_lambda={decision.get('should_call_lambda')}, action={decision.get('lambda_action')}")
         return decision
 
     except json.JSONDecodeError as e:
@@ -358,8 +358,8 @@ def orchestrate_intelligent_workflow(
     session_id: str,
     customer_id: str,
     client_id: str,
-    pf_bearer_token: str,
-    conversation_history: List[Dict]
+    pf_bearer_token: str = None,
+    conversation_history: List[Dict] = None
 ) -> Dict[str, Any]:
     """
     Main intelligent orchestration function
@@ -370,8 +370,8 @@ def orchestrate_intelligent_workflow(
         session_id: Session ID
         customer_id: Customer ID
         client_id: Client ID
-        pf_bearer_token: ProjectForce API token
-        conversation_history: Previous messages
+        pf_bearer_token: ProjectForce API token (optional - uses Secrets Manager if not provided)
+        conversation_history: Previous messages (optional)
 
     Returns:
         Response dictionary with text, intent, action, timing
@@ -385,7 +385,7 @@ def orchestrate_intelligent_workflow(
     workflow_state = state_manager.get_state(session_id)
 
     # Step 1: Intelligent classification using Sonnet 3.7
-    logger.info("🧠 Step 1: Intelligent classification with Sonnet 3.7")
+    logger.info(" Step 1: Intelligent classification with Sonnet 3.7")
     classification_start = time.time()
 
     classification = intelligent_classify(
@@ -397,7 +397,7 @@ def orchestrate_intelligent_workflow(
     timing['classification'] = time.time() - classification_start
 
     # Step 2: Intelligent decision using Sonnet 3.7
-    logger.info("🎯 Step 2: Intelligent decision-making with Sonnet 3.7")
+    logger.info(" Step 2: Intelligent decision-making with Sonnet 3.7")
     decision_start = time.time()
 
     decision = intelligent_decide_next_action(
@@ -415,14 +415,17 @@ def orchestrate_intelligent_workflow(
         lambda_action = decision['lambda_action']
         lambda_params = decision['lambda_params']
 
-        # Add auth params
+        # Add auth params (only include pf_bearer_token if provided)
         lambda_params.update({
             'customer_id': customer_id,
-            'client_id': client_id,
-            'pf_bearer_token': pf_bearer_token
+            'client_id': client_id
         })
 
-        logger.info(f"⚡ Calling Lambda: {lambda_action} with params: {lambda_params}")
+        # Only add pf_bearer_token if explicitly provided (Phase 1+2: tokens come from Secrets Manager)
+        if pf_bearer_token:
+            lambda_params['pf_bearer_token'] = pf_bearer_token
+
+        logger.info(f" Calling Lambda: {lambda_action} with params: {lambda_params}")
         lambda_start = time.time()
 
         try:
@@ -447,7 +450,7 @@ def orchestrate_intelligent_workflow(
                 project_category = workflow_state.get('context', {}).get('category') if workflow_state else None
 
                 if project_category and is_outdoor_project(project_category):
-                    logger.info(f"🌤️  Outdoor project detected ({project_category}), checking weather...")
+                    logger.info(f"  Outdoor project detected ({project_category}), checking weather...")
 
                     # Extract location from workflow state
                     location = extract_location_from_context(workflow_state)
@@ -457,15 +460,18 @@ def orchestrate_intelligent_workflow(
                             # Get target date from params
                             target_date = lambda_params.get('date')
 
-                            # Call weather API
+                            # Call weather API (only include pf_bearer_token if provided)
                             weather_params = {
                                 'location': location,
                                 'customer_id': customer_id,
-                                'client_id': client_id,
-                                'pf_bearer_token': pf_bearer_token
+                                'client_id': client_id
                             }
 
-                            logger.info(f"🌤️  Fetching weather for {location} on {target_date}")
+                            # Only add pf_bearer_token if explicitly provided
+                            if pf_bearer_token:
+                                weather_params['pf_bearer_token'] = pf_bearer_token
+
+                            logger.info(f"  Fetching weather for {location} on {target_date}")
                             weather_response = call_lambda_directly('get_weather', weather_params)
 
                             # Extract weather data
@@ -493,10 +499,10 @@ def orchestrate_intelligent_workflow(
 
                                 if not assessment['suitable']:
                                     # Inject weather warning into response
-                                    logger.info(f"⚠️  Weather warning: {assessment['severity']} - {', '.join(assessment['warnings'])}")
+                                    logger.info(f"  Weather warning: {assessment['severity']} - {', '.join(assessment['warnings'])}")
                                     response_body['weather_warning'] = assessment
                                 else:
-                                    logger.info(f"✅ Weather looks good for {project_category}")
+                                    logger.info(f" Weather looks good for {project_category}")
 
                         except Exception as weather_error:
                             logger.warning(f"Weather check failed (non-fatal): {weather_error}")
@@ -512,14 +518,14 @@ def orchestrate_intelligent_workflow(
             # CRITICAL: Extract request_id from Lambda response and add to workflow state
             # request_id is required for get_time_slots and confirm_appointment
             if 'request_id' in response_body and response_body['request_id']:
-                logger.info(f"📌 Extracted request_id from Lambda response: {response_body['request_id']}")
+                logger.info(f" Extracted request_id from Lambda response: {response_body['request_id']}")
 
                 # Add request_id to Sonnet's workflow state update
                 if decision.get('update_workflow_state'):
                     if 'context' not in decision['update_workflow_state']:
                         decision['update_workflow_state']['context'] = {}
                     decision['update_workflow_state']['context']['request_id'] = response_body['request_id']
-                    logger.info(f"📌 Added request_id to workflow state context")
+                    logger.info(f" Added request_id to workflow state context")
 
         except Exception as e:
             logger.error(f"Lambda call failed: {e}")
@@ -537,11 +543,11 @@ def orchestrate_intelligent_workflow(
     # Step 5: Clear workflow if complete
     if decision.get('workflow_complete'):
         state_manager.clear_state(session_id)
-        logger.info("✅ Workflow complete, state cleared")
+        logger.info(" Workflow complete, state cleared")
 
     timing['total'] = time.time() - start_time
 
-    logger.info(f"⏱️  Intelligent Orchestration: Total={timing['total']:.2f}s | Classification={timing.get('classification', 0):.2f}s | Decision={timing.get('decision', 0):.2f}s")
+    logger.info(f"  Intelligent Orchestration: Total={timing['total']:.2f}s | Classification={timing.get('classification', 0):.2f}s | Decision={timing.get('decision', 0):.2f}s")
 
     return {
         'response': response_text,

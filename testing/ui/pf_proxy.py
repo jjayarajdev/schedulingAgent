@@ -780,6 +780,7 @@ def login():
                     "client_id": response_client_id,
                     "user_id": str(response_user_id),
                     "api_base_url": PF_API_BASE,
+                    "REFRESH_TOKEN": "true",
                     "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                     "updated_by": "pf_proxy.py login"
                 }

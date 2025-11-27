@@ -73,11 +73,11 @@ def handle_greet(params: Dict[str, Any]) -> Dict[str, Any]:
 def handle_help(params: Dict[str, Any]) -> Dict[str, Any]:
     """Provide help information"""
     help_text = """I can help you with:
-• View your projects (list my projects)
-• Get project details (details for project 7751744)
-• Check available dates (what dates are available for project 7751744)
-• View time slots (show me time slots for Nov 25)
-• Schedule appointments (schedule project 7751744)
+ View your projects (list my projects)
+ Get project details (details for project 7751744)
+ Check available dates (what dates are available for project 7751744)
+ View time slots (show me time slots for Nov 25)
+ Schedule appointments (schedule project 7751744)
 
 Just ask me what you'd like to do!"""
 

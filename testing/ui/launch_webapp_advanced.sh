@@ -187,6 +187,121 @@ echo -e "${BLUE}🚀 ProjectForce Advanced Web Application Launcher${NC}"
 echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
+# ============================================================================
+# AWS ACCOUNT SELECTION - Smart account detection and configuration
+# ============================================================================
+
+echo -e "${CYAN}🔐 AWS ACCOUNT SELECTION${NC}"
+echo ""
+
+# Get current/default profile
+CURRENT_PROFILE="${AWS_PROFILE:-default}"
+CURRENT_ACCOUNT=$(aws sts get-caller-identity --profile "$CURRENT_PROFILE" --query Account --output text 2>/dev/null || echo "N/A")
+
+echo -e "Current Profile: ${YELLOW}${CURRENT_PROFILE}${NC}"
+echo -e "Current Account: ${YELLOW}${CURRENT_ACCOUNT}${NC}"
+echo ""
+
+# Ask if this is correct
+echo -e "${YELLOW}Is this the correct AWS account?${NC}"
+echo ""
+echo "  [1] Yes, proceed with account ${CURRENT_ACCOUNT}"
+echo "  [2] No, I want to use a different account"
+echo ""
+read -p "Enter choice (1 or 2): " ACCOUNT_CHOICE
+
+if [[ "$ACCOUNT_CHOICE" == "1" ]]; then
+    AWS_PROFILE="$CURRENT_PROFILE"
+    AWS_ACCOUNT="$CURRENT_ACCOUNT"
+    echo ""
+    echo -e "${GREEN}✓ Using account: ${AWS_ACCOUNT}${NC}"
+else
+    echo ""
+    echo -e "${YELLOW}Enter the AWS Account ID you want to use:${NC}"
+    read -p "Account ID (12 digits): " TARGET_ACCOUNT_ID
+
+    if ! [[ "$TARGET_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+        echo -e "${RED}Invalid account ID format. Must be 12 digits.${NC}"
+        exit 1
+    fi
+
+    echo ""
+    echo "Searching existing profiles for account ${TARGET_ACCOUNT_ID}..."
+
+    FOUND_PROFILE=""
+    while IFS= read -r profile; do
+        if [[ -n "$profile" ]]; then
+            PROFILE_ACCOUNT=$(aws sts get-caller-identity --profile "$profile" --query Account --output text 2>/dev/null || echo "")
+            if [[ "$PROFILE_ACCOUNT" == "$TARGET_ACCOUNT_ID" ]]; then
+                FOUND_PROFILE="$profile"
+                break
+            fi
+        fi
+    done < <(aws configure list-profiles 2>/dev/null)
+
+    if [[ -n "$FOUND_PROFILE" ]]; then
+        echo -e "${GREEN}✓ Found existing profile '${FOUND_PROFILE}' with account ${TARGET_ACCOUNT_ID}${NC}"
+        AWS_PROFILE="$FOUND_PROFILE"
+        AWS_ACCOUNT="$TARGET_ACCOUNT_ID"
+    else
+        echo -e "${YELLOW}No existing profile found for account ${TARGET_ACCOUNT_ID}${NC}"
+        echo ""
+        echo -e "${CYAN}Let's configure AWS credentials for this account:${NC}"
+        echo ""
+
+        read -p "Profile name (e.g., pf-${TARGET_ACCOUNT_ID}): " NEW_PROFILE_NAME
+        if [[ -z "$NEW_PROFILE_NAME" ]]; then
+            NEW_PROFILE_NAME="pf-${TARGET_ACCOUNT_ID}"
+        fi
+
+        echo ""
+        echo -e "${YELLOW}Enter AWS credentials for account ${TARGET_ACCOUNT_ID}:${NC}"
+        echo ""
+
+        read -p "AWS Access Key ID: " AWS_ACCESS_KEY_ID
+        if [[ -z "$AWS_ACCESS_KEY_ID" ]]; then
+            echo -e "${RED}Access Key ID is required. Aborting.${NC}"
+            exit 1
+        fi
+
+        echo -e "${YELLOW}AWS Secret Access Key (will be visible - clear screen after):${NC}"
+        read -p "> " AWS_SECRET_ACCESS_KEY
+        if [[ -z "$AWS_SECRET_ACCESS_KEY" ]]; then
+            echo -e "${RED}Secret Access Key is required. Aborting.${NC}"
+            exit 1
+        fi
+        echo -e "\033[1A\033[2K> ********** (hidden)"
+
+        echo ""
+        echo "Configuring profile '${NEW_PROFILE_NAME}'..."
+
+        aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile "$NEW_PROFILE_NAME"
+        aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile "$NEW_PROFILE_NAME"
+        aws configure set region "us-east-1" --profile "$NEW_PROFILE_NAME"
+        aws configure set output "json" --profile "$NEW_PROFILE_NAME"
+
+        echo "Verifying credentials..."
+        VERIFY_ACCOUNT=$(aws sts get-caller-identity --profile "$NEW_PROFILE_NAME" --query Account --output text 2>/dev/null || echo "ERROR")
+
+        if [[ "$VERIFY_ACCOUNT" == "$TARGET_ACCOUNT_ID" ]]; then
+            echo -e "${GREEN}✓ Profile '${NEW_PROFILE_NAME}' configured successfully!${NC}"
+            echo -e "${GREEN}✓ Verified account: ${VERIFY_ACCOUNT}${NC}"
+            AWS_PROFILE="$NEW_PROFILE_NAME"
+            AWS_ACCOUNT="$TARGET_ACCOUNT_ID"
+        else
+            echo -e "${RED}❌ Credentials verification failed!${NC}"
+            echo "   Expected account: $TARGET_ACCOUNT_ID"
+            echo "   Got account: $VERIFY_ACCOUNT"
+            exit 1
+        fi
+    fi
+fi
+
+echo ""
+
+# Export AWS_PROFILE for use by pf_proxy.py
+export AWS_PROFILE
+
 # Display platform info
 echo -e "${CYAN}📋 Platform Information:${NC}"
 echo "────────────────────────────────────────────────────────────────────────────"
@@ -198,28 +313,20 @@ echo "  • Log Directory:  $LOG_DIR"
 echo "────────────────────────────────────────────────────────────────────────────"
 echo ""
 
-# Display AWS Account Information
+# Display AWS Account Information (using selected profile)
 echo -e "${CYAN}☁️  AWS Account Information:${NC}"
 echo "────────────────────────────────────────────────────────────────────────────"
-if command -v aws &> /dev/null; then
-    # Get AWS caller identity
-    AWS_IDENTITY=$(aws sts get-caller-identity 2>/dev/null)
-    if [ $? -eq 0 ]; then
-        AWS_ACCOUNT=$(echo "$AWS_IDENTITY" | grep -o '"Account": "[^"]*"' | cut -d'"' -f4)
-        AWS_USER=$(echo "$AWS_IDENTITY" | grep -o '"Arn": "[^"]*"' | cut -d'"' -f4 | awk -F'/' '{print $NF}')
-        AWS_REGION=$(aws configure get region 2>/dev/null || echo "us-east-1")
-        AWS_PROFILE_NAME="${AWS_PROFILE:-default}"
+AWS_IDENTITY=$(aws sts get-caller-identity --profile "$AWS_PROFILE" 2>/dev/null)
+if [ $? -eq 0 ]; then
+    AWS_USER=$(echo "$AWS_IDENTITY" | grep -o '"Arn": "[^"]*"' | cut -d'"' -f4 | awk -F'/' '{print $NF}')
+    AWS_REGION=$(aws configure get region --profile "$AWS_PROFILE" 2>/dev/null || echo "us-east-1")
 
-        echo "  • Account ID:     $AWS_ACCOUNT"
-        echo "  • User/Role:      $AWS_USER"
-        echo "  • Region:         $AWS_REGION"
-        echo "  • Profile:        $AWS_PROFILE_NAME"
-    else
-        echo -e "  ${YELLOW}⚠️  Unable to get AWS credentials${NC}"
-        echo "  Run: aws configure"
-    fi
+    echo "  • Account ID:     $AWS_ACCOUNT"
+    echo "  • User/Role:      $AWS_USER"
+    echo "  • Region:         $AWS_REGION"
+    echo "  • Profile:        $AWS_PROFILE"
 else
-    echo -e "  ${YELLOW}⚠️  AWS CLI not installed${NC}"
+    echo -e "  ${YELLOW}⚠️  Unable to get AWS credentials${NC}"
 fi
 echo "────────────────────────────────────────────────────────────────────────────"
 
