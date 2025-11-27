@@ -32,7 +32,7 @@ def print_test_header(test_name):
     print("="*80)
 
 def print_result(success, message, details=None):
-    status = "✅ PASS" if success else "❌ FAIL"
+    status = " PASS" if success else " FAIL"
     print(f"\n{status}: {message}")
     if details:
         print(f"Details: {json.dumps(details, indent=2)}")
@@ -185,12 +185,12 @@ def test_authentication_headers():
     config = get_api_config()
     headers = get_auth_headers()
 
-    print("\n📋 Configuration:")
+    print("\n Configuration:")
     print(f"  Base URL: {config['base_url']}")
     print(f"  Environment: dev")
     print(f"  Client ID: {DEFAULT_CLIENT_ID}")
 
-    print("\n📋 Authentication Headers:")
+    print("\n Authentication Headers:")
     for key, value in headers.items():
         if key == "Authorization":
             print(f"  {key}: Bearer [TOKEN_SET - {len(value)-7} chars]")
@@ -207,9 +207,9 @@ def test_authentication_headers():
     ]
 
     all_passed = True
-    print("\n🔍 Validation Checks:")
+    print("\n Validation Checks:")
     for check_name, passed in checks:
-        status = "✅" if passed else "❌"
+        status = "" if passed else ""
         print(f"  {status} {check_name}")
         if not passed:
             all_passed = False
@@ -238,7 +238,7 @@ def main():
         success, request_id = test_get_available_dates()
         results['scheduler_api'] = success
     else:
-        print("\n⚠️  Skipping scheduler test (no projects available)")
+        print("\n  Skipping scheduler test (no projects available)")
         results['scheduler_api'] = None
 
     # Test 4: Project details
@@ -251,11 +251,11 @@ def main():
 
     for test_name, result in results.items():
         if result is None:
-            status = "⏭️  SKIPPED"
+            status = "  SKIPPED"
         elif result:
-            status = "✅ PASSED"
+            status = " PASSED"
         else:
-            status = "❌ FAILED"
+            status = " FAILED"
         print(f"  {status}: {test_name}")
 
     total_tests = sum(1 for r in results.values() if r is not None)

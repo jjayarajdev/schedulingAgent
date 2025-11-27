@@ -52,7 +52,7 @@ def route_with_multi_agent_orchestration(
     timing = {}
     start_time = time.time()
 
-    logger.info(f"🎯 Multi-agent routing for: '{message[:50]}...'")
+    logger.info(f" Multi-agent routing for: '{message[:50]}...'")
 
     # Step 1: Resolve contextual references
     context_start = time.time()
@@ -62,7 +62,7 @@ def route_with_multi_agent_orchestration(
     timing['context_resolution'] = time.time() - context_start
 
     if resolved_context['references']:
-        logger.info(f"📎 Resolved {len(resolved_context['references'])} reference(s): {resolved_message}")
+        logger.info(f" Resolved {len(resolved_context['references'])} reference(s): {resolved_message}")
 
     # Step 2: Classify intent with multi-agent awareness
     classification_start = time.time()
@@ -74,7 +74,7 @@ def route_with_multi_agent_orchestration(
     orchestration_type = classification['orchestration_type']
     can_optimize = classification['can_optimize']
 
-    logger.info(f"📋 Classification: {orchestration_type} | Agents: {agents_needed} | Optimize: {can_optimize}")
+    logger.info(f" Classification: {orchestration_type} | Agents: {agents_needed} | Optimize: {can_optimize}")
 
     # Session attributes
     session_attributes = {
@@ -153,7 +153,7 @@ def route_with_multi_agent_orchestration(
     result['timing']['total'] = time.time() - start_time
     result['timing'].update(timing)
 
-    logger.info(f"⏱️  Total orchestration time: {result['timing']['total']:.2f}s")
+    logger.info(f"  Total orchestration time: {result['timing']['total']:.2f}s")
 
     return result
 
@@ -183,7 +183,7 @@ def _route_single_agent(
         can_call_direct = action_classification.get('can_call_direct', False)
 
         if can_call_direct and action:
-            logger.info(f"⚡ Fast path: Direct Lambda call for {action}")
+            logger.info(f" Fast path: Direct Lambda call for {action}")
 
             try:
                 # Merge params: classifier first, then context entities (entities override classifier)
@@ -230,7 +230,7 @@ def _route_single_agent(
                 # Fall through to agent invocation
 
     # Use Bedrock agent (direct to specialist, bypassing Supervisor)
-    logger.info(f"🤖 Routing to {intent} agent directly (bypassing Supervisor)")
+    logger.info(f" Routing to {intent} agent directly (bypassing Supervisor)")
 
     agent_result = invoke_bedrock_agent(
         message=resolved_message,
@@ -252,11 +252,11 @@ def _route_parallel_agents(
     """
     Execute multiple agents in parallel for faster response
 
-    Example: "show my projects and weather" → invoke scheduling + information simultaneously
+    Example: "show my projects and weather"  invoke scheduling + information simultaneously
     """
     config = get_config()
 
-    logger.info(f"⚡ Parallel execution: {len(agents_needed)} agents")
+    logger.info(f" Parallel execution: {len(agents_needed)} agents")
 
     # Build agent configs
     agent_configs = []
@@ -311,11 +311,11 @@ def _route_sequential_agents(
     """
     Execute agents sequentially (one after another)
 
-    Example: "check weather then show outdoor projects" → information THEN scheduling
+    Example: "check weather then show outdoor projects"  information THEN scheduling
     """
     config = get_config()
 
-    logger.info(f"⏭️  Sequential execution: {len(agents_needed)} agents")
+    logger.info(f"  Sequential execution: {len(agents_needed)} agents")
 
     # Build agent configs
     agent_configs = []
@@ -353,7 +353,7 @@ def _route_sequential_agents(
         'response': combined['response'],
         'intent': 'multi_agent',
         'action': None,
-        'agent_name': f"Multi-Agent Sequential ({' → '.join(combined['agents_used'])})",
+        'agent_name': f"Multi-Agent Sequential ({'  '.join(combined['agents_used'])})",
         'direct_call': False,
         'timing': {'agent_execution': combined['timing']},
         'agents_used': combined['agents_used']
@@ -371,12 +371,12 @@ def _route_conditional_agents(
     """
     Execute agents conditionally based on previous results
 
-    Example: "if weather is good, schedule project" → check weather, then conditionally schedule
+    Example: "if weather is good, schedule project"  check weather, then conditionally schedule
     """
     # For now, implement conditional as sequential with smart result checking
     # Future enhancement: Add conditional logic evaluation
 
-    logger.info(f"🔀 Conditional execution: {len(agents_needed)} agents with dependencies")
+    logger.info(f" Conditional execution: {len(agents_needed)} agents with dependencies")
 
     # Execute sequentially and let agents handle conditional logic in their prompts
     return _route_sequential_agents(

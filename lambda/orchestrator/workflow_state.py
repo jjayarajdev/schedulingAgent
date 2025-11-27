@@ -67,7 +67,7 @@ class WorkflowStateManager:
             # Convert Decimal to int/float for JSON serialization
             state = self._convert_decimals(state)
 
-            logger.info(f"📦 Loaded workflow state: type={state.get('workflow_type')}, stage={state.get('current_stage')}")
+            logger.info(f" Loaded workflow state: type={state.get('workflow_type')}, stage={state.get('current_stage')}")
             return state
 
         except Exception as e:
@@ -95,7 +95,7 @@ class WorkflowStateManager:
 
             self.table.put_item(Item=item)
 
-            logger.info(f"💾 Saved workflow state: session={session_id}, type={item['workflow_type']}, stage={item['current_stage']}")
+            logger.info(f" Saved workflow state: session={session_id}, type={item['workflow_type']}, stage={item['current_stage']}")
             return True
 
         except Exception as e:
@@ -130,7 +130,7 @@ class WorkflowStateManager:
         """
         try:
             self.table.delete_item(Key={'session_id': session_id})
-            logger.info(f"🗑️  Cleared workflow state for session {session_id}")
+            logger.info(f"  Cleared workflow state for session {session_id}")
             return True
 
         except Exception as e:

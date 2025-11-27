@@ -35,15 +35,15 @@ print("=" * 80)
 print("\n### SIMPLE QUERIES (Expected: SIMPLE) ###\n")
 for query in test_queries["SIMPLE"]:
     result = classify_query_complexity(query)
-    status = "✅" if result == "SIMPLE" else "❌"
-    print(f"{status} '{query[:50]}...' → {result}")
+    status = "PASS" if result == "SIMPLE" else "FAIL"
+    print(f"{status} '{query[:50]}...' -> {result}")
 
 # Test complex queries
 print("\n### COMPLEX QUERIES (Expected: COMPLEX) ###\n")
 for query in test_queries["COMPLEX"]:
     result = classify_query_complexity(query)
-    status = "✅" if result == "COMPLEX" else "❌"
-    print(f"{status} '{query[:50]}...' → {result}")
+    status = "PASS" if result == "COMPLEX" else "FAIL"
+    print(f"{status} '{query[:50]}...' -> {result}")
 
 print("\n" + "=" * 80)
 print("Test completed!")

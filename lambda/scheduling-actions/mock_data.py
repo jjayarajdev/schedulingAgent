@@ -189,7 +189,7 @@ def get_mock_confirm_appointment(project_id: str, date: str, time: str, request_
     """
     return {
         "status": "success",
-        "message": f"✅ [MOCK] Appointment scheduled successfully for project {project_id} on {date} at {time}",
+        "message": f" [MOCK] Appointment scheduled successfully for project {project_id} on {date} at {time}",
         "data": {
             "project_id": project_id,
             "scheduled_date": date,
@@ -206,7 +206,7 @@ def get_mock_cancel_appointment(project_id: str) -> Dict[str, Any]:
     """
     return {
         "status": "success",
-        "message": f"✅ [MOCK] Appointment cancelled successfully for project {project_id}",
+        "message": f" [MOCK] Appointment cancelled successfully for project {project_id}",
         "data": {
             "project_id": project_id,
             "cancelled_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

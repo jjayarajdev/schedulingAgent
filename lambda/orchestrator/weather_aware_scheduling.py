@@ -16,8 +16,8 @@ OUTDOOR_CATEGORIES = {
     "Decking": {
         "bad_conditions": ["rain", "snow", "thunderstorm"],
         "rain_threshold": 50,  # % precipitation
-        "temp_min": 40,  # °F
-        "temp_max": 95,  # °F
+        "temp_min": 40,  # F
+        "temp_max": 95,  # F
         "wind_max": 25,  # mph
     },
     "Roofing": {
@@ -206,11 +206,11 @@ def analyze_weather_suitability(
     min_temp = forecast.get('min_temp_f', 60)
 
     if max_temp < criteria['temp_min']:
-        warnings.append(f"Temperature too cold (high of {max_temp}°F)")
+        warnings.append(f"Temperature too cold (high of {max_temp}F)")
         severity = "medium" if severity == "low" else severity
 
     if min_temp > criteria['temp_max']:
-        warnings.append(f"Temperature too hot (low of {min_temp}°F)")
+        warnings.append(f"Temperature too hot (low of {min_temp}F)")
         severity = "medium" if severity == "low" else severity
 
     # Check wind (if available)

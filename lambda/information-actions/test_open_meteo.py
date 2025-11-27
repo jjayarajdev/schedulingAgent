@@ -48,7 +48,7 @@ def test_weather_with_coordinates():
     print("\nWeather Summary:")
     print(f"Location: {body['location']}")
     print(f"Coordinates: {body['coordinates']['latitude']}, {body['coordinates']['longitude']}")
-    print(f"Current Temp: {body['weather']['current']['temp_f']}°F")
+    print(f"Current Temp: {body['weather']['current']['temp_f']}F")
     print(f"Condition: {body['weather']['current']['condition']}")
     print(f"Forecast Days: {len(body['weather']['forecast'])}")
 
@@ -83,7 +83,7 @@ def test_weather_with_city_name():
     print("\nWeather Summary:")
     print(f"Location: {body['location']}")
     print(f"Coordinates (geocoded): {body['coordinates']['latitude']}, {body['coordinates']['longitude']}")
-    print(f"Current Temp: {body['weather']['current']['temp_f']}°F")
+    print(f"Current Temp: {body['weather']['current']['temp_f']}F")
     print(f"Condition: {body['weather']['current']['condition']}")
     print(f"Forecast Days: {len(body['weather']['forecast'])}")
 
@@ -122,14 +122,14 @@ def test_weather_project_context():
     print("\nWeather Summary:")
     print(f"Location: {body['location']}")
     print(f"Context: Project {body['weather']['context']['project_id']}, Customer {body['weather']['context']['customer_id']}")
-    print(f"Current Temp: {body['weather']['current']['temp_f']}°F")
-    print(f"Feels Like: {body['weather']['current']['feels_like_f']}°F")
+    print(f"Current Temp: {body['weather']['current']['temp_f']}F")
+    print(f"Feels Like: {body['weather']['current']['feels_like_f']}F")
     print(f"Condition: {body['weather']['current']['condition']}")
     print(f"Humidity: {body['weather']['current']['humidity']}%")
     print(f"Wind: {body['weather']['current']['wind_mph']} mph")
     print("\n3-Day Forecast:")
     for day in body['weather']['forecast']:
-        print(f"  {day['date']}: {day['min_temp_f']}-{day['max_temp_f']}°F, {day['condition']}, {day['precipitation_probability']}% rain")
+        print(f"  {day['date']}: {day['min_temp_f']}-{day['max_temp_f']}F, {day['condition']}, {day['precipitation_probability']}% rain")
 
     return response
 
@@ -200,11 +200,11 @@ if __name__ == "__main__":
         test_invalid_city()
 
         print("\n" + "="*80)
-        print("✅ ALL TESTS COMPLETED")
+        print(" ALL TESTS COMPLETED")
         print("="*80)
 
     except Exception as e:
-        print(f"\n❌ TEST FAILED: {str(e)}")
+        print(f"\n TEST FAILED: {str(e)}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

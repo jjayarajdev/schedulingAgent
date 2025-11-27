@@ -98,13 +98,13 @@ def is_weather_suitable(weather_data: Dict, project_category: str) -> Dict[str, 
 
         # Temperature check
         if temp_f < requirements['min_temp_f']:
-            issues.append(f"Temperature too low ({temp_f}°F < {requirements['min_temp_f']}°F minimum)")
+            issues.append(f"Temperature too low ({temp_f}F < {requirements['min_temp_f']}F minimum)")
         elif temp_f > requirements['max_temp_f']:
-            issues.append(f"Temperature too high ({temp_f}°F > {requirements['max_temp_f']}°F maximum)")
+            issues.append(f"Temperature too high ({temp_f}F > {requirements['max_temp_f']}F maximum)")
         elif temp_f < requirements['min_temp_f'] + 5:
-            warnings.append(f"Temperature is borderline low ({temp_f}°F)")
+            warnings.append(f"Temperature is borderline low ({temp_f}F)")
         elif temp_f > requirements['max_temp_f'] - 5:
-            warnings.append(f"Temperature is borderline high ({temp_f}°F)")
+            warnings.append(f"Temperature is borderline high ({temp_f}F)")
 
         # Wind check
         if wind_mph > requirements['max_wind_mph']:
@@ -135,7 +135,7 @@ def is_weather_suitable(weather_data: Dict, project_category: str) -> Dict[str, 
             'confidence_score': confidence_score,
             'project_type': project_type,
             'weather_summary': {
-                'temperature': f"{temp_f}°F",
+                'temperature': f"{temp_f}F",
                 'condition': condition,
                 'wind': f"{wind_mph} mph",
                 'humidity': f"{humidity}%"
@@ -161,7 +161,7 @@ def _generate_recommendation(is_suitable: bool, issues: List[str], warnings: Lis
                             temp_f: float, condition: str) -> str:
     """Generate human-readable recommendation"""
     if is_suitable and len(warnings) == 0:
-        return f"Perfect conditions! {temp_f}°F and {condition}. Ideal for outdoor work."
+        return f"Perfect conditions! {temp_f}F and {condition}. Ideal for outdoor work."
     elif is_suitable and len(warnings) > 0:
         return f"Acceptable conditions with minor concerns: {'; '.join(warnings)}. Proceed with caution."
     else:

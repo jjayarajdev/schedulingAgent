@@ -53,7 +53,7 @@ def invoke_single_agent(
         )
         bedrock_client = boto3.client('bedrock-agent-runtime', config=boto_config)
 
-        logger.info(f"🚀 Invoking {agent_name} agent ({agent_id})")
+        logger.info(f" Invoking {agent_name} agent ({agent_id})")
 
         # Invoke agent
         response = bedrock_client.invoke_agent(
@@ -80,7 +80,7 @@ def invoke_single_agent(
         response_text = ''.join(full_response)
         execution_time = time.time() - start_time
 
-        logger.info(f"✅ {agent_name} completed in {execution_time:.2f}s: {response_text[:100]}...")
+        logger.info(f" {agent_name} completed in {execution_time:.2f}s: {response_text[:100]}...")
 
         return {
             'agent_name': agent_name,
@@ -92,7 +92,7 @@ def invoke_single_agent(
 
     except Exception as e:
         execution_time = time.time() - start_time
-        logger.error(f"❌ {agent_name} failed after {execution_time:.2f}s: {e}")
+        logger.error(f" {agent_name} failed after {execution_time:.2f}s: {e}")
 
         return {
             'agent_name': agent_name,
@@ -140,7 +140,7 @@ def execute_agents_in_parallel(
     """
     start_time = time.time()
 
-    logger.info(f"⚡ Executing {len(agents)} agents in PARALLEL (max_workers={max_workers})")
+    logger.info(f" Executing {len(agents)} agents in PARALLEL (max_workers={max_workers})")
 
     results = []
 
@@ -172,9 +172,9 @@ def execute_agents_in_parallel(
             try:
                 result = future.result()
                 results.append(result)
-                logger.debug(f"✅ Collected result from {agent_name}")
+                logger.debug(f" Collected result from {agent_name}")
             except Exception as e:
-                logger.error(f"❌ Exception collecting result from {agent_name}: {e}")
+                logger.error(f" Exception collecting result from {agent_name}: {e}")
                 results.append({
                     'agent_name': agent_name,
                     'response': None,
@@ -186,7 +186,7 @@ def execute_agents_in_parallel(
     total_time = time.time() - start_time
     successful_count = sum(1 for r in results if r['success'])
 
-    logger.info(f"⏱️  Parallel execution complete: {successful_count}/{len(agents)} succeeded in {total_time:.2f}s")
+    logger.info(f"  Parallel execution complete: {successful_count}/{len(agents)} succeeded in {total_time:.2f}s")
 
     # Sort results by original agent order for consistency
     agent_names = [a['name'] for a in agents]
@@ -224,7 +224,7 @@ def execute_agents_sequentially(
     """
     start_time = time.time()
 
-    logger.info(f"⏭️  Executing {len(agents)} agents SEQUENTIALLY")
+    logger.info(f"  Executing {len(agents)} agents SEQUENTIALLY")
 
     results = []
 
@@ -244,7 +244,7 @@ def execute_agents_sequentially(
 
 Now handle this: {agent_message}"""
 
-        logger.info(f"🔄 Step {i+1}/{len(agents)}: Invoking {agent_name}")
+        logger.info(f" Step {i+1}/{len(agents)}: Invoking {agent_name}")
 
         result = invoke_single_agent(
             agent_name=agent_name,
@@ -259,12 +259,12 @@ Now handle this: {agent_message}"""
 
         # If agent failed and it's critical, stop execution
         if not result['success']:
-            logger.warning(f"⚠️  {agent_name} failed, stopping sequential execution")
+            logger.warning(f"  {agent_name} failed, stopping sequential execution")
             break
 
     total_time = time.time() - start_time
     successful_count = sum(1 for r in results if r['success'])
 
-    logger.info(f"⏱️  Sequential execution complete: {successful_count}/{len(agents)} succeeded in {total_time:.2f}s")
+    logger.info(f"  Sequential execution complete: {successful_count}/{len(agents)} succeeded in {total_time:.2f}s")
 
     return results

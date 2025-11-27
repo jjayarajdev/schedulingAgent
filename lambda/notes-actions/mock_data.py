@@ -31,7 +31,7 @@ def get_mock_add_note(project_id: str, note_text: str, author: str = "Agent") ->
 
     return {
         "status": "success",
-        "message": f"✅ [MOCK] Note added successfully to project {project_id}",
+        "message": f" [MOCK] Note added successfully to project {project_id}",
         "data": note
     }
 

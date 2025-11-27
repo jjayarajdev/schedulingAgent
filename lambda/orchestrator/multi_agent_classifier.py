@@ -109,9 +109,9 @@ Classify the message into one of these orchestration patterns:
 1. **SINGLE AGENT** (orchestration_type: "single")
    - Query involves only ONE domain
    - Examples:
-     * "show my projects" → scheduling agent only
-     * "what's the weather" → information agent only
-     * "hello" → chitchat agent only
+     * "show my projects"  scheduling agent only
+     * "what's the weather"  information agent only
+     * "hello"  chitchat agent only
    - can_optimize: TRUE if it's a simple query (show/list/get)
    - can_optimize: FALSE if it's an action (schedule/book/create)
 
@@ -119,24 +119,24 @@ Classify the message into one of these orchestration patterns:
    - Query involves MULTIPLE INDEPENDENT domains
    - Agents can execute simultaneously
    - Examples:
-     * "show my projects and the weather" → scheduling + information (parallel)
-     * "tell me about projects and greet me" → scheduling + chitchat (parallel)
+     * "show my projects and the weather"  scheduling + information (parallel)
+     * "tell me about projects and greet me"  scheduling + chitchat (parallel)
    - can_optimize: FALSE (always requires agents for coordination)
 
 3. **SEQUENTIAL MULTI-AGENT** (orchestration_type: "sequential")
    - Query requires agents to execute IN ORDER
    - One agent's output feeds into the next
    - Examples:
-     * "check weather next week and if good, schedule project" → information THEN scheduling
-     * "show project details then check weather there" → scheduling THEN information
+     * "check weather next week and if good, schedule project"  information THEN scheduling
+     * "show project details then check weather there"  scheduling THEN information
    - can_optimize: FALSE (complex orchestration)
    - Must include 'dependencies' field showing order
 
 4. **CONDITIONAL MULTI-AGENT** (orchestration_type: "conditional")
    - Execution of one agent depends on another's result
    - Examples:
-     * "if weather is good, show my outdoor projects" → information THEN conditionally scheduling
-     * "schedule only if dates are available" → check availability THEN conditionally schedule
+     * "if weather is good, show my outdoor projects"  information THEN conditionally scheduling
+     * "schedule only if dates are available"  check availability THEN conditionally schedule
    - can_optimize: FALSE
    - Must include 'dependencies' field with conditions
 {context_str}
@@ -153,10 +153,10 @@ Current message: "{message}"
 }}
 
 **Rules:**
-- If only ONE agent needed → orchestration_type = "single"
-- If MULTIPLE agents with NO dependencies → orchestration_type = "parallel"
-- If agents must run IN ORDER → orchestration_type = "sequential"
-- If execution is CONDITIONAL → orchestration_type = "conditional"
+- If only ONE agent needed  orchestration_type = "single"
+- If MULTIPLE agents with NO dependencies  orchestration_type = "parallel"
+- If agents must run IN ORDER  orchestration_type = "sequential"
+- If execution is CONDITIONAL  orchestration_type = "conditional"
 - can_optimize = true ONLY for single-agent simple queries (show/list/get)
 - can_optimize = false for actions (schedule/book) and all multi-agent queries
 
@@ -222,7 +222,7 @@ Respond ONLY with valid JSON."""
         response_body = json.loads(response['body'].read())
         classification_text = response_body['content'][0]['text'].strip()
 
-        logger.info(f"🔍 Multi-agent classification: {classification_text}")
+        logger.info(f" Multi-agent classification: {classification_text}")
 
         # Parse JSON
         classification = json.loads(classification_text)
@@ -239,7 +239,7 @@ Respond ONLY with valid JSON."""
         if 'dependencies' not in classification:
             classification['dependencies'] = None
 
-        logger.info(f"✅ Multi-agent classification: {classification['orchestration_type']} with "
+        logger.info(f" Multi-agent classification: {classification['orchestration_type']} with "
                    f"{len(classification['agents_needed'])} agent(s): {classification['agents_needed']}")
 
         return classification

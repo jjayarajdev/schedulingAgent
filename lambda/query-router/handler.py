@@ -2,8 +2,8 @@
 """
 Query Router Lambda Function
 Analyzes incoming queries and determines routing path:
-- Simple queries → Direct to Bedrock Supervisor
-- Complex queries → Route to Step Functions
+- Simple queries  Direct to Bedrock Supervisor
+- Complex queries  Route to Step Functions
 """
 
 import boto3
@@ -141,7 +141,7 @@ def determine_state_machine(query):
             if re.search(pattern, query_lower):
                 arn = STATE_MACHINES.get(machine_key)
                 if arn:
-                    logger.info(f"Matched pattern '{pattern}' → {machine_key}")
+                    logger.info(f"Matched pattern '{pattern}'  {machine_key}")
                     return arn
 
     # Default to general orchestration
