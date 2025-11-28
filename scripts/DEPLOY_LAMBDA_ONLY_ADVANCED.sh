@@ -690,42 +690,48 @@ EOF
     fi
 
     echo "  [OK] IAM role created"
-    echo "  -> Waiting for IAM role to propagate..."
+    echo "  -> Waiting for IAM role to propagate (max 5 minutes)..."
 
     local ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
 
-    # Poll for role propagation with 60 second max timeout
-    local MAX_WAIT=60
-    local POLL_INTERVAL=10
+    # Dynamic polling for role propagation with 5 minute max timeout
+    local MAX_WAIT=300  # 5 minutes
+    local POLL_INTERVAL=5
     local ELAPSED=0
     local ROLE_READY=false
 
     while [[ $ELAPSED -lt $MAX_WAIT ]]; do
-        echo "  -> Poll attempt at ${ELAPSED}s: checking role $ROLE_NAME..."
-
         if aws_cmd iam get-role --role-name "$ROLE_NAME" 2>&1 | grep -q "Role"; then
-            echo "  -> Role exists, checking trust policy..."
             TRUST_POLICY=$(aws_cmd iam get-role --role-name "$ROLE_NAME" --query 'Role.AssumeRolePolicyDocument' 2>&1)
             if [[ -n "$TRUST_POLICY" ]] && [[ "$TRUST_POLICY" != "null" ]]; then
                 ROLE_READY=true
-                echo "  [OK] IAM role fully propagated after ${ELAPSED}s"
+                echo "  [OK] IAM role propagated after ${ELAPSED}s"
                 break
-            else
-                echo "  -> Trust policy not ready yet (got: ${TRUST_POLICY:0:50}...)"
             fi
-        else
-            echo "  -> Role not found yet in IAM"
         fi
 
         sleep $POLL_INTERVAL
         ELAPSED=$((ELAPSED + POLL_INTERVAL))
+
+        # Show progress every 15 seconds
+        if [[ $((ELAPSED % 15)) -eq 0 ]]; then
+            echo "  -> Waiting for IAM propagation... ${ELAPSED}s / ${MAX_WAIT}s"
+        fi
     done
 
     if [[ "$ROLE_READY" != "true" ]]; then
         echo "  [FAIL] ERROR: IAM role not propagated after ${MAX_WAIT}s"
-        echo "  -> Checking if role actually exists..."
         aws_cmd iam get-role --role-name "$ROLE_NAME" 2>&1 | head -20
         return 1
+    fi
+
+    # Additional safety wait for cross-region IAM consistency
+    # Lambda service may not see the role immediately even if IAM API returns it
+    local MIN_SAFETY_WAIT=15
+    if [[ $ELAPSED -lt $MIN_SAFETY_WAIT ]]; then
+        local EXTRA_WAIT=$((MIN_SAFETY_WAIT - ELAPSED))
+        echo "  -> Adding ${EXTRA_WAIT}s safety buffer for Lambda service consistency..."
+        sleep $EXTRA_WAIT
     fi
 
     # Create or update Lambda
@@ -750,21 +756,94 @@ EOF
         echo -e "  ${GREEN}[OK] Lambda updated: $FUNCTION_NAME${NC}"
     else
         echo "  -> Creating new function..."
-        if aws_cmd lambda create-function \
-            --function-name "$FUNCTION_NAME" \
-            --runtime python3.11 \
-            --role "$ROLE_ARN" \
-            --handler "$HANDLER" \
-            --zip-file fileb://function.zip \
-            --timeout "$TIMEOUT" \
-            --memory-size "$MEMORY" \
-            --region "$REGION" 2>&1 | tee ./lambda-create-$FUNCTION_NAME.log; then
-            echo -e "  ${GREEN}[OK] Lambda created: $FUNCTION_NAME${NC}"
-        else
-            echo -e "  ${RED}[FAIL] Lambda creation FAILED: $FUNCTION_NAME${NC}"
+
+        # Dynamic polling for Lambda creation (max 5 minutes)
+        # IAM role assumability can take time to propagate to Lambda service
+        local CREATE_MAX_WAIT=300  # 5 minutes
+        local CREATE_POLL_INTERVAL=10
+        local CREATE_ELAPSED=0
+        local LAMBDA_CREATED=false
+        local ATTEMPT=0
+
+        while [[ $CREATE_ELAPSED -lt $CREATE_MAX_WAIT ]]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "  -> Attempt $ATTEMPT at ${CREATE_ELAPSED}s..."
+
+            # Capture output and exit code separately (tee swallows exit code)
+            local CREATE_OUTPUT
+            CREATE_OUTPUT=$(aws_cmd lambda create-function \
+                --function-name "$FUNCTION_NAME" \
+                --runtime python3.11 \
+                --role "$ROLE_ARN" \
+                --handler "$HANDLER" \
+                --zip-file fileb://function.zip \
+                --timeout "$TIMEOUT" \
+                --memory-size "$MEMORY" \
+                --region "$REGION" 2>&1)
+            local CREATE_EXIT_CODE=$?
+
+            # Save output to log
+            echo "$CREATE_OUTPUT" > ./lambda-create-$FUNCTION_NAME.log
+
+            if [[ $CREATE_EXIT_CODE -eq 0 ]]; then
+                LAMBDA_CREATED=true
+                echo -e "  ${GREEN}[OK] Lambda created: $FUNCTION_NAME (after ${CREATE_ELAPSED}s)${NC}"
+                break
+            elif echo "$CREATE_OUTPUT" | grep -q "cannot be assumed by Lambda"; then
+                echo "  [WAIT] IAM role not yet assumable by Lambda service"
+                sleep $CREATE_POLL_INTERVAL
+                CREATE_ELAPSED=$((CREATE_ELAPSED + CREATE_POLL_INTERVAL))
+
+                # Show progress every 30 seconds
+                if [[ $((CREATE_ELAPSED % 30)) -eq 0 ]]; then
+                    echo "  -> Still waiting for IAM-Lambda consistency... ${CREATE_ELAPSED}s / ${CREATE_MAX_WAIT}s"
+                fi
+            else
+                # Some other error - show it and fail
+                echo "$CREATE_OUTPUT"
+                echo -e "  ${RED}[FAIL] Lambda creation FAILED: $FUNCTION_NAME${NC}"
+                return 1
+            fi
+        done
+
+        if [[ "$LAMBDA_CREATED" != "true" ]]; then
+            echo -e "  ${RED}[FAIL] Lambda creation FAILED after ${CREATE_MAX_WAIT}s${NC}"
             echo "  See error log: ./lambda-create-$FUNCTION_NAME.log"
             return 1
         fi
+    fi
+
+    # POST-DEPLOYMENT VERIFICATION: Wait for Lambda to be fully Active
+    echo "  -> Verifying Lambda is Active..."
+    local VERIFY_ATTEMPTS=10
+    local VERIFY_DELAY=3
+    local LAMBDA_ACTIVE=false
+
+    for V in $(seq 1 $VERIFY_ATTEMPTS); do
+        local LAMBDA_STATE=$(aws_cmd lambda get-function \
+            --function-name "$FUNCTION_NAME" \
+            --region "$REGION" \
+            --query 'Configuration.State' \
+            --output text 2>/dev/null || echo "UNKNOWN")
+
+        local LAST_UPDATE=$(aws_cmd lambda get-function \
+            --function-name "$FUNCTION_NAME" \
+            --region "$REGION" \
+            --query 'Configuration.LastUpdateStatus' \
+            --output text 2>/dev/null || echo "UNKNOWN")
+
+        if [[ "$LAMBDA_STATE" == "Active" ]] && [[ "$LAST_UPDATE" == "Successful" || "$LAST_UPDATE" == "null" || -z "$LAST_UPDATE" ]]; then
+            LAMBDA_ACTIVE=true
+            echo -e "  ${GREEN}[OK] Lambda verified Active: $FUNCTION_NAME${NC}"
+            break
+        else
+            echo "  -> Waiting... (State: $LAMBDA_STATE, LastUpdate: $LAST_UPDATE)"
+            sleep $VERIFY_DELAY
+        fi
+    done
+
+    if [[ "$LAMBDA_ACTIVE" != "true" ]]; then
+        echo -e "  ${YELLOW}[WARN] Lambda may not be fully ready - State: $LAMBDA_STATE${NC}"
     fi
 }
 
@@ -939,13 +1018,201 @@ echo ""
 echo -e "${GREEN}[OK] KMS encryption fix completed for all Lambdas${NC}"
 
 
-# Summary
+##############################################################################
+# Step 7: FINAL VERIFICATION - Check ALL resources exist and are working
 ##############################################################################
 
 echo ""
-echo "----------------------------------------------------------------------------"
-echo -e "${GREEN}[OK] Deployment Complete!${NC}"
-echo "----------------------------------------------------------------------------"
+echo "============================================================================"
+echo -e "${YELLOW}Step 7: FINAL VERIFICATION - Checking all deployed resources${NC}"
+echo "============================================================================"
+echo ""
+
+DEPLOYMENT_OK=true
+FAILED_RESOURCES=""
+
+# 7.1 Verify all Lambda functions exist and are Active
+echo "  -> Verifying Lambda functions..."
+REQUIRED_LAMBDAS=("pf-orchestrator" "pf-scheduling-actions" "pf-information-actions" "pf-chitchat-actions")
+
+for LAMBDA_NAME in "${REQUIRED_LAMBDAS[@]}"; do
+    echo -n "     Checking $LAMBDA_NAME... "
+
+    LAMBDA_STATE=$(aws_cmd lambda get-function \
+        --function-name "$LAMBDA_NAME" \
+        --region "$REGION" \
+        --query 'Configuration.State' \
+        --output text 2>/dev/null || echo "NOT_FOUND")
+
+    if [[ "$LAMBDA_STATE" == "Active" ]]; then
+        echo -e "${GREEN}[OK] Active${NC}"
+    elif [[ "$LAMBDA_STATE" == "NOT_FOUND" ]]; then
+        echo -e "${RED}[FAIL] NOT FOUND!${NC}"
+        DEPLOYMENT_OK=false
+        FAILED_RESOURCES="$FAILED_RESOURCES\n  - Lambda: $LAMBDA_NAME (not found)"
+    else
+        echo -e "${YELLOW}[WARN] State: $LAMBDA_STATE${NC}"
+        # Wait for it to become active
+        echo "     -> Waiting for Lambda to become Active..."
+        for i in 1 2 3 4 5; do
+            sleep 5
+            LAMBDA_STATE=$(aws_cmd lambda get-function \
+                --function-name "$LAMBDA_NAME" \
+                --region "$REGION" \
+                --query 'Configuration.State' \
+                --output text 2>/dev/null || echo "NOT_FOUND")
+            if [[ "$LAMBDA_STATE" == "Active" ]]; then
+                echo -e "     ${GREEN}[OK] Now Active${NC}"
+                break
+            fi
+        done
+        if [[ "$LAMBDA_STATE" != "Active" ]]; then
+            DEPLOYMENT_OK=false
+            FAILED_RESOURCES="$FAILED_RESOURCES\n  - Lambda: $LAMBDA_NAME (state: $LAMBDA_STATE)"
+        fi
+    fi
+done
+
+echo ""
+
+# 7.2 Verify DynamoDB tables exist and are Active
+echo "  -> Verifying DynamoDB tables..."
+REQUIRED_TABLES=("pf-sessions-${ENV}" "pf-notes-${ENV}" "pf-workflow-states-${ENV}")
+
+for TABLE_NAME in "${REQUIRED_TABLES[@]}"; do
+    echo -n "     Checking $TABLE_NAME... "
+
+    TABLE_STATUS=$(aws_cmd dynamodb describe-table \
+        --table-name "$TABLE_NAME" \
+        --region "$REGION" \
+        --query 'Table.TableStatus' \
+        --output text 2>/dev/null || echo "NOT_FOUND")
+
+    if [[ "$TABLE_STATUS" == "ACTIVE" ]]; then
+        echo -e "${GREEN}[OK] Active${NC}"
+    elif [[ "$TABLE_STATUS" == "NOT_FOUND" ]]; then
+        echo -e "${RED}[FAIL] NOT FOUND!${NC}"
+        DEPLOYMENT_OK=false
+        FAILED_RESOURCES="$FAILED_RESOURCES\n  - DynamoDB: $TABLE_NAME (not found)"
+    else
+        echo -e "${YELLOW}[WARN] Status: $TABLE_STATUS - waiting...${NC}"
+        aws_cmd dynamodb wait table-exists --table-name "$TABLE_NAME" --region "$REGION" 2>/dev/null || true
+        TABLE_STATUS=$(aws_cmd dynamodb describe-table \
+            --table-name "$TABLE_NAME" \
+            --region "$REGION" \
+            --query 'Table.TableStatus' \
+            --output text 2>/dev/null || echo "NOT_FOUND")
+        if [[ "$TABLE_STATUS" == "ACTIVE" ]]; then
+            echo -e "     ${GREEN}[OK] Now Active${NC}"
+        else
+            DEPLOYMENT_OK=false
+            FAILED_RESOURCES="$FAILED_RESOURCES\n  - DynamoDB: $TABLE_NAME (status: $TABLE_STATUS)"
+        fi
+    fi
+done
+
+echo ""
+
+# 7.3 Verify Secrets Manager secret exists
+echo "  -> Verifying Secrets Manager..."
+echo -n "     Checking projectforce/api/credentials... "
+SECRET_EXISTS=$(aws_cmd secretsmanager describe-secret \
+    --secret-id "projectforce/api/credentials" \
+    --region "$REGION" \
+    --query 'Name' \
+    --output text 2>/dev/null || echo "NOT_FOUND")
+
+if [[ "$SECRET_EXISTS" != "NOT_FOUND" ]]; then
+    echo -e "${GREEN}[OK] Exists${NC}"
+else
+    echo -e "${RED}[FAIL] NOT FOUND!${NC}"
+    DEPLOYMENT_OK=false
+    FAILED_RESOURCES="$FAILED_RESOURCES\n  - Secret: projectforce/api/credentials (not found)"
+fi
+
+echo ""
+
+# 7.4 Verify IAM roles exist
+echo "  -> Verifying IAM roles..."
+REQUIRED_ROLES=("pf-orchestrator-role" "pf-scheduling-actions-role" "pf-information-actions-role" "pf-chitchat-actions-role")
+
+for ROLE_NAME in "${REQUIRED_ROLES[@]}"; do
+    echo -n "     Checking $ROLE_NAME... "
+
+    ROLE_EXISTS=$(aws_cmd iam get-role \
+        --role-name "$ROLE_NAME" \
+        --query 'Role.RoleName' \
+        --output text 2>/dev/null || echo "NOT_FOUND")
+
+    if [[ "$ROLE_EXISTS" != "NOT_FOUND" ]]; then
+        echo -e "${GREEN}[OK] Exists${NC}"
+    else
+        echo -e "${RED}[FAIL] NOT FOUND!${NC}"
+        DEPLOYMENT_OK=false
+        FAILED_RESOURCES="$FAILED_RESOURCES\n  - IAM Role: $ROLE_NAME (not found)"
+    fi
+done
+
+echo ""
+
+# 7.5 Verify orchestrator environment variables
+echo "  -> Verifying orchestrator configuration..."
+echo -n "     Checking environment variables... "
+ORCH_CONFIG=$(aws_cmd lambda get-function-configuration \
+    --function-name "pf-orchestrator" \
+    --region "$REGION" \
+    --query 'Environment.Variables.SCHEDULING_LAMBDA' \
+    --output text 2>/dev/null || echo "NOT_SET")
+
+if [[ "$ORCH_CONFIG" == "pf-scheduling-actions" ]]; then
+    echo -e "${GREEN}[OK] Configured${NC}"
+else
+    echo -e "${YELLOW}[WARN] SCHEDULING_LAMBDA=$ORCH_CONFIG${NC}"
+fi
+
+echo ""
+
+# 7.6 Test Lambda invocability (optional quick test)
+echo "  -> Testing Lambda invocability..."
+echo -n "     Testing pf-orchestrator invoke... "
+INVOKE_RESULT=$(aws_cmd lambda invoke \
+    --function-name "pf-orchestrator" \
+    --payload '{"test": true}' \
+    --region "$REGION" \
+    /dev/null 2>&1 || echo "INVOKE_FAILED")
+
+if echo "$INVOKE_RESULT" | grep -q "INVOKE_FAILED\|error\|Error"; then
+    echo -e "${YELLOW}[WARN] Invoke test inconclusive${NC}"
+else
+    echo -e "${GREEN}[OK] Invocable${NC}"
+fi
+
+echo ""
+echo "============================================================================"
+
+# Final result
+if [[ "$DEPLOYMENT_OK" == "true" ]]; then
+    echo -e "${GREEN}[OK] ALL VERIFICATION CHECKS PASSED!${NC}"
+    echo "============================================================================"
+    echo ""
+
+    # Summary
+    echo "----------------------------------------------------------------------------"
+    echo -e "${GREEN}[OK] Deployment Complete!${NC}"
+    echo "----------------------------------------------------------------------------"
+else
+    echo -e "${RED}[FAIL] DEPLOYMENT VERIFICATION FAILED!${NC}"
+    echo "============================================================================"
+    echo ""
+    echo -e "${RED}Failed resources:${NC}"
+    echo -e "$FAILED_RESOURCES"
+    echo ""
+    echo "Please fix the above issues before using the system."
+    echo "You may need to re-run this script or check AWS console."
+    echo ""
+    echo "----------------------------------------------------------------------------"
+    exit 1
+fi
 echo ""
 echo "Deployed Resources:"
 echo "  [OK] 4 Lambda functions"

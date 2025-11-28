@@ -405,26 +405,31 @@ EOF
 
     echo "  [OK] IAM role created"
 
-    # Poll for role propagation (10s intervals, 60s timeout, early exit when ready)
-    echo "  -> Waiting for IAM role to propagate..."
-    local MAX_WAIT=60
-    local POLL_INTERVAL=10
+    # Dynamic polling for role propagation (5 minute max timeout)
+    echo "  -> Waiting for IAM role to propagate (max 5 minutes)..."
+    local MAX_WAIT=300  # 5 minutes
+    local POLL_INTERVAL=5
     local ELAPSED=0
     local ROLE_READY=false
 
     while [[ $ELAPSED -lt $MAX_WAIT ]]; do
         if aws_cmd iam get-role --role-name "$ROLE_NAME" 2>&1 | grep -q "Role"; then
             ROLE_READY=true
-            echo "  [OK] IAM role propagated (checked at ${ELAPSED}s)"
+            echo "  [OK] IAM role propagated after ${ELAPSED}s"
             break
         fi
         sleep $POLL_INTERVAL
         ELAPSED=$((ELAPSED + POLL_INTERVAL))
-        echo "    Polling... ${ELAPSED}s elapsed"
+
+        # Show progress every 15 seconds
+        if [[ $((ELAPSED % 15)) -eq 0 ]]; then
+            echo "  -> Waiting for IAM propagation... ${ELAPSED}s / ${MAX_WAIT}s"
+        fi
     done
 
     if [[ "$ROLE_READY" != "true" ]]; then
-        echo "  [WARN]  Warning: IAM role may not be fully propagated after ${MAX_WAIT}s"
+        echo "  [FAIL] IAM role not propagated after ${MAX_WAIT}s"
+        return 1
     fi
 
     return 0
@@ -638,25 +643,61 @@ deploy_lambda() {
     if aws_cmd lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" 2>&1 | grep -q "ResourceNotFoundException"; then
         echo "  -> Creating new function..."
 
-        # Use PIPESTATUS to capture actual aws command exit code
-        aws_cmd lambda create-function \
-            --function-name "$FUNCTION_NAME" \
-            --runtime "$RUNTIME" \
-            --role "$ROLE_ARN" \
-            --handler "$HANDLER" \
-            --zip-file "fileb://${ZIP_PATH}" \
-            --description "$DESCRIPTION" \
-            --timeout 60 \
-            --memory-size 512 \
-            --region "$REGION" 2>&1 | tee "./lambda-create-$FUNCTION_NAME.log"
+        # Dynamic polling for Lambda creation (max 5 minutes)
+        # IAM role assumability can take time to propagate to Lambda service
+        local CREATE_MAX_WAIT=300  # 5 minutes
+        local CREATE_POLL_INTERVAL=10
+        local CREATE_ELAPSED=0
+        local LAMBDA_CREATED=false
+        local ATTEMPT=0
 
-        if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "  [FAIL] Failed to create Lambda function $FUNCTION_NAME"
-            echo "  Check log: ./lambda-create-$FUNCTION_NAME.log"
+        while [[ $CREATE_ELAPSED -lt $CREATE_MAX_WAIT ]]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "  -> Attempt $ATTEMPT at ${CREATE_ELAPSED}s..."
+
+            # Capture output and exit code separately
+            local CREATE_OUTPUT
+            CREATE_OUTPUT=$(aws_cmd lambda create-function \
+                --function-name "$FUNCTION_NAME" \
+                --runtime "$RUNTIME" \
+                --role "$ROLE_ARN" \
+                --handler "$HANDLER" \
+                --zip-file "fileb://${ZIP_PATH}" \
+                --description "$DESCRIPTION" \
+                --timeout 60 \
+                --memory-size 512 \
+                --region "$REGION" 2>&1)
+            local CREATE_EXIT_CODE=$?
+
+            # Save output to log
+            echo "$CREATE_OUTPUT" > "./lambda-create-$FUNCTION_NAME.log"
+
+            if [[ $CREATE_EXIT_CODE -eq 0 ]]; then
+                LAMBDA_CREATED=true
+                echo -e "  ${GREEN}[OK] Lambda created: $FUNCTION_NAME (after ${CREATE_ELAPSED}s)${NC}"
+                break
+            elif echo "$CREATE_OUTPUT" | grep -q "cannot be assumed by Lambda"; then
+                echo "  [WAIT] IAM role not yet assumable by Lambda service"
+                sleep $CREATE_POLL_INTERVAL
+                CREATE_ELAPSED=$((CREATE_ELAPSED + CREATE_POLL_INTERVAL))
+
+                # Show progress every 30 seconds
+                if [[ $((CREATE_ELAPSED % 30)) -eq 0 ]]; then
+                    echo "  -> Still waiting for IAM-Lambda consistency... ${CREATE_ELAPSED}s / ${CREATE_MAX_WAIT}s"
+                fi
+            else
+                # Some other error - show it and fail
+                echo "$CREATE_OUTPUT"
+                echo -e "  ${RED}[FAIL] Lambda creation FAILED: $FUNCTION_NAME${NC}"
+                return 1
+            fi
+        done
+
+        if [[ "$LAMBDA_CREATED" != "true" ]]; then
+            echo -e "  ${RED}[FAIL] Lambda creation FAILED after ${CREATE_MAX_WAIT}s${NC}"
+            echo "  See error log: ./lambda-create-$FUNCTION_NAME.log"
             return 1
         fi
-
-        echo -e "  ${GREEN}[OK] Lambda created: $FUNCTION_NAME${NC}"
     else
         echo "  -> Updating existing function code..."
 
@@ -685,6 +726,40 @@ deploy_lambda() {
         rm -f "$(cygpath -u "$ZIP_PATH")"
     else
         rm -f "$ZIP_PATH"
+    fi
+
+    # POST-DEPLOYMENT VERIFICATION: Wait for Lambda to be fully Active
+    echo "  -> Verifying Lambda is Active..."
+    local VERIFY_ATTEMPTS=10
+    local VERIFY_DELAY=3
+    local LAMBDA_ACTIVE=false
+
+    for V in $(seq 1 $VERIFY_ATTEMPTS); do
+        local LAMBDA_STATE=$(aws_cmd lambda get-function \
+            --function-name "$FUNCTION_NAME" \
+            --region "$REGION" \
+            --query 'Configuration.State' \
+            --output text 2>/dev/null || echo "UNKNOWN")
+
+        local LAST_UPDATE=$(aws_cmd lambda get-function \
+            --function-name "$FUNCTION_NAME" \
+            --region "$REGION" \
+            --query 'Configuration.LastUpdateStatus' \
+            --output text 2>/dev/null || echo "UNKNOWN")
+
+        if [[ "$LAMBDA_STATE" == "Active" ]] && [[ "$LAST_UPDATE" == "Successful" || "$LAST_UPDATE" == "null" || -z "$LAST_UPDATE" ]]; then
+            LAMBDA_ACTIVE=true
+            echo -e "  ${GREEN}[OK] Lambda verified Active: $FUNCTION_NAME${NC}"
+            break
+        else
+            echo "  -> Waiting... (State: $LAMBDA_STATE, LastUpdate: $LAST_UPDATE)"
+            sleep $VERIFY_DELAY
+        fi
+    done
+
+    if [[ "$LAMBDA_ACTIVE" != "true" ]]; then
+        echo -e "  ${YELLOW}[WARN] Lambda may not be fully ready - State: $LAMBDA_STATE${NC}"
+        return 1
     fi
 
     return 0
@@ -1285,14 +1360,24 @@ try:
     except Exception as e:
         print("  Warning listing aliases: " + str(e))
 
+    # IMPORTANT: TSTALIASID (TestBotAlias) can ONLY use DRAFT version
+    # For numbered versions, we'd need to create a different alias
+    # Since Connect typically uses TestBotAlias, we use DRAFT
+    use_version = 'DRAFT'
+    if alias_id == 'TSTALIASID':
+        print("  Note: TestBotAlias (TSTALIASID) can only use DRAFT version")
+        use_version = 'DRAFT'
+    else:
+        use_version = bot_version
+
     if alias_needs_update and alias_id:
         try:
-            print("  Updating alias to version " + bot_version + " with Lambda hook...")
+            print("  Updating alias with " + use_version + " version and Lambda hook...")
             client.update_bot_alias(
                 botId=bot_id,
                 botAliasId=alias_id,
                 botAliasName='TestBotAlias',
-                botVersion=bot_version,
+                botVersion=use_version,
                 botAliasLocaleSettings={
                     'en_US': {
                         'enabled': True,
@@ -1319,11 +1404,11 @@ try:
 
     if not alias_id:
         try:
-            print("  Creating new alias with version " + bot_version + "...")
+            print("  Creating new alias with DRAFT version...")
             alias_response = client.create_bot_alias(
                 botId=bot_id,
                 botAliasName='TestBotAlias',
-                botVersion=bot_version,
+                botVersion='DRAFT',
                 botAliasLocaleSettings={
                     'en_US': {
                         'enabled': True,
@@ -1412,6 +1497,100 @@ PYTHON_SCRIPT
         LEX_ALIAS_ID="ALIAS_ID_PLACEHOLDER"
     fi
 fi
+
+# ============================================================================
+# Step 4.5: Auto-fix Connect Integration (CRITICAL)
+# ============================================================================
+# This step ensures:
+# 1. Bot is associated with all Connect instances
+# 2. All existing contact flows are updated to use the new bot ID
+# ============================================================================
+
+echo ""
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo -e "${YELLOW}Step 4.5: Auto-fixing Connect Integration${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo ""
+
+if [[ -n "$LEX_BOT_ID" && "$LEX_BOT_ID" != "BOT_ID_PLACEHOLDER" ]]; then
+    # Auto-detect all Connect instances
+    echo "  -> Detecting Connect instances..."
+    CONNECT_INSTANCE_IDS=$(aws_cmd connect list-instances --region "$REGION" --query "InstanceSummaryList[].Id" --output text 2>/dev/null || echo "")
+
+    if [[ -n "$CONNECT_INSTANCE_IDS" && "$CONNECT_INSTANCE_IDS" != "None" ]]; then
+        for INST_ID in $CONNECT_INSTANCE_IDS; do
+            echo ""
+            echo "  -> Processing Connect instance: $INST_ID"
+
+            # 1. Associate bot with Connect instance
+            echo "     -> Associating Lex bot..."
+            BOT_ALIAS_ARN="arn:aws:lex:${REGION}:${ACCOUNT_ID}:bot-alias/${LEX_BOT_ID}/${LEX_ALIAS_ID}"
+            aws_cmd connect associate-bot \
+                --instance-id "$INST_ID" \
+                --lex-v2-bot "AliasArn=${BOT_ALIAS_ARN}" \
+                --region "$REGION" 2>/dev/null && echo "     [OK] Bot associated" || echo "     [INFO] Bot already associated or error"
+
+            # 2. Find and update ALL contact flows that use Lex bots
+            echo "     -> Checking contact flows for old bot references..."
+            FLOW_IDS=$(aws_cmd connect list-contact-flows \
+                --instance-id "$INST_ID" \
+                --region "$REGION" \
+                --query "ContactFlowSummaryList[].Id" \
+                --output text 2>/dev/null || echo "")
+
+            for FLOW_ID in $FLOW_IDS; do
+                if [[ -n "$FLOW_ID" && "$FLOW_ID" != "None" ]]; then
+                    # Get the flow content
+                    FLOW_CONTENT=$(aws_cmd connect describe-contact-flow \
+                        --instance-id "$INST_ID" \
+                        --contact-flow-id "$FLOW_ID" \
+                        --query "ContactFlow.Content" \
+                        --output text \
+                        --region "$REGION" 2>/dev/null || echo "")
+
+                    # Check if it contains any bot-alias reference that's NOT our bot
+                    if echo "$FLOW_CONTENT" | grep -q "bot-alias"; then
+                        # Check if it's using a different bot ID
+                        CURRENT_BOT_IN_FLOW=$(echo "$FLOW_CONTENT" | grep -oE 'bot-alias/[A-Z0-9]+/' | head -1 | sed 's/bot-alias\///;s/\///')
+
+                        if [[ -n "$CURRENT_BOT_IN_FLOW" && "$CURRENT_BOT_IN_FLOW" != "$LEX_BOT_ID" ]]; then
+                            FLOW_NAME=$(aws_cmd connect describe-contact-flow \
+                                --instance-id "$INST_ID" \
+                                --contact-flow-id "$FLOW_ID" \
+                                --query "ContactFlow.Name" \
+                                --output text \
+                                --region "$REGION" 2>/dev/null || echo "unknown")
+
+                            echo "     -> Updating flow '$FLOW_NAME': $CURRENT_BOT_IN_FLOW -> $LEX_BOT_ID"
+
+                            # Replace old bot ID with new bot ID
+                            NEW_FLOW_CONTENT=$(echo "$FLOW_CONTENT" | sed "s/${CURRENT_BOT_IN_FLOW}/${LEX_BOT_ID}/g")
+
+                            # Update the contact flow
+                            if aws_cmd connect update-contact-flow-content \
+                                --instance-id "$INST_ID" \
+                                --contact-flow-id "$FLOW_ID" \
+                                --content "$NEW_FLOW_CONTENT" \
+                                --region "$REGION" 2>/dev/null; then
+                                echo "     [OK] Flow updated successfully"
+                            else
+                                echo "     [WARN] Could not update flow (may need manual fix)"
+                            fi
+                        fi
+                    fi
+                fi
+            done
+        done
+        echo ""
+        echo "  [OK] Connect integration auto-fix complete"
+    else
+        echo "  [INFO] No Connect instances found - skipping auto-fix"
+    fi
+else
+    echo "  [SKIP] No valid bot ID - skipping Connect auto-fix"
+fi
+
+echo ""
 
 # Ask for Connect instance ID (optional)
 echo ""
@@ -1628,11 +1807,233 @@ if [[ -n "$CONNECT_INSTANCE_ID" && "$CONNECT_INSTANCE_ID" != "CONNECT_INSTANCE_P
 fi
 
 # ============================================================================
+# Step 7: FINAL VERIFICATION - Bulletproof checks before saying "Complete"
+# ============================================================================
+
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo -e "${YELLOW}Step 7: FINAL VERIFICATION${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo ""
+
+VERIFICATION_PASSED=true
+VERIFICATION_ERRORS=()
+
+# 7.1: Verify all Lambda functions are Active
+echo "  [7.1] Verifying Lambda functions..."
+for FUNC_NAME in "$LEX_FULFILLMENT_FUNCTION" "$VOICE_BRIDGE_FUNCTION" "$CUSTOMER_LOOKUP_FUNCTION"; do
+    echo "    -> Checking $FUNC_NAME..."
+
+    LAMBDA_CHECK=$(aws_cmd lambda get-function \
+        --function-name "$FUNC_NAME" \
+        --region "$REGION" 2>&1)
+
+    if echo "$LAMBDA_CHECK" | grep -q "ResourceNotFoundException"; then
+        echo "    [FAIL] Lambda not found: $FUNC_NAME"
+        VERIFICATION_PASSED=false
+        VERIFICATION_ERRORS+=("Lambda $FUNC_NAME does not exist")
+    else
+        LAMBDA_STATE=$(echo "$LAMBDA_CHECK" | $PYTHON_CMD -c "import sys,json; d=json.load(sys.stdin); print(d.get('Configuration',{}).get('State','UNKNOWN'))" 2>/dev/null || echo "UNKNOWN")
+        LAST_UPDATE=$(echo "$LAMBDA_CHECK" | $PYTHON_CMD -c "import sys,json; d=json.load(sys.stdin); print(d.get('Configuration',{}).get('LastUpdateStatus',''))" 2>/dev/null || echo "")
+
+        if [[ "$LAMBDA_STATE" == "Active" ]]; then
+            if [[ "$LAST_UPDATE" == "Successful" || -z "$LAST_UPDATE" || "$LAST_UPDATE" == "null" ]]; then
+                echo "    [OK] $FUNC_NAME is Active (LastUpdate: ${LAST_UPDATE:-N/A})"
+            else
+                echo "    [WAIT] $FUNC_NAME update in progress: $LAST_UPDATE"
+                # Wait for update to complete
+                for W in $(seq 1 10); do
+                    sleep 3
+                    LAST_UPDATE=$(aws_cmd lambda get-function-configuration \
+                        --function-name "$FUNC_NAME" \
+                        --region "$REGION" \
+                        --query 'LastUpdateStatus' \
+                        --output text 2>/dev/null || echo "UNKNOWN")
+                    if [[ "$LAST_UPDATE" == "Successful" || "$LAST_UPDATE" == "null" || -z "$LAST_UPDATE" ]]; then
+                        echo "    [OK] $FUNC_NAME update completed"
+                        break
+                    fi
+                done
+            fi
+        else
+            echo "    [WARN] $FUNC_NAME state: $LAMBDA_STATE (expected: Active)"
+            VERIFICATION_ERRORS+=("Lambda $FUNC_NAME is not Active (state: $LAMBDA_STATE)")
+        fi
+    fi
+done
+echo ""
+
+# 7.2: Test Lambda invocability (dry-run)
+echo "  [7.2] Testing Lambda invocability..."
+for FUNC_NAME in "$LEX_FULFILLMENT_FUNCTION" "$VOICE_BRIDGE_FUNCTION" "$CUSTOMER_LOOKUP_FUNCTION"; do
+    echo "    -> Testing $FUNC_NAME..."
+
+    # Use DryRun invocation to test permissions without actually running
+    INVOKE_TEST=$(aws_cmd lambda invoke \
+        --function-name "$FUNC_NAME" \
+        --invocation-type DryRun \
+        --region "$REGION" \
+        /dev/null 2>&1)
+
+    if [[ $? -eq 0 ]] || echo "$INVOKE_TEST" | grep -q "204\|DryRunOperation"; then
+        echo "    [OK] $FUNC_NAME is invocable"
+    else
+        echo "    [WARN] $FUNC_NAME invocation test issue: $INVOKE_TEST"
+        # Don't fail verification for this - DryRun can be flaky
+    fi
+done
+echo ""
+
+# 7.3: Verify DynamoDB table
+echo "  [7.3] Verifying DynamoDB tables..."
+echo "    -> Checking $CUSTOMER_TABLE..."
+TABLE_STATUS=$(aws_cmd dynamodb describe-table \
+    --table-name "$CUSTOMER_TABLE" \
+    --region "$REGION" \
+    --query 'Table.TableStatus' \
+    --output text 2>/dev/null || echo "NOT_FOUND")
+
+if [[ "$TABLE_STATUS" == "ACTIVE" ]]; then
+    echo "    [OK] $CUSTOMER_TABLE is ACTIVE"
+elif [[ "$TABLE_STATUS" == "NOT_FOUND" ]]; then
+    echo "    [FAIL] $CUSTOMER_TABLE not found"
+    VERIFICATION_PASSED=false
+    VERIFICATION_ERRORS+=("DynamoDB table $CUSTOMER_TABLE does not exist")
+else
+    echo "    [WAIT] $CUSTOMER_TABLE status: $TABLE_STATUS"
+    # Wait for table to become active
+    for W in $(seq 1 10); do
+        sleep 3
+        TABLE_STATUS=$(aws_cmd dynamodb describe-table \
+            --table-name "$CUSTOMER_TABLE" \
+            --region "$REGION" \
+            --query 'Table.TableStatus' \
+            --output text 2>/dev/null || echo "UNKNOWN")
+        if [[ "$TABLE_STATUS" == "ACTIVE" ]]; then
+            echo "    [OK] $CUSTOMER_TABLE is now ACTIVE"
+            break
+        fi
+    done
+fi
+echo ""
+
+# 7.4: Verify IAM roles
+echo "  [7.4] Verifying IAM roles..."
+for ROLE_NAME in "$LEX_FULFILLMENT_ROLE" "$VOICE_BRIDGE_ROLE" "$CUSTOMER_LOOKUP_ROLE"; do
+    echo "    -> Checking $ROLE_NAME..."
+
+    if aws_cmd iam get-role --role-name "$ROLE_NAME" &>/dev/null; then
+        echo "    [OK] $ROLE_NAME exists"
+    else
+        echo "    [FAIL] $ROLE_NAME not found"
+        VERIFICATION_PASSED=false
+        VERIFICATION_ERRORS+=("IAM role $ROLE_NAME does not exist")
+    fi
+done
+echo ""
+
+# 7.5: Verify Lex bot and alias configuration
+echo "  [7.5] Verifying Lex bot configuration..."
+if [[ -n "$LEX_BOT_ID" && "$LEX_BOT_ID" != "BOT_ID_PLACEHOLDER" ]]; then
+    echo "    -> Checking bot: $LEX_BOT_ID..."
+
+    BOT_STATUS=$(aws_cmd lexv2-models describe-bot \
+        --bot-id "$LEX_BOT_ID" \
+        --region "$REGION" \
+        --query 'botStatus' \
+        --output text 2>/dev/null || echo "NOT_FOUND")
+
+    if [[ "$BOT_STATUS" == "Available" ]]; then
+        echo "    [OK] Bot $LEX_BOT_ID is Available"
+    elif [[ "$BOT_STATUS" == "NOT_FOUND" ]]; then
+        echo "    [FAIL] Bot $LEX_BOT_ID not found"
+        VERIFICATION_PASSED=false
+        VERIFICATION_ERRORS+=("Lex bot $LEX_BOT_ID does not exist")
+    else
+        echo "    [WARN] Bot status: $BOT_STATUS"
+    fi
+
+    # Verify alias has Lambda hook configured
+    echo "    -> Checking alias configuration..."
+    ALIAS_CONFIG=$(aws_cmd lexv2-models describe-bot-alias \
+        --bot-id "$LEX_BOT_ID" \
+        --bot-alias-id "$LEX_ALIAS_ID" \
+        --region "$REGION" 2>/dev/null)
+
+    if [[ -n "$ALIAS_CONFIG" ]]; then
+        ALIAS_VERSION=$(echo "$ALIAS_CONFIG" | $PYTHON_CMD -c "import sys,json; print(json.load(sys.stdin).get('botVersion',''))" 2>/dev/null || echo "")
+        LAMBDA_ARN=$(echo "$ALIAS_CONFIG" | $PYTHON_CMD -c "import sys,json; d=json.load(sys.stdin); print(d.get('botAliasLocaleSettings',{}).get('en_US',{}).get('codeHookSpecification',{}).get('lambdaCodeHook',{}).get('lambdaARN','NOT_SET'))" 2>/dev/null || echo "NOT_SET")
+
+        echo "    [OK] Alias version: $ALIAS_VERSION"
+
+        if [[ "$LAMBDA_ARN" != "NOT_SET" && -n "$LAMBDA_ARN" ]]; then
+            echo "    [OK] Lambda hook configured: $(basename $LAMBDA_ARN)"
+        else
+            echo "    [FAIL] Lambda hook NOT configured on alias!"
+            VERIFICATION_PASSED=false
+            VERIFICATION_ERRORS+=("Lex alias $LEX_ALIAS_ID missing Lambda code hook")
+        fi
+    else
+        echo "    [FAIL] Could not retrieve alias configuration"
+        VERIFICATION_PASSED=false
+        VERIFICATION_ERRORS+=("Could not verify Lex alias $LEX_ALIAS_ID")
+    fi
+else
+    echo "    [SKIP] No Lex bot ID - skipping verification"
+fi
+echo ""
+
+# 7.6: Verify Connect integration (if instance provided)
+if [[ -n "$CONNECT_INSTANCE_ID" && "$CONNECT_INSTANCE_ID" != "CONNECT_INSTANCE_ID_PLACEHOLDER" ]]; then
+    echo "  [7.6] Verifying Connect integration..."
+
+    # Check bot association
+    echo "    -> Checking bot association..."
+    BOT_ASSOC=$(aws_cmd connect list-bots \
+        --instance-id "$CONNECT_INSTANCE_ID" \
+        --lex-version "V2" \
+        --region "$REGION" \
+        --query "LexBots[?contains(Name,'$LEX_BOT_NAME')]" \
+        --output text 2>/dev/null || echo "")
+
+    if [[ -n "$BOT_ASSOC" && "$BOT_ASSOC" != "None" ]]; then
+        echo "    [OK] Bot is associated with Connect instance"
+    else
+        echo "    [WARN] Bot may not be associated with Connect instance"
+        echo "         Run: aws connect associate-bot --instance-id $CONNECT_INSTANCE_ID --lex-v2-bot AliasArn=arn:aws:lex:${REGION}:${ACCOUNT_ID}:bot-alias/${LEX_BOT_ID}/${LEX_ALIAS_ID}"
+    fi
+    echo ""
+else
+    echo "  [7.6] Skipping Connect verification (no instance ID provided)"
+    echo ""
+fi
+
+# 7.7: Final verification summary
+echo "  [7.7] Verification Summary"
+echo "  --------------------------"
+
+if [[ "$VERIFICATION_PASSED" == "true" ]]; then
+    echo -e "  ${GREEN}[PASS] All critical verifications passed!${NC}"
+    echo ""
+else
+    echo -e "  ${RED}[FAIL] Some verifications failed:${NC}"
+    for ERR in "${VERIFICATION_ERRORS[@]}"; do
+        echo -e "    ${RED}- $ERR${NC}"
+    done
+    echo ""
+    echo -e "  ${YELLOW}Deployment may not work correctly. Please fix the above issues.${NC}"
+    echo ""
+fi
+
+# ============================================================================
 # Deployment Summary
 # ============================================================================
 
 echo -e "${BLUE}============================================================================${NC}"
-echo -e "${GREEN}Deployment Complete!${NC}"
+if [[ "$VERIFICATION_PASSED" == "true" ]]; then
+    echo -e "${GREEN}Deployment Complete - All Verified!${NC}"
+else
+    echo -e "${YELLOW}Deployment Complete - With Warnings (see above)${NC}"
+fi
 echo -e "${BLUE}============================================================================${NC}"
 echo ""
 
@@ -1691,5 +2092,9 @@ echo "   aws logs tail /aws/lambda/$LEX_FULFILLMENT_FUNCTION --follow --region $
 echo "   aws logs tail /aws/lambda/$VOICE_BRIDGE_FUNCTION --follow --region $REGION"
 echo ""
 
-echo -e "${GREEN}Voice deployment complete! All components automated.${NC}"
+if [[ "$VERIFICATION_PASSED" == "true" ]]; then
+    echo -e "${GREEN}Voice deployment complete! All components verified and ready.${NC}"
+else
+    echo -e "${YELLOW}Voice deployment finished with warnings. Review issues above before testing.${NC}"
+fi
 echo ""
