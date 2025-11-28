@@ -5,14 +5,14 @@
 set -e  # Exit on error
 
 echo ""
-echo "╔════════════════════════════════════════════════════════════════════╗"
-echo "║  TEST SUITE 8: Multi-Intent & Complex Query Edge Cases            ║"
-echo "╚════════════════════════════════════════════════════════════════════╝"
+echo ""
+echo "  TEST SUITE 8: Multi-Intent & Complex Query Edge Cases            "
+echo ""
 echo ""
 
 # Check if test_config.sh exists
 if [ ! -f "test_config.sh" ]; then
-    echo "❌ Error: test_config.sh not found!"
+    echo " Error: test_config.sh not found!"
     echo "   Please create test_config.sh with your API credentials."
     echo ""
     echo "   Example:"
@@ -26,13 +26,13 @@ fi
 # Source configuration
 source test_config.sh
 
-echo "✅ Configuration loaded"
+echo " Configuration loaded"
 echo "   API Endpoint: $API_ENDPOINT"
 echo ""
 
 # Check if jq is installed
 if ! command -v jq &> /dev/null; then
-    echo "⚠️  Warning: jq is not installed. Results will not be formatted."
+    echo "  Warning: jq is not installed. Results will not be formatted."
     echo "   Install with: brew install jq (macOS) or apt-get install jq (Linux)"
     echo ""
 fi
@@ -50,7 +50,7 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 echo ""
-echo "🚀 Starting Test Suite 8..."
+echo " Starting Test Suite 8..."
 echo ""
 
 # Run test suite
@@ -60,19 +60,19 @@ echo ""
 RESULTS_FILE=$(ls -t test_suite_8_results_*.json 2>/dev/null | head -1)
 
 if [ -z "$RESULTS_FILE" ]; then
-    echo "❌ Error: No results file found!"
+    echo " Error: No results file found!"
     exit 1
 fi
 
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
 echo "                         ANALYZING RESULTS"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
 echo ""
 
 # Check if Python 3 is available
 if command -v python3 &> /dev/null; then
-    echo "📊 Running Python analyzer..."
+    echo " Running Python analyzer..."
     echo ""
     python3 analyze_suite_8_results.py "$RESULTS_FILE"
 
@@ -83,10 +83,10 @@ if command -v python3 &> /dev/null; then
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         CSV_FILE="${RESULTS_FILE%.json}.csv"
         python3 analyze_suite_8_results.py "$RESULTS_FILE" --csv "$CSV_FILE"
-        echo "✅ CSV exported to: $CSV_FILE"
+        echo " CSV exported to: $CSV_FILE"
     fi
 else
-    echo "⚠️  Python 3 not found. Showing basic jq analysis..."
+    echo "  Python 3 not found. Showing basic jq analysis..."
     echo ""
 
     if command -v jq &> /dev/null; then
@@ -106,11 +106,11 @@ else
 fi
 
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "                            COMPLETE"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "📁 Results saved to: $RESULTS_FILE"
+echo "                            COMPLETE"
+echo ""
+echo ""
+echo " Results saved to: $RESULTS_FILE"
 echo ""
 echo "Next steps:"
 echo "  1. Review the analysis report above"

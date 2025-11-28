@@ -158,3 +158,6 @@ shraman_context.sh
 # Generated infrastructure files (contain account-specific values)
 infrastructure/voice/*.generated.json
 infrastructure/voice/contact-flows/*.generated.json
+
+# Friend's changes for merge comparison
+friend_changes/

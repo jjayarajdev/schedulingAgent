@@ -10,7 +10,7 @@ from typing import Dict, Any
 
 from config import get_config
 from conversation import get_conversation_manager
-from router import route_request
+from router import route_request, handle_welcome_request
 
 # Configure logging
 logger = logging.getLogger()
@@ -53,6 +53,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         pf_token = body.get('pf_token', '')
         pf_client_id = body.get('pf_client_id', '')
         pf_user_id = str(body.get('pf_user_id', ''))
+        pf_user_name = body.get('pf_user_name', '')  # User's display name for personalization
         channel = body.get('channel', 'chat')  # 'voice' or 'chat'
 
         # Validate required parameters
@@ -64,14 +65,44 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if not pf_client_id or not pf_user_id:
             return create_error_response(400, "Missing authentication parameters: pf_client_id and pf_user_id required")
 
-        logger.info(f" Request: session_id={session_id}, message='{message[:50]}...'")
+        logger.info(f"[REQUEST] session_id={session_id}, message='{message[:50]}...', channel={channel}")
+
+        # WELCOME FLOW: Detect __WELCOME__ signal from frontend after login
+        logger.info(f"[DEBUG] message repr={repr(message)}, len={len(message)}, startswith='__'={message.startswith('__')}")
+        if message == '__WELCOME__' or message.strip() == '__WELCOME__':
+            logger.info(f"[WELCOME] Welcome request detected for user: {pf_user_name or pf_user_id}")
+            result = handle_welcome_request(
+                customer_id=pf_user_id,
+                client_id=pf_client_id,
+                pf_bearer_token=pf_token,
+                user_name=pf_user_name,
+                session_id=session_id
+            )
+
+            # IMPORTANT: Add welcome response to conversation history
+            # So subsequent messages have context about which projects were shown
+            conversation_manager = get_conversation_manager()
+            conversation_manager.add_to_conversation_history(
+                session_id,
+                'assistant',
+                result['response'],
+                metadata={
+                    'agent_name': 'Welcome',
+                    'intent': 'welcome',
+                    'action': 'welcome_with_projects',
+                    'projects_shown': [p.get('id') for p in result.get('projects', [])]
+                }
+            )
+            logger.info(f"[HISTORY] Added welcome response to conversation history")
+
+            return create_success_response(result)
 
         # Get conversation manager
         conversation_manager = get_conversation_manager()
 
         # Get conversation history for this session
         conversation_history = conversation_manager.get_conversation_history(session_id)
-        logger.info(f" Session {session_id} has {len(conversation_history)} messages in history")
+        logger.info(f"[SESSION] Session {session_id} has {len(conversation_history)} messages in history")
 
         # Add user message to history
         conversation_manager.add_to_conversation_history(session_id, 'user', message)
@@ -95,7 +126,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         direct_call = result['direct_call']
         timing = result['timing']
 
-        logger.info(f" Response: agent={agent_name}, intent={intent}, direct={direct_call}, timing={timing.get('total', 0):.2f}s")
+        logger.info(f"[OK] Response: agent={agent_name}, intent={intent}, direct={direct_call}, timing={timing.get('total', 0):.2f}s")
 
         # Add assistant response to conversation history
         conversation_manager.add_to_conversation_history(

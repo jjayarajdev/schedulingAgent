@@ -105,7 +105,7 @@ Respond in JSON format with FOUR fields:
 3. can_call_direct: true/false
 4. params: object with extracted parameters (or null if none)
 
- INTENT CATEGORIES 
+** INTENT CATEGORIES **
 
 **SCHEDULING intent:**
 - Anything related to projects, appointments, dates, times, booking, project notes
@@ -120,7 +120,7 @@ Respond in JSON format with FOUR fields:
 - Greetings, thanks, casual conversation
 - Examples: "hello", "thank you", "how are you"
 
- CRITICAL RULE: UNDERSTAND SEMANTIC INTENT 
+** CRITICAL RULE: UNDERSTAND SEMANTIC INTENT **
 
 Think about what the user is TRYING TO DO, not just the words they use:
 
@@ -151,14 +151,14 @@ Think about what the user is TRYING TO DO, not just the words they use:
 
 **How to decide:**
 1. Ask yourself: "Is the user asking for information, or asking to do something?"
-2. If ASKING FOR INFO  can_call_direct=true
-3. If REQUESTING AN ACTION  can_call_direct=false
+2. If ASKING FOR INFO -> can_call_direct=true
+3. If REQUESTING AN ACTION -> can_call_direct=false
 
 Even if the message doesn't contain explicit action verbs, use semantic understanding:
-- "I'll take project 123 for tomorrow"  ACTION (implied booking)
-- "Can you tell me about project 123"  QUERY (asking for info)
-- "Let's go with 2pm on Friday"  ACTION (implicit confirmation)
-- "What times work for Friday"  QUERY (asking for info)
+- "I'll take project 123 for tomorrow" -> ACTION (implied booking)
+- "Can you tell me about project 123" -> QUERY (asking for info)
+- "Let's go with 2pm on Friday" -> ACTION (implicit confirmation)
+- "What times work for Friday" -> QUERY (asking for info)
 
 DIRECT Lambda actions:
 
@@ -204,7 +204,7 @@ get_project_details:
   * Look in conversation history for project IDs
   * Extract the Nth project ID from that list
   * DO NOT use the number as project_id - extract the actual ID!
-  * Example: History has [7751741, 7751742, 7751743], user says "2nd project"  use "7751742"
+  * Example: History has [7751741, 7751742, 7751743], user says "2nd project" -> use "7751742"
 - If you CANNOT find project IDs in history for a position reference:
   * Set can_call_direct=false (needs agent to handle ambiguity)
 - Response: intent=scheduling, action=get_project_details, can_call_direct=true, params with ACTUAL project_id
@@ -248,142 +248,134 @@ list_notes:
 - Examples: "show notes for project 123", "list notes"
 - Response: intent=scheduling, action=list_notes, can_call_direct=true, params={{"project_id":"..."}}
 
- ALL intents now use can_call_direct=TRUE (NO Bedrock agents)
+[OK] ALL intents now use can_call_direct=TRUE (NO Bedrock agents)
 
 Example JSON responses (respond with VALID JSON only):
 
 Example 1 - Query intent (Direct Lambda):
 For "show details for 7751742":
 {{"intent":"scheduling","action":"get_project_details","can_call_direct":true,"params":{{"project_id":"7751742"}}}}
-Reasoning: User wants to VIEW information  QUERY
+Reasoning: User wants to VIEW information -> QUERY
 
 Example 2 - Query with position reference (Direct Lambda):
 History shows: projects with ids ["7751741", "7751742", "7751743", ...]
 For "show me the 3rd project":
 {{"intent":"scheduling","action":"get_project_details","can_call_direct":true,"params":{{"project_id":"7751743"}}}}
-Reasoning: User wants to SEE info  QUERY. "3rd project" = id at index 2 = "7751743"
+Reasoning: User wants to SEE info -> QUERY. "3rd project" = id at index 2 = "7751743"
 
 Example 3 - Schedule action (Lambda Workflow):
 For "schedule the last project":
 {{"intent":"scheduling","action":"schedule_project","can_call_direct":true,"params":{{"project_id":"7751743"}}}}
-Reasoning: User wants to CREATE appointment  triggers Lambda workflow orchestration (multi-step)
+Reasoning: User wants to CREATE appointment -> triggers Lambda workflow orchestration (multi-step)
 
 Example 4 - Time selection in workflow:
 For "2pm" (when previous message showed time slots):
 {{"intent":"scheduling","action":"confirm_appointment","can_call_direct":true,"params":{{"time":"2pm"}}}}
-Reasoning: User selecting time slot  part of workflow, handled by Lambda
+Reasoning: User selecting time slot -> part of workflow, handled by Lambda
 
 Example 5 - Query about availability (Direct Lambda):
 For "what dates are free for project 123":
 {{"intent":"scheduling","action":"get_available_dates","can_call_direct":true,"params":{{"project_id":"123"}}}}
-Reasoning: User wants to CHECK availability  QUERY (asking, not booking)
+Reasoning: User wants to CHECK availability -> QUERY (asking, not booking)
 
 Example 6 - Confirmation intent (Agent):
 For "yes, that works":
 {{"intent":"scheduling","action":null,"can_call_direct":false,"params":null}}
-Reasoning: Confirmation of previous action  needs agent context
+Reasoning: Confirmation of previous action -> needs agent context
 
 Example 7 - Query with conversational phrasing (Direct Lambda):
 For "can you tell me what projects I have":
 {{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":null}}
-Reasoning: Polite phrasing but semantic intent is VIEW/GET info  QUERY
+Reasoning: Polite phrasing but semantic intent is VIEW/GET info -> QUERY
 
 Example 8 - Information intent (Direct Lambda):
 For "what's the weather in Tampa":
 {{"intent":"information","action":"get_weather","can_call_direct":true,"params":{{"location":"Tampa"}}}}
-Reasoning: Weather query  INFORMATION intent (call pf-information-actions directly)
+Reasoning: Weather query -> INFORMATION intent (call pf-information-actions directly)
 
 Example 9 - Chitchat (Direct Lambda):
 For "hello":
 {{"intent":"chitchat","action":"greet","can_call_direct":true,"params":null}}
-Reasoning: Greeting  CHITCHAT intent (call pf-chitchat-actions directly)
+Reasoning: Greeting -> CHITCHAT intent (call pf-chitchat-actions directly)
 
 Example 10 - Query with status filter (Direct Lambda):
 For "show the scheduled projects":
 {{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":{{"status":"Scheduled"}}}}
-Reasoning: User wants to VIEW filtered list  QUERY with filter
+Reasoning: User wants to VIEW filtered list -> QUERY with filter
 
 Example 11 - Query with category filter (Direct Lambda):
 For "list my decking projects":
 {{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":{{"category":"Decking"}}}}
-Reasoning: User wants to VIEW category-specific projects  QUERY with filter
+Reasoning: User wants to VIEW category-specific projects -> QUERY with filter
 
 Example 12 - Query with multiple filters (Direct Lambda):
 For "show scheduled decking projects":
 {{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":{{"status":"Scheduled","category":"Decking"}}}}
-Reasoning: User wants to VIEW with multiple filters  QUERY with multiple params
+Reasoning: User wants to VIEW with multiple filters -> QUERY with multiple params
 
 Remember: Focus on WHAT THE USER WANTS TO ACCOMPLISH, not the exact words they use.
 Weather queries ALWAYS go to "information" intent, NOT "chitchat".
-For filters: Match natural language to field values (e.g., "scheduled"  "Scheduled", "call back"  "Call Back").
+For filters: Match natural language to field values (e.g., "scheduled" -> "Scheduled", "call back" -> "Call Back").
 
- CRITICAL: For list_projects action, ALWAYS extract filter parameters from the user message 
+** CRITICAL: For list_projects action, ALWAYS extract filter parameters from the user message **
 
 Analyze the current user message: "{message}"
 
 Step 1: Identify the intent (scheduling/information/chitchat)
 Step 2: Identify the action (list_projects/get_project_details/etc)
 Step 3: Extract ANY filters mentioned in the message:
-   - If "scheduled" is mentioned (but NOT "ready to schedule")  add {{"status":"Scheduled"}} to params
-   - If "ready to schedule" is mentioned  add {{"status":"Ready To Schedule"}} to params
-   - If "new" is mentioned  add {{"status":"New"}} to params
-   - If "completed" is mentioned  add {{"status":"Completed"}} to params
-   - If "decking" is mentioned  add {{"category":"Decking"}} to params
-   - If "flooring" is mentioned  add {{"category":"Flooring"}} to params
-   - If "call back" is mentioned  add {{"projectType":"Call Back"}} to params
-   - If NO filters mentioned  params should be null
+   - If "scheduled" is mentioned (but NOT "ready to schedule") -> add {{"status":"Scheduled"}} to params
+   - If "ready to schedule" is mentioned -> add {{"status":"Ready To Schedule"}} to params
+   - If "new" is mentioned -> add {{"status":"New"}} to params
+   - If "completed" is mentioned -> add {{"status":"Completed"}} to params
+   - If "decking" is mentioned -> add {{"category":"Decking"}} to params
+   - If "flooring" is mentioned -> add {{"category":"Flooring"}} to params
+   - If "call back" is mentioned -> add {{"projectType":"Call Back"}} to params
+   - If NO filters mentioned -> params should be null
 
 Respond ONLY with the JSON object, nothing else."""
 
     try:
-        logger.info(f" CLASSIFIER START: message='{message}', model={config.orchestrator_model}")
-
         bedrock_runtime = get_bedrock_client()
 
-        request_body = {
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 500,
-            "temperature": 0.0,
-            "messages": [{"role": "user", "content": prompt}]
-        }
-        logger.info(f" Bedrock request: modelId={config.orchestrator_model}")
-
+        # Use Sonnet 3.7 for superior classification accuracy
         response = bedrock_runtime.invoke_model(
             modelId=config.orchestrator_model,
-            body=json.dumps(request_body)
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 500,  # More tokens for complex reasoning
+                "temperature": 0.0,
+                "messages": [{"role": "user", "content": prompt}]
+            })
         )
-        logger.info(f" Bedrock response received, status: {response['ResponseMetadata']['HTTPStatusCode']}")
 
         response_body = json.loads(response['body'].read())
-        logger.info(f" Response body keys: {response_body.keys()}")
-
         classification_text = response_body['content'][0]['text'].strip()
-        logger.info(f" RAW CLASSIFICATION TEXT: {classification_text}")
+
+        logger.info(f"Raw classification response: {classification_text}")
 
         # Parse JSON response
         classification = json.loads(classification_text)
-        logger.info(f" PARSED CLASSIFICATION: {json.dumps(classification)}")
-        logger.info(f" Classification: intent={classification.get('intent')}, action={classification.get('action')}, can_call_direct={classification.get('can_call_direct')}")
+
+        logger.info(f"[OK] Classification: {classification} for message: '{message[:50]}...'")
         return classification
 
     except json.JSONDecodeError as e:
-        logger.error(f" JSON DECODE ERROR: {e}")
-        logger.error(f" Classification text was: {classification_text if 'classification_text' in locals() else 'N/A'}")
+        logger.error(f"Failed to parse classification JSON: {e}")
+        logger.error(f"Classification text: {classification_text if 'classification_text' in locals() else 'N/A'}")
         # Fallback: chitchat intent, requires agent
         return {
             'intent': 'chitchat',
-            'action': 'unknown',
+            'action': None,
             'can_call_direct': False,
             'params': None
         }
     except Exception as e:
-        logger.error(f" CLASSIFICATION ERROR: {type(e).__name__}: {e}")
-        import traceback
-        logger.error(f" TRACEBACK: {traceback.format_exc()}")
+        logger.error(f"Classification error: {e}")
         # Fallback: chitchat intent, requires agent
         return {
             'intent': 'chitchat',
-            'action': 'unknown',
+            'action': None,
             'can_call_direct': False,
             'params': None
         }

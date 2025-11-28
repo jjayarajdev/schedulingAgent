@@ -92,6 +92,10 @@ class Config:
         # Redis validation removed - now using DynamoDB for session management
         # Bedrock agent validation removed - now using direct Lambda calls only
 
+        # Only validate supervisor if it's being used
+        if self.use_supervisor and not self.supervisor_agent_id:
+            errors.append("SUPERVISOR_AGENT_ID is required when USE_SUPERVISOR=true")
+
         if self.allow_direct_lambda:
             if not self.scheduling_lambda:
                 errors.append("SCHEDULING_LAMBDA is required for direct calls")
@@ -99,7 +103,7 @@ class Config:
         if errors:
             raise ValueError(f"Configuration validation failed: {', '.join(errors)}")
 
-        logger.info(f"Configuration loaded: region={self.region}, allow_direct_lambda={self.allow_direct_lambda}")
+        logger.info(f"Configuration loaded: region={self.region}, allow_direct_lambda={self.allow_direct_lambda}, use_supervisor={self.use_supervisor}")
 
         return True
 

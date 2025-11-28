@@ -88,14 +88,37 @@ Your job is to provide warm, conversational responses to customers about their s
 
 Guidelines:
 - Be friendly, professional, and helpful
-- Use natural, conversational language
+- Use natural, conversational language suitable for ages 20-80
+- Use simple, everyday words (no jargon or technical terms)
 - Provide clear information without being overly formal
 - Show empathy and understanding
 - Keep responses concise but complete
 - Use proper formatting (line breaks, lists) when helpful
 - Never invent information - only use what's provided in the data
 - IMPORTANT: Do NOT ask follow-up questions or offer additional help
-- IMPORTANT: Just present the information in a friendly, informative way"""
+- IMPORTANT: Just present the information in a friendly, informative way
+
+Weather Warning Guidelines:
+- If data contains 'weatherWarning', warn about bad weather conditions in simple terms
+- Use phrases like "rain and snow" instead of "precipitation"
+- Explain why it matters: "That's not ideal for outdoor work"
+- If 'betterDates' are provided, suggest them as alternatives
+- Be helpful, not alarming - respect their choice if they still want that date
+- Tone: like a helpful neighbor giving advice
+
+IMPORTANT - When 'allDatesHaveWeatherConcerns' is true:
+- Tell the user: "Unfortunately, all available dates this week have similar weather concerns"
+- Explain briefly what the weather issue is (cold, snow, rain)
+- Give them clear options: "You can proceed anyway and our crew will do their best, or wait for new dates to open up"
+- Do NOT keep suggesting they pick a different day - there are no better options right now
+
+Proactive Weather Indicators in Available Dates:
+- If dates have 'weatherIndicator' fields ([OK], [WARNING], or [ERROR]), mention which dates look good vs concerning
+- For [WARNING] or [ERROR] dates, briefly mention the concern (e.g., "cold weather", "snow expected")
+- If 'weatherSummary' shows weather concerns, mention: "A few of these dates have weather to consider"
+- Show the weather-suitable dates as good options: "Nov 28 and Nov 29 look great weather-wise"
+- Present ALL dates but help user make informed choice
+- Keep it brief - just highlight the key info, don't explain every date's weather"""
 
         user_prompt = f"""The user asked: "{user_message}"
 
@@ -133,7 +156,7 @@ Keep your response concise (3-5 sentences) and friendly. Do NOT include the raw 
 
         # Extract conversational text
         conversational_text = response['output']['message']['content'][0]['text']
-        logger.info(f" Generated conversational response ({len(conversational_text)} chars)")
+        logger.info(f"[OK] Generated conversational response ({len(conversational_text)} chars)")
 
         return conversational_text.strip()
 
@@ -195,20 +218,56 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             if not dates:
                 return "No available dates found for this project."
 
+            # Check for weather-enriched dates (proactive weather warnings)
+            dates_with_weather = response_body.get('dates_with_weather', [])
+            has_weather_concerns = response_body.get('has_weather_concerns', False)
+
             # Format dates for UI rendering
             from datetime import datetime
             formatted_dates = []
-            for date_str in dates:
-                try:
-                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-                    formatted_dates.append({
-                        "date": date_str,
-                        "dayShort": date_obj.strftime("%a"),  # Mon, Tue
-                        "monthDay": date_obj.strftime("%b %d"),  # Nov 25
-                        "dayName": date_obj.strftime("%A")  # Monday
-                    })
-                except:
-                    formatted_dates.append({"date": date_str, "monthDay": date_str})
+
+            if dates_with_weather:
+                # Use enriched dates with weather indicators
+                for enriched_date in dates_with_weather:
+                    date_str = enriched_date.get('date', '')
+                    try:
+                        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                        formatted_dates.append({
+                            "date": date_str,
+                            "dayShort": date_obj.strftime("%a"),
+                            "monthDay": date_obj.strftime("%b %d"),
+                            "dayName": date_obj.strftime("%A"),
+                            # Weather info
+                            "weatherIndicator": enriched_date.get('indicator', ''),
+                            "weatherSuitable": enriched_date.get('suitable', True),
+                            "weatherSeverity": enriched_date.get('severity', 'low'),
+                            "weatherCondition": enriched_date.get('condition', ''),
+                            "weatherWarnings": enriched_date.get('warnings', []),
+                            "highTemp": enriched_date.get('high_temp'),
+                            "lowTemp": enriched_date.get('low_temp')
+                        })
+                    except:
+                        formatted_dates.append({
+                            "date": date_str,
+                            "monthDay": date_str,
+                            "weatherIndicator": enriched_date.get('indicator', ''),
+                            "weatherSuitable": enriched_date.get('suitable', True)
+                        })
+
+                logger.info(f"[WEATHER] Formatted {len(formatted_dates)} dates with weather indicators")
+            else:
+                # No weather data - use basic date formatting
+                for date_str in dates:
+                    try:
+                        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                        formatted_dates.append({
+                            "date": date_str,
+                            "dayShort": date_obj.strftime("%a"),
+                            "monthDay": date_obj.strftime("%b %d"),
+                            "dayName": date_obj.strftime("%A")
+                        })
+                    except:
+                        formatted_dates.append({"date": date_str, "monthDay": date_str})
 
             # Prepare structured data
             result = {
@@ -216,6 +275,18 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 "dates": formatted_dates,
                 "dateCount": len(formatted_dates)
             }
+
+            # Add weather summary if there are concerns
+            if has_weather_concerns:
+                suitable_count = response_body.get('suitable_date_count', 0)
+                unsuitable_count = response_body.get('unsuitable_date_count', 0)
+                result['weatherSummary'] = {
+                    "hasWeatherConcerns": True,
+                    "suitableDateCount": suitable_count,
+                    "unsuitableDateCount": unsuitable_count,
+                    "message": f"{unsuitable_count} of {len(formatted_dates)} dates have weather concerns"
+                }
+                logger.info(f"[WARNING] Weather summary: {unsuitable_count}/{len(formatted_dates)} dates have concerns")
 
             # Generate conversational response using Claude
             conversational = generate_conversational_response(action, user_message, result)
@@ -273,7 +344,17 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             # Add weather warning if present (from weather-aware scheduling)
             if 'weather_warning' in response_body:
                 result['weatherWarning'] = response_body['weather_warning']
-                logger.info(f"  Including weather warning in time slots response")
+                logger.info(f"[WARNING]  Including weather warning in time slots response")
+
+                # Add better dates suggestions if available
+                if 'better_dates' in response_body:
+                    result['betterDates'] = response_body['better_dates']
+                    logger.info(f"[FOUND] Including {len(response_body['better_dates'])} better weather dates in response")
+
+                # Flag when ALL available dates have weather concerns
+                if response_body.get('all_dates_have_weather_concerns'):
+                    result['allDatesHaveWeatherConcerns'] = True
+                    logger.info(f"[WARNING]  All available dates have weather concerns")
 
             # Generate conversational response using Claude
             conversational = generate_conversational_response(action, user_message, result)
@@ -309,12 +390,10 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             # Check for errors first
             if 'error' in response_body:
                 error_message = response_body['error']
-                result = {
-                    "message": f" Failed to confirm appointment: {error_message}",
-                    "status": "error",
-                    "details": response_body
-                }
-                return f"```json\n{json.dumps(result, indent=2)}\n```"
+                # Generate friendly error message
+                friendly_error = f"I wasn't able to confirm this appointment. The system reported: {error_message}. Please try again or contact support if the problem continues."
+                logger.warning(f"[ERROR] Appointment confirmation failed: {error_message}")
+                return friendly_error
 
             # Format successful appointment confirmation response
             appointment = response_body.get('appointment', {})
@@ -327,7 +406,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 }
             else:
                 result = {
-                    "message": " Appointment confirmed!",
+                    "message": "[OK] Appointment confirmed!",
                     "appointment": appointment or response_body,
                     "status": "confirmed"
                 }
@@ -342,17 +421,14 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             # Check for errors first
             if 'error' in response_body:
                 error_message = response_body['error']
-                result = {
-                    "message": f" Failed to reschedule appointment: {error_message}",
-                    "status": "error",
-                    "details": response_body
-                }
-                return f"```json\n{json.dumps(result, indent=2)}\n```"
+                friendly_error = f"I wasn't able to reschedule this appointment. The system reported: {error_message}. Please try again or contact support if the problem continues."
+                logger.warning(f"[ERROR] Appointment reschedule failed: {error_message}")
+                return friendly_error
 
             # Format successful reschedule confirmation response
             appointment = response_body.get('appointment', {})
             result = {
-                "message": " Appointment rescheduled successfully!",
+                "message": "[OK] Appointment rescheduled successfully!",
                 "appointment": appointment or response_body,
                 "status": "success"
             }
@@ -368,7 +444,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             if 'error' in response_body:
                 error_message = response_body['error']
                 result = {
-                    "message": f" Failed to cancel appointment: {error_message}",
+                    "message": f"[ERROR] Failed to cancel appointment: {error_message}",
                     "status": "error",
                     "details": response_body
                 }
@@ -376,7 +452,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
 
             # Format successful cancellation confirmation response
             result = {
-                "message": " Appointment cancelled successfully!",
+                "message": "[OK] Appointment cancelled successfully!",
                 "details": response_body,
                 "status": "success"
             }
@@ -452,6 +528,200 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
         return json.dumps(response_body, indent=2)
 
 
+def generate_welcome_greeting(user_name: str, projects: list) -> str:
+    """
+    Use Claude to generate a personalized welcome greeting with project summary.
+
+    Designed for simple, conversational English suitable for ages 20-80.
+
+    Args:
+        user_name: User's display name (may be empty)
+        projects: List of user's projects from list_projects
+
+    Returns:
+        Friendly welcome message mentioning their projects
+    """
+    try:
+        client = get_bedrock_runtime_client()
+
+        # Build project summary for the prompt
+        if projects:
+            project_summary = []
+            for p in projects:
+                status = p.get('status', 'Unknown')
+                category = p.get('category', 'Project')
+                proj_id = p.get('id', '')
+                scheduled_date = p.get('scheduledDate', '')
+
+                if scheduled_date:
+                    project_summary.append(f"- {category} (#{proj_id}): {status}, scheduled for {scheduled_date}")
+                else:
+                    project_summary.append(f"- {category} (#{proj_id}): {status}")
+
+            project_data = "\n".join(project_summary)
+        else:
+            project_data = "No projects found"
+
+        system_prompt = """You are a friendly assistant for a home services company.
+Write a warm welcome message following these EXACT rules:
+
+STRICT RULES:
+1. If user name is provided, ALWAYS start with "Hello, [Name]!" - NEVER skip the name
+2. If no name provided, start with just "Hello!"
+3. State the EXACT project count: "You have X projects" (use the actual number)
+4. List project types with their statuses naturally (e.g., "a Decking installation that's ready to schedule, plus 2 Flooring projects")
+5. Keep it brief: 2-4 sentences MAXIMUM
+6. End with ONE simple offer: "Let me know which one you'd like to work on" or "I'm here to help"
+7. NO emojis, NO multiple questions, NO jargon
+
+EXAMPLES TO FOLLOW:
+
+With name, multiple projects:
+"Hello, John! Welcome back. You have 3 projects with us - a Decking installation that's ready to schedule, plus 2 Flooring projects. Let me know which one you'd like to work on, or just ask me anything."
+
+With name, 1 scheduled project:
+"Hello, Sarah! Welcome back. You have a Roofing project (#7751746) that's scheduled for November 26th. I'm here if you need to make changes or have questions."
+
+With name, no projects:
+"Hello, Mike! Welcome to ProjectForce. You don't have any projects set up yet. When you're ready to get started, I'm here to help."
+
+No name, multiple projects:
+"Hello! Welcome back. You have 3 projects with us - a Decking installation that's ready to schedule, plus 2 Flooring projects. Let me know which one you'd like to work on." """
+
+        user_prompt = f"""User name: {user_name if user_name else '(none provided)'}
+Total projects: {len(projects)}
+Project details:
+{project_data}
+
+Write the welcome greeting following the EXACT format shown in the examples. Use the actual project count and types from the data above."""
+
+        response = client.converse(
+            modelId="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [{"text": user_prompt}]
+                }
+            ],
+            system=[{"text": system_prompt}],
+            inferenceConfig={
+                "maxTokens": 300,
+                "temperature": 0.7,
+                "topP": 0.9
+            }
+        )
+
+        greeting = response['output']['message']['content'][0]['text']
+        logger.info(f"[OK] Generated welcome greeting ({len(greeting)} chars)")
+        return greeting.strip()
+
+    except Exception as e:
+        logger.error(f"Failed to generate welcome greeting: {e}")
+        # Fallback greeting
+        name_part = f", {user_name}" if user_name else ""
+        if projects:
+            return f"Hello{name_part}! Welcome back. You have {len(projects)} project(s) with us. Let me know how I can help you today."
+        else:
+            return f"Hello{name_part}! Welcome to ProjectForce. You don't have any projects set up yet. I'm here when you're ready to get started."
+
+
+def handle_welcome_request(
+    customer_id: str,
+    client_id: str,
+    pf_bearer_token: str,
+    user_name: str,
+    session_id: str
+) -> Dict[str, Any]:
+    """
+    Handle welcome request triggered by frontend after login.
+
+    Fetches user's projects and generates a personalized greeting.
+
+    Args:
+        customer_id: User's customer ID
+        client_id: Client ID
+        pf_bearer_token: API bearer token
+        user_name: User's display name
+        session_id: Session identifier
+
+    Returns:
+        Response dict with greeting, projects, and metadata
+    """
+    import time
+    start_time = time.time()
+
+    try:
+        # Fetch user's projects
+        logger.info(f"[INFO] Fetching projects for welcome greeting (customer_id={customer_id})")
+
+        projects_response = call_lambda_directly('list_projects', {
+            'customer_id': customer_id,
+            'client_id': client_id,
+            'pf_bearer_token': pf_bearer_token
+        })
+
+        # Extract projects from Lambda response
+        response_data = projects_response.get('response', {})
+        function_response = response_data.get('functionResponse', {})
+        response_body_wrapper = function_response.get('responseBody', {})
+        text_wrapper = response_body_wrapper.get('TEXT', {})
+        response_body_str = text_wrapper.get('body', '{}')
+
+        if isinstance(response_body_str, str):
+            response_body = json.loads(response_body_str)
+        else:
+            response_body = response_body_str
+
+        projects = response_body.get('projects', [])
+        logger.info(f"[INFO] Found {len(projects)} projects for user")
+
+        # Generate personalized greeting
+        greeting = generate_welcome_greeting(user_name, projects)
+
+        # Format response with JSON block (like list_projects does)
+        # This ensures the frontend renders the project table
+        if projects:
+            result = {
+                "message": f"Found {len(projects)} project(s):",
+                "projects": projects
+            }
+            formatted_response = f"{greeting}\n\n```json\n{json.dumps(result, indent=2)}\n```"
+        else:
+            formatted_response = greeting
+
+        timing = {
+            'total': time.time() - start_time
+        }
+
+        logger.info(f"[WELCOME] Welcome response generated in {timing['total']:.2f}s")
+
+        return {
+            'response': formatted_response,
+            'agent_name': 'Welcome',
+            'intent': 'welcome',
+            'action': 'welcome_with_projects',
+            'session_id': session_id,
+            'direct_call': True,
+            'projects': projects,  # Include projects for frontend rendering
+            'performance': timing
+        }
+
+    except Exception as e:
+        logger.error(f"Welcome request failed: {e}")
+        # Return graceful fallback
+        name_part = f", {user_name}" if user_name else ""
+        return {
+            'response': f"Hello{name_part}! Welcome to ProjectForce. I'm here to help with your home service projects.",
+            'agent_name': 'Welcome',
+            'intent': 'welcome',
+            'action': 'welcome_fallback',
+            'session_id': session_id,
+            'direct_call': True,
+            'projects': [],
+            'performance': {'total': time.time() - start_time}
+        }
+
+
 def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
     """
     Call Lambda function directly for simple actions
@@ -484,6 +754,7 @@ def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         'get_available_dates': config.scheduling_lambda,
         'get_time_slots': config.scheduling_lambda,
         'get_available_timeslots': config.scheduling_lambda,  # Alias for get_time_slots
+        'get_business_hours': config.scheduling_lambda,
         # Scheduling write actions
         'confirm_appointment': config.scheduling_lambda,
         'reschedule_appointment': config.scheduling_lambda,
@@ -499,16 +770,6 @@ def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
     api_path = '/' + action.replace('_', '-')
 
     # Construct Lambda event (Bedrock agent format)
-    # Only include pf_bearer_token in sessionAttributes if provided (Phase 1+2: tokens come from Secrets Manager)
-    session_attributes = {
-        'customer_id': params.get('customer_id', ''),
-        'client_id': params.get('client_id', '')
-    }
-
-    # Only add pf_bearer_token if explicitly provided
-    if 'pf_bearer_token' in params and params['pf_bearer_token']:
-        session_attributes['pf_bearer_token'] = params['pf_bearer_token']
-
     event = {
         'actionGroup': 'scheduling-actions',
         'function': action,
@@ -519,10 +780,14 @@ def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
             for key, value in params.items()
             if key not in ['customer_id', 'client_id', 'pf_bearer_token']
         ],
-        'sessionAttributes': session_attributes
+        'sessionAttributes': {
+            'customer_id': params.get('customer_id', ''),
+            'client_id': params.get('client_id', ''),
+            'pf_bearer_token': params.get('pf_bearer_token', '')
+        }
     }
 
-    logger.info(f" Calling Lambda directly: {function_name}.{action}")
+    logger.info(f"[LAMBDA] Calling Lambda directly: {function_name}.{action}")
     logger.debug(f"Lambda event: {json.dumps(event, indent=2)}")
 
     try:
@@ -533,7 +798,7 @@ def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         payload = json.loads(response['Payload'].read())
-        logger.info(f" Lambda direct call successful")
+        logger.info(f"[OK] Lambda direct call successful")
         return payload
 
     except Exception as e:
@@ -598,7 +863,7 @@ def route_request(
         session_id: Session identifier
         customer_id: Customer ID
         client_id: Client ID
-        pf_bearer_token: ProjectForce API bearer token (optional - uses Secrets Manager if not provided)
+        pf_bearer_token: ProjectForce API bearer token (optional - can use Secrets Manager)
         conversation_history: Previous conversation for context
         channel: Channel type ('voice' or 'chat') - determines response formatting
 
@@ -615,7 +880,7 @@ def route_request(
 
     # NEW: Use multi-agent orchestration if enabled
     if config.enable_multi_agent_orchestration:
-        logger.info(" Using multi-agent orchestration")
+        logger.info("[ORCHESTRATION] Using multi-agent orchestration")
 
         try:
             from multi_agent_router import route_with_multi_agent_orchestration
@@ -626,8 +891,7 @@ def route_request(
                 customer_id=customer_id,
                 client_id=client_id,
                 pf_bearer_token=pf_bearer_token,
-                conversation_history=conversation_history,
-                channel=channel
+                conversation_history=conversation_history
             )
         except ImportError as e:
             logger.warning(f"Multi-agent router not available: {e}, falling back to standard routing")
@@ -635,7 +899,7 @@ def route_request(
             logger.error(f"Multi-agent routing error: {e}, falling back to standard routing")
 
     # FALLBACK: Use standard routing
-    logger.info(" Using standard routing")
+    logger.info("[ROUTING] Using standard routing")
 
     timing = {}
     start_time = time.time()
@@ -647,9 +911,9 @@ def route_request(
 
     # Log context resolution
     if resolved_message != message:
-        logger.info(f" Context resolved: '{message}'  '{resolved_message}'")
+        logger.info(f"[CONTEXT] Context resolved: '{message}' -> '{resolved_message}'")
     if resolved_entities:
-        logger.info(f" Resolved entities: {resolved_entities}")
+        logger.info(f"[ENTITIES] Resolved entities: {resolved_entities}")
 
     # Use resolved message for classification
     classification = classify_intent_and_action(resolved_message, conversation_history)
@@ -663,21 +927,17 @@ def route_request(
 
     timing['classification'] = time.time() - start_time
 
-    logger.info(f" Classification: intent={intent}, action={action}, can_call_direct={can_call_direct}")
-    logger.info(f" Extracted params: {extracted_params}")
+    logger.info(f"[INFO] Classification: intent={intent}, action={action}, can_call_direct={can_call_direct}")
+    logger.info(f"[INFO] Extracted params: {extracted_params}")
     if resolved_entities:
-        logger.info(f" Merged params (with resolved entities): {merged_params}")
+        logger.info(f"[INFO] Merged params (with resolved entities): {merged_params}")
 
-    # Session attributes for agent calls (only include pf_bearer_token if provided)
+    # Session attributes for agent calls
     session_attributes = {
         'customer_id': customer_id,
         'client_id': client_id,
-        'channel': channel  # 'voice' or 'chat' - for response formatting
+        'pf_bearer_token': pf_bearer_token
     }
-
-    # Only add pf_bearer_token if explicitly provided (Phase 1+2: tokens come from Secrets Manager)
-    if pf_bearer_token:
-        session_attributes['pf_bearer_token'] = pf_bearer_token
 
     # INTELLIGENT ORCHESTRATION: Use Sonnet 3.5 for ALL workflow decisions
     # NO hardcoding, NO regex - pure intelligence!
@@ -694,7 +954,7 @@ def route_request(
     )
 
     if needs_intelligent_orchestration:
-        logger.info(f" INTELLIGENT ORCHESTRATION: Using Sonnet 3.7 for workflow decisions")
+        logger.info(f"[SONNET] INTELLIGENT ORCHESTRATION: Using Sonnet 3.7 for workflow decisions")
 
         try:
             from intelligent_orchestrator import orchestrate_intelligent_workflow
@@ -716,22 +976,18 @@ def route_request(
 
     # OPTIMIZATION: Call Lambda directly for simple data retrieval
     if config.allow_direct_lambda and can_call_direct and action:
-        logger.info(f" DIRECT LAMBDA CALL: {action} (bypassing Bedrock)")
+        logger.info(f"[LAMBDA] DIRECT LAMBDA CALL: {action} (bypassing Bedrock)")
 
         try:
             lambda_start = time.time()
 
             # Prepare Lambda parameters (merge session params with merged params)
-            # Only include pf_bearer_token if provided (Phase 1+2: tokens come from Secrets Manager)
             lambda_params = {
                 'customer_id': customer_id,
                 'client_id': client_id,
+                'pf_bearer_token': pf_bearer_token,
                 **merged_params  # Add merged params (extracted + resolved entities)
             }
-
-            # Only add pf_bearer_token if explicitly provided
-            if pf_bearer_token:
-                lambda_params['pf_bearer_token'] = pf_bearer_token
 
             # Call Lambda directly
             lambda_response = call_lambda_directly(action, lambda_params)
@@ -758,7 +1014,7 @@ def route_request(
             formatted_response = format_lambda_response(action, response_body, message)
             logger.debug(f"Formatted response: {formatted_response[:200]}...")
 
-            logger.info(f"  Direct Lambda Performance: Total={timing['total']:.2f}s | "
+            logger.info(f"[TIMING]  Direct Lambda Performance: Total={timing['total']:.2f}s | "
                         f"Lambda={timing['lambda_direct']:.2f}s | "
                         f"Classification={timing['classification']:.3f}s")
 
@@ -784,7 +1040,7 @@ def route_request(
             }
 
     # NO BEDROCK FALLBACK - All actions should be handled by direct Lambda or workflow
-    logger.warning(f" No handler found for: intent={intent}, action={action}, can_call_direct={can_call_direct}")
+    logger.warning(f"[WARNING] No handler found for: intent={intent}, action={action}, can_call_direct={can_call_direct}")
 
     timing['total'] = time.time() - start_time
     return {

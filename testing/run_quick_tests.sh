@@ -19,8 +19,8 @@ echo "(In real world: one user = one persistent session)"
 echo ""
 
 # Test 1: Greeting
-echo "📝 Test 1: Greeting (Chitchat Agent)"
-echo "Expected: Supervisor → Chitchat Agent (~11s)"
+echo " Test 1: Greeting (Chitchat Agent)"
+echo "Expected: Supervisor -> Chitchat Agent (~11s)"
 echo ""
 curl -X POST "$API_ENDPOINT" \
   -H "Content-Type: application/json" \
@@ -34,8 +34,8 @@ curl -X POST "$API_ENDPOINT" \
 echo -e "\n\n"
 
 # Test 2: List Projects
-echo "📝 Test 2: List Projects (Direct Lambda)"
-echo "Expected: Direct Lambda → pf-information-actions (~3s)"
+echo " Test 2: List Projects (Direct Lambda)"
+echo "Expected: Direct Lambda -> pf-information-actions (~3s)"
 echo ""
 curl -X POST "$API_ENDPOINT" \
   -H "Content-Type: application/json" \
@@ -49,8 +49,8 @@ curl -X POST "$API_ENDPOINT" \
 echo -e "\n\n"
 
 # Test 3: Filter Scheduled Projects
-echo "📝 Test 3: Filter Scheduled Projects (Direct Lambda)"
-echo "Expected: Direct Lambda → pf-information-actions (~3s)"
+echo " Test 3: Filter Scheduled Projects (Direct Lambda)"
+echo "Expected: Direct Lambda -> pf-information-actions (~3s)"
 echo ""
 curl -X POST "$API_ENDPOINT" \
   -H "Content-Type: application/json" \
@@ -64,8 +64,8 @@ curl -X POST "$API_ENDPOINT" \
 echo -e "\n\n"
 
 # Test 4: Get Project Details
-echo "📝 Test 4: Get Project Details (Direct Lambda)"
-echo "Expected: Direct Lambda → pf-information-actions (~3s)"
+echo " Test 4: Get Project Details (Direct Lambda)"
+echo "Expected: Direct Lambda -> pf-information-actions (~3s)"
 echo ""
 curl -X POST "$API_ENDPOINT" \
   -H "Content-Type: application/json" \

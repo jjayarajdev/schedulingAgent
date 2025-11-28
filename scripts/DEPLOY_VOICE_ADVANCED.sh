@@ -1101,7 +1101,37 @@ else
             --role-name "$LEX_BOT_ROLE_NAME" \
             --policy-arn "arn:aws:iam::aws:policy/AmazonLexFullAccess" &>/dev/null
 
-        sleep 10
+        # Dynamic polling for Lex IAM role propagation (max 5 minutes)
+        echo "  -> Waiting for Lex IAM role to propagate (max 5 minutes)..."
+        LEX_ROLE_MAX_WAIT=300
+        LEX_ROLE_POLL=5
+        LEX_ROLE_ELAPSED=0
+        LEX_ROLE_READY=false
+
+        while [[ $LEX_ROLE_ELAPSED -lt $LEX_ROLE_MAX_WAIT ]]; do
+            if aws_cmd iam get-role --role-name "$LEX_BOT_ROLE_NAME" 2>&1 | grep -q "Role"; then
+                LEX_ROLE_READY=true
+                echo "  [OK] Lex IAM role propagated after ${LEX_ROLE_ELAPSED}s"
+                break
+            fi
+            sleep $LEX_ROLE_POLL
+            LEX_ROLE_ELAPSED=$((LEX_ROLE_ELAPSED + LEX_ROLE_POLL))
+            if [[ $((LEX_ROLE_ELAPSED % 15)) -eq 0 ]]; then
+                echo "  -> Waiting for Lex IAM propagation... ${LEX_ROLE_ELAPSED}s / ${LEX_ROLE_MAX_WAIT}s"
+            fi
+        done
+
+        if [[ "$LEX_ROLE_READY" != "true" ]]; then
+            echo "  [WARN] Lex IAM role may not be fully propagated"
+        fi
+
+        # Additional safety buffer for cross-region consistency
+        MIN_SAFETY=15
+        if [[ $LEX_ROLE_ELAPSED -lt $MIN_SAFETY ]]; then
+            EXTRA=$((MIN_SAFETY - LEX_ROLE_ELAPSED))
+            echo "  -> Adding ${EXTRA}s safety buffer..."
+            sleep $EXTRA
+        fi
     fi
 
     LEX_BOT_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${LEX_BOT_ROLE_NAME}"
@@ -1140,7 +1170,23 @@ try:
     bot_id = bot_response['botId']
     print("  Bot created: " + bot_id)
 
-    time.sleep(5)
+    # Poll for bot to be available (max 5 minutes)
+    print("  Waiting for bot to be available (max 5 minutes)...")
+    max_wait = 300
+    poll_interval = 5
+    elapsed = 0
+    while elapsed < max_wait:
+        try:
+            bot_status = client.describe_bot(botId=bot_id)
+            if bot_status.get('botStatus') in ['Available', 'Versioning']:
+                print("  [OK] Bot available after " + str(elapsed) + "s")
+                break
+        except Exception:
+            pass
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+        if elapsed % 15 == 0:
+            print("  -> Waiting for bot... " + str(elapsed) + "s / " + str(max_wait) + "s")
 
     print("  Creating locale (en_US)...")
     client.create_bot_locale(
@@ -1149,7 +1195,20 @@ try:
         localeId='en_US',
         nluIntentConfidenceThreshold=0.4
     )
-    time.sleep(3)
+
+    # Poll for locale to be ready
+    print("  Waiting for locale to be ready...")
+    elapsed = 0
+    while elapsed < 60:
+        try:
+            locale_status = client.describe_bot_locale(botId=bot_id, botVersion='DRAFT', localeId='en_US')
+            if locale_status.get('botLocaleStatus') in ['Built', 'ReadyExpressTesting', 'NotBuilt']:
+                print("  [OK] Locale ready after " + str(elapsed) + "s")
+                break
+        except Exception:
+            pass
+        time.sleep(3)
+        elapsed += 3
 
     intents = [
         {
@@ -1239,6 +1298,66 @@ try:
                 'this is urgent', 'emergency', 'I need help urgently',
                 'urgent matter', 'this is an emergency', 'urgent request',
                 'I have an urgent issue', 'need immediate help'
+            ]
+        },
+        {
+            'name': 'CheckAvailability',
+            'description': 'Check available dates for scheduling',
+            'utterances': [
+                'what dates are available', 'show available dates',
+                'when can I schedule', 'available times', 'what times work',
+                'check availability', 'when are you available',
+                'show me available slots', 'open dates', 'free dates',
+                'what days are open', 'available appointments'
+            ]
+        },
+        {
+            'name': 'RescheduleAppointment',
+            'description': 'Reschedule an existing appointment',
+            'utterances': [
+                'reschedule my appointment', 'change my appointment',
+                'move my appointment', 'I need to reschedule',
+                'can I change the time', 'change appointment time',
+                'reschedule please', 'move to a different day',
+                'pick a different time', 'change the date'
+            ]
+        },
+        {
+            'name': 'CancelAppointment',
+            'description': 'Cancel an existing appointment',
+            'utterances': [
+                'cancel my appointment', 'I need to cancel',
+                'cancel the appointment', 'remove my appointment',
+                'I want to cancel', 'cancel please', 'delete appointment',
+                'I cannot make it', 'cancel my booking'
+            ]
+        },
+        {
+            'name': 'BusinessHours',
+            'description': 'Ask about business hours',
+            'utterances': [
+                'what are your hours', 'when are you open',
+                'business hours', 'operating hours', 'what time do you open',
+                'what time do you close', 'are you open on weekends',
+                'hours of operation', 'when can I call', 'office hours'
+            ]
+        },
+        {
+            'name': 'ThankYou',
+            'description': 'Express gratitude',
+            'utterances': [
+                'thank you', 'thanks', 'thanks a lot', 'thank you so much',
+                'appreciate it', 'that is helpful', 'thanks for your help',
+                'thank you very much', 'you have been helpful', 'great thanks'
+            ]
+        },
+        {
+            'name': 'HowAreYou',
+            'description': 'Casual chitchat greeting',
+            'utterances': [
+                'how are you', 'how are you doing', 'how is it going',
+                'what is up', 'how do you do', 'are you doing well',
+                'hows everything', 'how have you been', 'you doing okay'
             ]
         }
     ]

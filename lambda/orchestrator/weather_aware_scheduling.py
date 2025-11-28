@@ -242,6 +242,204 @@ def analyze_weather_suitability(
     }
 
 
+def find_better_weather_dates(
+    weather_data: Dict,
+    available_dates: List[str],
+    category: str,
+    limit: int = 3
+) -> List[Dict[str, Any]]:
+    """
+    Find dates with suitable weather conditions for outdoor work.
+
+    Checks weather forecast for each available date and returns
+    dates that meet weather criteria for the project category.
+
+    Args:
+        weather_data: Weather response from get_weather Lambda
+        available_dates: List of date strings (YYYY-MM-DD)
+        category: Project category (e.g., "Decking", "Roofing")
+        limit: Maximum number of good dates to return
+
+    Returns:
+        List of dicts with date info and weather summary:
+        [
+            {
+                "date": "2024-11-29",
+                "day_name": "Saturday",
+                "condition": "Clear",
+                "high_temp": 45,
+                "low_temp": 32,
+                "precipitation": 10,
+                "suitable": True
+            },
+            ...
+        ]
+    """
+    better_dates = []
+
+    try:
+        weather = weather_data.get('weather', {})
+        forecast_list = weather.get('forecast', [])
+
+        if not forecast_list:
+            logger.warning("No forecast data available for better date suggestions")
+            return []
+
+        # Build forecast lookup by date
+        forecast_by_date = {}
+        for day in forecast_list:
+            date_str = day.get('date')
+            if date_str:
+                forecast_by_date[date_str] = day
+
+        # Check each available date
+        for date_str in available_dates:
+            if date_str not in forecast_by_date:
+                continue  # No forecast for this date
+
+            forecast = forecast_by_date[date_str]
+            assessment = analyze_weather_suitability(forecast, category, date_str)
+
+            if assessment['suitable']:
+                # Parse date for day name
+                try:
+                    from datetime import datetime
+                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                    day_name = date_obj.strftime("%A")
+                    month_day = date_obj.strftime("%b %d")
+                except:
+                    day_name = date_str
+                    month_day = date_str
+
+                better_dates.append({
+                    "date": date_str,
+                    "day_name": day_name,
+                    "month_day": month_day,
+                    "condition": forecast.get('condition', 'Unknown'),
+                    "high_temp": forecast.get('max_temp_f', 0),
+                    "low_temp": forecast.get('min_temp_f', 0),
+                    "precipitation": forecast.get('precipitation_probability', 0),
+                    "suitable": True
+                })
+
+                if len(better_dates) >= limit:
+                    break
+
+        logger.info(f"Found {len(better_dates)} suitable weather dates for {category}")
+        return better_dates
+
+    except Exception as e:
+        logger.error(f"Error finding better weather dates: {e}")
+        return []
+
+
+def add_weather_indicators_to_dates(
+    weather_data: Dict,
+    available_dates: List[str],
+    category: str
+) -> List[Dict[str, Any]]:
+    """
+    Enrich available dates with weather indicators for proactive warnings.
+
+    For each available date, checks weather and adds an indicator:
+    - [GOOD] Good weather
+    - [WARN] Marginal conditions with warning text
+    - [BAD] Poor conditions with warning text
+
+    Args:
+        weather_data: Weather response from get_weather Lambda
+        available_dates: List of date strings (YYYY-MM-DD)
+        category: Project category (e.g., "Decking", "Roofing")
+
+    Returns:
+        List of dicts with enriched date info:
+        [
+            {
+                "date": "2024-11-27",
+                "day_name": "Wednesday",
+                "month_day": "Nov 27",
+                "indicator": "[WARN]",
+                "suitable": False,
+                "severity": "medium",
+                "warnings": ["Snow forecasted", "Temperature too cold (high of 32F)"],
+                "condition": "Snow",
+                "high_temp": 32,
+                "low_temp": 20
+            },
+            ...
+        ]
+    """
+    enriched_dates = []
+
+    try:
+        weather = weather_data.get('weather', {})
+        forecast_list = weather.get('forecast', [])
+
+        # Build forecast lookup by date
+        forecast_by_date = {}
+        for day in forecast_list:
+            date_str = day.get('date')
+            if date_str:
+                forecast_by_date[date_str] = day
+
+        for date_str in available_dates:
+            # Parse date for display
+            try:
+                date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                day_name = date_obj.strftime("%A")
+                month_day = date_obj.strftime("%b %d")
+            except:
+                day_name = date_str
+                month_day = date_str
+
+            date_info = {
+                "date": date_str,
+                "day_name": day_name,
+                "month_day": month_day,
+                "suitable": True,
+                "indicator": "[GOOD]",
+                "severity": "low",
+                "warnings": [],
+                "condition": "Unknown",
+                "high_temp": None,
+                "low_temp": None
+            }
+
+            # Check if we have forecast for this date
+            if date_str in forecast_by_date:
+                forecast = forecast_by_date[date_str]
+                assessment = analyze_weather_suitability(forecast, category, date_str)
+
+                date_info["condition"] = forecast.get('condition', 'Unknown')
+                date_info["high_temp"] = forecast.get('max_temp_f')
+                date_info["low_temp"] = forecast.get('min_temp_f')
+                date_info["precipitation"] = forecast.get('precipitation_probability', 0)
+                date_info["suitable"] = assessment['suitable']
+                date_info["severity"] = assessment['severity']
+                date_info["warnings"] = assessment['warnings']
+
+                # Set indicator based on assessment
+                if assessment['suitable']:
+                    date_info["indicator"] = "[GOOD]"
+                elif assessment['severity'] == "high":
+                    date_info["indicator"] = "[BAD]"
+                else:
+                    date_info["indicator"] = "[WARN]"
+
+            enriched_dates.append(date_info)
+
+        # Log summary
+        good_count = sum(1 for d in enriched_dates if d['suitable'])
+        logger.info(f"Weather enrichment: {good_count}/{len(enriched_dates)} dates suitable for {category}")
+
+        return enriched_dates
+
+    except Exception as e:
+        logger.error(f"Error adding weather indicators: {e}")
+        # Return basic date info without weather
+        return [{"date": d, "suitable": True, "indicator": "", "warnings": []} for d in available_dates]
+
+
 def extract_location_from_context(workflow_state: Dict) -> Optional[str]:
     """
     Extract location (City, State) from workflow state context

@@ -56,10 +56,10 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
 def handle_greet(params: Dict[str, Any]) -> Dict[str, Any]:
     """Handle greeting messages"""
     greetings = [
-        "Hello! I'm here to help you schedule appointments with our property management team. What would you like to do today?",
-        "Hi there! How can I help you with your projects today?",
-        "Hello! I can help you view your projects, check available dates, and schedule appointments. What would you like to do?",
-        "Hi! Ready to help you manage your projects. What can I do for you?"
+        "Hello!  Great to see you! I'm here to help you manage your projects - whether you need to check project details, view available dates, or schedule appointments. Just let me know how I can assist you!",
+        "Hi there! Welcome back! I'm your ProjectForce scheduling assistant. I can help you view your projects, find available dates, and get appointments scheduled. Feel free to ask me anything!",
+        "Hey!  I'm happy to help you today! I can show you your projects, check scheduling availability, and help you book appointments. Let me know what you'd like to start with!",
+        "Hello! Thanks for stopping by! I'm here to make managing your projects easy. I can help you explore your current projects, find open dates, and schedule appointments. How can I help you today?"
     ]
 
     response_text = random.choice(greetings)
@@ -73,11 +73,11 @@ def handle_greet(params: Dict[str, Any]) -> Dict[str, Any]:
 def handle_help(params: Dict[str, Any]) -> Dict[str, Any]:
     """Provide help information"""
     help_text = """I can help you with:
- View your projects (list my projects)
- Get project details (details for project 7751744)
- Check available dates (what dates are available for project 7751744)
- View time slots (show me time slots for Nov 25)
- Schedule appointments (schedule project 7751744)
+- View your projects (list my projects)
+- Get project details (details for project 7751744)
+- Check available dates (what dates are available for project 7751744)
+- View time slots (show me time slots for Nov 25)
+- Schedule appointments (schedule project 7751744)
 
 Just ask me what you'd like to do!"""
 
@@ -93,19 +93,19 @@ def handle_general(params: Dict[str, Any]) -> Dict[str, Any]:
 
     responses = {
         'thanks': [
-            "You're welcome! Is there anything else I can help you with?",
-            "Happy to help! Let me know if you need anything else.",
-            "No problem! What else can I do for you?"
+            "You're very welcome!  I'm always here if you need anything else with your projects!",
+            "My pleasure! Happy to help! Feel free to ask me anything about your projects or scheduling.",
+            "Absolutely! Glad I could help! Let me know if there's anything else you'd like to do."
         ],
         'bye': [
-            "Goodbye! Feel free to come back if you need help with your projects.",
-            "Take care! Let me know if you need anything.",
-            "Bye! Have a great day!"
+            "Goodbye!  Feel free to come back anytime you need help with your projects. Have a great day!",
+            "Take care! I'm here whenever you need assistance with scheduling or projects. See you soon!",
+            "Bye! Have a wonderful day! Come back anytime you need help managing your projects! "
         ],
         'default': [
-            "I'm here to help you with scheduling appointments and managing your projects. What would you like to do?",
-            "I specialize in helping with project scheduling. How can I assist you today?",
-            "I can help you view projects, check availability, and schedule appointments. What do you need?"
+            "I'm here to help you with your projects! I can show you project details, check availability, and schedule appointments. Let me know what you'd like to do!",
+            "I specialize in making project scheduling easy for you! I can help you view projects, find available dates, and book appointments. How can I assist you today?",
+            "I'm your ProjectForce scheduling assistant! I can help with viewing projects, checking availability, and scheduling appointments. Feel free to ask me anything! "
         ]
     }
 

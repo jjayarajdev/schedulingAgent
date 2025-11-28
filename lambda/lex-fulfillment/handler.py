@@ -203,6 +203,24 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         elif intent_name == "WeatherInquiry":
             response = handle_weather_inquiry(event, session_id, customer_id)
 
+        elif intent_name == "RescheduleAppointment":
+            response = handle_reschedule_appointment(event, session_id, customer_id)
+
+        elif intent_name == "CancelAppointment":
+            response = handle_cancel_appointment(event, session_id, customer_id)
+
+        elif intent_name == "BusinessHours":
+            response = handle_business_hours(event, session_id)
+
+        elif intent_name == "ThankYou":
+            response = handle_thank_you(event, session_id)
+
+        elif intent_name == "HowAreYou":
+            response = handle_how_are_you(event, session_id)
+
+        elif intent_name == "Goodbye":
+            response = handle_goodbye(event, session_id)
+
         elif intent_name in ["ScheduleAppointment", "UrgentRequest", "FallbackIntent"]:
             response = hand_off_to_bedrock(event, session_id, customer_id, input_transcript)
 
@@ -884,6 +902,113 @@ def handle_weather_inquiry(
             event,
             "I encountered an error checking the weather. Please try again."
         )
+
+
+def handle_reschedule_appointment(
+    event: Dict[str, Any],
+    session_id: str,
+    customer_id: Optional[str]
+) -> Dict[str, Any]:
+    """
+    Handle RescheduleAppointment intent - reschedule an existing appointment
+    """
+    logger.info(f"[RESCHEDULE] Handling reschedule request for customer {customer_id}")
+
+    # For now, hand off to orchestrator for complex workflow
+    input_text = event.get('inputTranscript', 'reschedule my appointment')
+    return hand_off_to_bedrock(event, session_id, customer_id, input_text)
+
+
+def handle_cancel_appointment(
+    event: Dict[str, Any],
+    session_id: str,
+    customer_id: Optional[str]
+) -> Dict[str, Any]:
+    """
+    Handle CancelAppointment intent - cancel an existing appointment
+    """
+    logger.info(f"[CANCEL] Handling cancel request for customer {customer_id}")
+
+    # For now, hand off to orchestrator for complex workflow
+    input_text = event.get('inputTranscript', 'cancel my appointment')
+    return hand_off_to_bedrock(event, session_id, customer_id, input_text)
+
+
+def handle_business_hours(
+    event: Dict[str, Any],
+    session_id: str
+) -> Dict[str, Any]:
+    """
+    Handle BusinessHours intent - provide business hours information
+    """
+    logger.info(f"[HOURS] Handling business hours inquiry")
+
+    response_text = (
+        "Our scheduling team is available Monday through Friday, "
+        "from 8 in the morning until 5 in the evening. "
+        "We're closed on weekends and major holidays. "
+        "Is there anything else I can help you with?"
+    )
+
+    return LexResponseBuilder.build_response(event, response_text)
+
+
+def handle_thank_you(
+    event: Dict[str, Any],
+    session_id: str
+) -> Dict[str, Any]:
+    """
+    Handle ThankYou intent - respond to expressions of gratitude
+    """
+    logger.info(f"[THANKS] Handling thank you")
+
+    import random
+    responses = [
+        "You're very welcome! Is there anything else I can help you with?",
+        "My pleasure! Let me know if you need anything else.",
+        "Happy to help! Is there anything else you'd like to know?",
+        "Absolutely! Feel free to ask if you have more questions."
+    ]
+
+    return LexResponseBuilder.build_response(event, random.choice(responses))
+
+
+def handle_how_are_you(
+    event: Dict[str, Any],
+    session_id: str
+) -> Dict[str, Any]:
+    """
+    Handle HowAreYou intent - casual chitchat response
+    """
+    logger.info(f"[CHITCHAT] Handling how are you")
+
+    import random
+    responses = [
+        "I'm doing great, thank you for asking! How can I help you today with your projects or scheduling?",
+        "I'm wonderful, thanks! Ready to help you with your projects. What would you like to do?",
+        "I'm here and happy to assist! Would you like to check on your projects or schedule an appointment?"
+    ]
+
+    return LexResponseBuilder.build_response(event, random.choice(responses))
+
+
+def handle_goodbye(
+    event: Dict[str, Any],
+    session_id: str
+) -> Dict[str, Any]:
+    """
+    Handle Goodbye intent - end the conversation gracefully
+    """
+    logger.info(f"[GOODBYE] Handling goodbye")
+
+    import random
+    responses = [
+        "Goodbye! Thank you for calling. Have a wonderful day!",
+        "Take care! Feel free to call back anytime you need help with your projects.",
+        "Goodbye! It was a pleasure assisting you. Have a great day!"
+    ]
+
+    return LexResponseBuilder.build_response(event, random.choice(responses))
 
 
 # Voice-specific prompt wrapper for natural, elderly-friendly responses
