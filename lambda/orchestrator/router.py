@@ -586,7 +586,8 @@ def route_request(
     customer_id: str,
     client_id: str,
     pf_bearer_token: str = None,
-    conversation_history: Optional[list] = None
+    conversation_history: Optional[list] = None,
+    channel: str = 'chat'
 ) -> Dict[str, Any]:
     """
     Route request to either Direct Lambda or Bedrock Agent
@@ -599,6 +600,7 @@ def route_request(
         client_id: Client ID
         pf_bearer_token: ProjectForce API bearer token (optional - uses Secrets Manager if not provided)
         conversation_history: Previous conversation for context
+        channel: Channel type ('voice' or 'chat') - determines response formatting
 
     Returns:
         Dictionary with:
@@ -624,7 +626,8 @@ def route_request(
                 customer_id=customer_id,
                 client_id=client_id,
                 pf_bearer_token=pf_bearer_token,
-                conversation_history=conversation_history
+                conversation_history=conversation_history,
+                channel=channel
             )
         except ImportError as e:
             logger.warning(f"Multi-agent router not available: {e}, falling back to standard routing")
@@ -668,7 +671,8 @@ def route_request(
     # Session attributes for agent calls (only include pf_bearer_token if provided)
     session_attributes = {
         'customer_id': customer_id,
-        'client_id': client_id
+        'client_id': client_id,
+        'channel': channel  # 'voice' or 'chat' - for response formatting
     }
 
     # Only add pf_bearer_token if explicitly provided (Phase 1+2: tokens come from Secrets Manager)

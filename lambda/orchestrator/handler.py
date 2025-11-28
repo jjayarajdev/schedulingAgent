@@ -53,6 +53,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         pf_token = body.get('pf_token', '')
         pf_client_id = body.get('pf_client_id', '')
         pf_user_id = str(body.get('pf_user_id', ''))
+        channel = body.get('channel', 'chat')  # 'voice' or 'chat'
 
         # Validate required parameters
         if not message:
@@ -82,7 +83,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             customer_id=pf_user_id,
             client_id=pf_client_id,
             pf_bearer_token=pf_token,
-            conversation_history=conversation_history
+            conversation_history=conversation_history,
+            channel=channel
         )
 
         # Extract response components

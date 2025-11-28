@@ -26,7 +26,8 @@ def route_with_multi_agent_orchestration(
     customer_id: str,
     client_id: str,
     pf_bearer_token: str,
-    conversation_history: Optional[List[Dict]] = None
+    conversation_history: Optional[List[Dict]] = None,
+    channel: str = 'chat'
 ) -> Dict[str, Any]:
     """
     Enhanced routing with multi-agent orchestration
@@ -44,6 +45,7 @@ def route_with_multi_agent_orchestration(
         client_id: Client ID
         pf_bearer_token: API bearer token
         conversation_history: Previous conversation
+        channel: Channel type ('voice' or 'chat') - determines response formatting
 
     Returns:
         Dictionary with response, timing, and metadata
@@ -80,7 +82,8 @@ def route_with_multi_agent_orchestration(
     session_attributes = {
         'customer_id': customer_id,
         'client_id': client_id,
-        'pf_bearer_token': pf_bearer_token
+        'pf_bearer_token': pf_bearer_token,
+        'channel': channel  # 'voice' or 'chat' - for response formatting
     }
 
     # Step 3: Route based on orchestration type

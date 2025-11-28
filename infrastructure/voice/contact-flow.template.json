@@ -1,0 +1,115 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "2b04c2b8-d4ad-4623-9b05-275f21534057",
+  "Metadata": {
+    "entryPointPosition": {"x": 40, "y": 40},
+    "ActionMetadata": {
+      "2b04c2b8-d4ad-4623-9b05-275f21534057": {"position": {"x": 53.6, "y": 131.2}},
+      "5871c107-fb23-488c-98c7-963593dcc97e": {"position": {"x": 704.8, "y": 65.6}},
+      "GetCustomerInput2": {
+        "position": {"x": 461.6, "y": 39.2},
+        "isFriendlyName": true,
+        "parameters": {
+          "LexV2Bot": {
+            "AliasArn": {
+              "displayName": "TestBotAlias",
+              "useLexBotDropdown": true,
+              "lexV2BotName": "pf-scheduling-assistant-dev"
+            }
+          }
+        },
+        "useLexBotDropdown": true,
+        "lexV2BotName": "pf-scheduling-assistant-dev",
+        "lexV2BotAliasName": "TestBotAlias",
+        "conditionMetadata": [{"id": "d9c8b1e7-a2f4-4e3a-8b5c-1d6e9f0a2b3c", "value": "Goodbye"}]
+      },
+      "GetCustomerInput1": {
+        "position": {"x": 248, "y": 32.8},
+        "isFriendlyName": true,
+        "parameters": {
+          "LexV2Bot": {
+            "AliasArn": {
+              "displayName": "TestBotAlias",
+              "useLexBotDropdown": true,
+              "lexV2BotName": "pf-scheduling-assistant-dev"
+            }
+          }
+        },
+        "useLexBotDropdown": true,
+        "lexV2BotName": "pf-scheduling-assistant-dev",
+        "lexV2BotAliasName": "TestBotAlias",
+        "conditionMetadata": [{"id": "a1b2c3d4-e5f6-7890-a1b2-c3d4e5f67890", "value": "Goodbye"}]
+      }
+    },
+    "Annotations": []
+  },
+  "Actions": [
+    {
+      "Parameters": {
+        "Text": "Thank you for calling ProjectForce. How can I help you today?"
+      },
+      "Identifier": "2b04c2b8-d4ad-4623-9b05-275f21534057",
+      "Type": "MessageParticipant",
+      "Transitions": {
+        "NextAction": "GetCustomerInput1",
+        "Errors": [{"NextAction": "5871c107-fb23-488c-98c7-963593dcc97e", "ErrorType": "NoMatchingError"}]
+      }
+    },
+    {
+      "Parameters": {},
+      "Identifier": "5871c107-fb23-488c-98c7-963593dcc97e",
+      "Type": "DisconnectParticipant",
+      "Transitions": {}
+    },
+    {
+      "Parameters": {
+        "Text": " ",
+        "LexV2Bot": {
+          "AliasArn": "arn:aws:lex:${REGION}:${ACCOUNT_ID}:bot-alias/${BOT_ID}/${ALIAS_ID}"
+        }
+      },
+      "Identifier": "GetCustomerInput2",
+      "Type": "ConnectParticipantWithLexBot",
+      "Transitions": {
+        "NextAction": "GetCustomerInput1",
+        "Errors": [
+          {"NextAction": "GetCustomerInput1", "ErrorType": "NoMatchingCondition"},
+          {"NextAction": "5871c107-fb23-488c-98c7-963593dcc97e", "ErrorType": "NoMatchingError"}
+        ],
+        "Conditions": [
+          {
+            "NextAction": "5871c107-fb23-488c-98c7-963593dcc97e",
+            "Condition": {"Operator": "Equals", "Operands": ["Goodbye"]},
+            "ConditionType": "IntentName",
+            "ConditionValue": "Goodbye"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "Text": " ",
+        "LexV2Bot": {
+          "AliasArn": "arn:aws:lex:${REGION}:${ACCOUNT_ID}:bot-alias/${BOT_ID}/${ALIAS_ID}"
+        }
+      },
+      "Identifier": "GetCustomerInput1",
+      "Type": "ConnectParticipantWithLexBot",
+      "Transitions": {
+        "NextAction": "GetCustomerInput2",
+        "Errors": [
+          {"NextAction": "GetCustomerInput2", "ErrorType": "NoMatchingCondition"},
+          {"NextAction": "5871c107-fb23-488c-98c7-963593dcc97e", "ErrorType": "NoMatchingError"}
+        ],
+        "Conditions": [
+          {
+            "NextAction": "5871c107-fb23-488c-98c7-963593dcc97e",
+            "Condition": {"Operator": "Equals", "Operands": ["Goodbye"]},
+            "ConditionType": "IntentName",
+            "ConditionValue": "Goodbye"
+          }
+        ]
+      }
+    }
+  ]
+}

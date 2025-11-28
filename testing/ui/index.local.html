@@ -505,8 +505,11 @@
     <!-- Header -->
     <div class="header">
         <div class="header-content">
-            <div class="logo">📦 ProjectForce Agent Demo</div>
-            <div class="user-badge" id="user-display">Not Logged In</div>
+            <div class="logo">ProjectForce Agent Demo (LOCAL)</div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <button onclick="promptSetToken()" style="padding: 8px 16px; border-radius: 20px; border: 1px solid #0066cc; background: white; color: #0066cc; cursor: pointer; font-size: 14px;">Set Token</button>
+                <div class="user-badge" id="user-display">Not Logged In</div>
+            </div>
         </div>
     </div>
 
@@ -583,7 +586,13 @@
                     accessToken = creds.accessToken;
                     clientId = creds.clientId;
                     userId = creds.userId;
-                    console.log('✅ Loaded saved credentials from localStorage');
+                    console.log('Loaded saved credentials from localStorage');
+
+                    // Also sync to pf_proxy on load
+                    if (accessToken && accessToken.length > 50) {
+                        syncTokenToProxy(accessToken);
+                        updateUIStatus(`User: ${userId}`, true);
+                    }
                     return true;
                 } catch (e) {
                     console.error('Failed to parse saved credentials:', e);
@@ -603,7 +612,77 @@
                 timestamp: Date.now()
             };
             localStorage.setItem('pf_credentials', JSON.stringify(creds));
-            console.log('💾 Credentials saved to localStorage');
+            console.log('Credentials saved to localStorage');
+
+            // Also sync token to pf_proxy for Lambda calls
+            syncTokenToProxy(accessToken);
+        }
+
+        // Sync token to pf_proxy (so Lambda uses this token, not Secrets Manager)
+        async function syncTokenToProxy(token) {
+            if (!token || token.length < 50) return;
+            try {
+                const response = await fetch(`${API_URL.replace('/api', '')}/api/set-token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: token })
+                });
+                if (response.ok) {
+                    console.log('Token synced to pf_proxy');
+                }
+            } catch (e) {
+                console.log('Could not sync to pf_proxy:', e.message);
+            }
+        }
+
+        // Manual token entry (for when auto-login fails)
+        async function promptSetToken() {
+            const token = prompt('Paste your ProjectForce bearer token from browser:');
+            if (token && token.length > 50) {
+                accessToken = token;
+
+                // Save to localStorage
+                const creds = { accessToken, clientId, userId, timestamp: Date.now() };
+                localStorage.setItem('pf_credentials', JSON.stringify(creds));
+
+                // Sync to pf_proxy AND Secrets Manager
+                try {
+                    const response = await fetch(`${API_URL.replace('/api', '')}/api/set-token`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token: token, update_secrets: true })
+                    });
+                    const result = await response.json();
+
+                    if (result.success) {
+                        updateUIStatus(`User: ${userId}`, true);
+                        if (result.secrets_manager) {
+                            alert('Token saved to:\n- Browser localStorage\n- pf_proxy memory\n- AWS Secrets Manager (for voice)\n\nBoth web UI and voice calls will use this token!');
+                        } else {
+                            alert(`Token saved to localStorage and pf_proxy.\n\nSecrets Manager update failed: ${result.secrets_error || 'Unknown error'}\n\nVoice calls may not work.`);
+                        }
+                        loadProjects();
+                    } else {
+                        alert('Failed to save token: ' + (result.error || 'Unknown error'));
+                    }
+                } catch (e) {
+                    // pf_proxy not running, just save to localStorage
+                    updateUIStatus(`User: ${userId}`, true);
+                    alert('Token saved to localStorage only.\n\npf_proxy not running - restart webapp to sync.');
+                    loadProjects();
+                }
+            } else if (token) {
+                alert('Invalid token (too short). Please paste the full bearer token.');
+            }
+        }
+
+        function updateUIStatus(message, success) {
+            const badge = document.querySelector('.user-badge');
+            if (badge) {
+                badge.textContent = message;
+                badge.style.background = success ? '#d4edda' : '#f8d7da';
+                badge.style.color = success ? '#155724' : '#721c24';
+            }
         }
 
         // Credential Manager - Clear credentials (logout)

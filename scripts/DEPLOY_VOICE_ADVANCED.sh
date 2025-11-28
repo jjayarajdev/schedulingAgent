@@ -194,15 +194,19 @@ REGION="${AWS_REGION:-us-east-1}"
 ENVIRONMENT="dev"
 PREFIX="pf"
 
+# Get project root directory (parent of scripts/)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 # Lambda function names
 LEX_FULFILLMENT_FUNCTION="pf-lex-fulfillment-${ENVIRONMENT}"
 VOICE_BRIDGE_FUNCTION="pf-voice-bedrock-bridge-${ENVIRONMENT}"
 CUSTOMER_LOOKUP_FUNCTION="pf-customer-lookup-${ENVIRONMENT}"
 
-# Lambda source directories
-LEX_FULFILLMENT_DIR="lambda/lex-fulfillment"
-VOICE_BRIDGE_DIR="lambda/voice-bedrock-bridge"
-CUSTOMER_LOOKUP_DIR="lambda/customer-lookup"
+# Lambda source directories (absolute paths)
+LEX_FULFILLMENT_DIR="${PROJECT_DIR}/lambda/lex-fulfillment"
+VOICE_BRIDGE_DIR="${PROJECT_DIR}/lambda/voice-bedrock-bridge"
+CUSTOMER_LOOKUP_DIR="${PROJECT_DIR}/lambda/customer-lookup"
 
 # IAM role names
 LEX_FULFILLMENT_ROLE="pf-lex-fulfillment-role-${ENVIRONMENT}"
@@ -617,7 +621,10 @@ LEX_FULFILLMENT_POLICY=$(cat <<EOF
       "Action": "lambda:InvokeFunction",
       "Resource": [
         "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-voice-bedrock-bridge-${ENVIRONMENT}",
-        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-customer-lookup-${ENVIRONMENT}"
+        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-customer-lookup-${ENVIRONMENT}",
+        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-scheduling-actions",
+        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-orchestrator",
+        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-information-actions"
       ]
     },
     {
@@ -821,11 +828,125 @@ for FUNCTION_NAME in "$LEX_FULFILLMENT_FUNCTION" "$VOICE_BRIDGE_FUNCTION"; do
 done
 
 # ============================================================================
+# Step 4: Generate Contact Flow Configuration Files
+# ============================================================================
+
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}Step 4: Generating Contact Flow Configuration${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+INFRA_VOICE_DIR="infrastructure/voice"
+
+# Check if Lex bot exists and get its ID
+echo "  → Checking for existing Lex bot..."
+LEX_BOT_NAME="pf-scheduling-assistant-${ENVIRONMENT}"
+LEX_BOT_ID=$(aws_cmd lexv2-models list-bots --region "$REGION" --query "botSummaries[?botName=='${LEX_BOT_NAME}'].botId" --output text 2>/dev/null || echo "")
+
+if [[ -n "$LEX_BOT_ID" && "$LEX_BOT_ID" != "None" ]]; then
+    echo "  Found Lex bot: $LEX_BOT_NAME (ID: $LEX_BOT_ID)"
+
+    # Get the bot alias ID
+    LEX_ALIAS_ID=$(aws_cmd lexv2-models list-bot-aliases --bot-id "$LEX_BOT_ID" --region "$REGION" --query "botAliasSummaries[0].botAliasId" --output text 2>/dev/null || echo "TSTALIASID")
+
+    if [[ -z "$LEX_ALIAS_ID" || "$LEX_ALIAS_ID" == "None" ]]; then
+        LEX_ALIAS_ID="TSTALIASID"
+    fi
+    echo "  Bot Alias ID: $LEX_ALIAS_ID"
+else
+    echo "  No Lex bot found. Using placeholder values."
+    echo "  You'll need to create the Lex bot first, then re-run this script."
+    LEX_BOT_ID="BOT_ID_PLACEHOLDER"
+    LEX_ALIAS_ID="ALIAS_ID_PLACEHOLDER"
+fi
+
+# Ask for Connect instance ID (optional)
+echo ""
+echo -e "${YELLOW}Do you have an AWS Connect instance to configure?${NC}"
+echo "  [1] Yes, I'll enter the Connect Instance ID"
+echo "  [2] No, skip Connect configuration for now"
+read -p "Enter choice (1 or 2): " CONNECT_CHOICE
+
+CONNECT_INSTANCE_ID=""
+if [[ "$CONNECT_CHOICE" == "1" ]]; then
+    # Try to auto-detect Connect instances
+    echo ""
+    echo "  → Checking for existing Connect instances..."
+    CONNECT_INSTANCES=$(aws_cmd connect list-instances --region "$REGION" --query "InstanceSummaryList[].{Id:Id,Alias:InstanceAlias}" --output table 2>/dev/null || echo "")
+
+    if [[ -n "$CONNECT_INSTANCES" && "$CONNECT_INSTANCES" != *"None"* ]]; then
+        echo "  Found Connect instances:"
+        echo "$CONNECT_INSTANCES"
+        echo ""
+    fi
+
+    read -p "Enter Connect Instance ID (UUID format): " CONNECT_INSTANCE_ID
+
+    if [[ -z "$CONNECT_INSTANCE_ID" ]]; then
+        echo "  No instance ID provided. Using placeholder."
+        CONNECT_INSTANCE_ID="CONNECT_INSTANCE_ID_PLACEHOLDER"
+    fi
+else
+    CONNECT_INSTANCE_ID="CONNECT_INSTANCE_ID_PLACEHOLDER"
+fi
+
+# Process templates
+echo ""
+echo "  → Processing contact flow templates..."
+
+TEMPLATE_VARS="REGION=${REGION}|ACCOUNT_ID=${ACCOUNT_ID}|BOT_ID=${LEX_BOT_ID}|ALIAS_ID=${LEX_ALIAS_ID}|CONNECT_INSTANCE_ID=${CONNECT_INSTANCE_ID}"
+
+# Function to process a template file
+process_template() {
+    local TEMPLATE_FILE=$1
+    local OUTPUT_FILE=$2
+
+    if [[ -f "$TEMPLATE_FILE" ]]; then
+        echo "    Processing: $(basename $TEMPLATE_FILE)"
+
+        # Read template and replace placeholders
+        sed -e "s/\${REGION}/${REGION}/g" \
+            -e "s/\${ACCOUNT_ID}/${ACCOUNT_ID}/g" \
+            -e "s/\${BOT_ID}/${LEX_BOT_ID}/g" \
+            -e "s/\${ALIAS_ID}/${LEX_ALIAS_ID}/g" \
+            -e "s/\${CONNECT_INSTANCE_ID}/${CONNECT_INSTANCE_ID}/g" \
+            "$TEMPLATE_FILE" > "$OUTPUT_FILE"
+
+        echo "    Generated: $(basename $OUTPUT_FILE)"
+    else
+        echo "    Template not found: $TEMPLATE_FILE"
+    fi
+}
+
+# Process each template
+if [[ -f "$INFRA_VOICE_DIR/contact-flow.template.json" ]]; then
+    process_template "$INFRA_VOICE_DIR/contact-flow.template.json" "$INFRA_VOICE_DIR/contact-flow.generated.json"
+fi
+
+if [[ -f "$INFRA_VOICE_DIR/lex-resource-policy.template.json" ]]; then
+    process_template "$INFRA_VOICE_DIR/lex-resource-policy.template.json" "$INFRA_VOICE_DIR/lex-resource-policy.generated.json"
+fi
+
+if [[ -f "$INFRA_VOICE_DIR/contact-flows/main-inbound-flow.json" ]]; then
+    # This file already uses placeholders, process it too
+    process_template "$INFRA_VOICE_DIR/contact-flows/main-inbound-flow.json" "$INFRA_VOICE_DIR/contact-flows/main-inbound-flow.generated.json"
+fi
+
+echo ""
+echo "  Configuration values used:"
+echo "    REGION:              $REGION"
+echo "    ACCOUNT_ID:          $ACCOUNT_ID"
+echo "    LEX_BOT_ID:          $LEX_BOT_ID"
+echo "    LEX_ALIAS_ID:        $LEX_ALIAS_ID"
+echo "    CONNECT_INSTANCE_ID: $CONNECT_INSTANCE_ID"
+echo ""
+
+# ============================================================================
 # Deployment Summary
 # ============================================================================
 
 echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}✅ Deployment Complete!${NC}"
+echo -e "${GREEN}Deployment Complete!${NC}"
 echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════${NC}"
 echo ""
 

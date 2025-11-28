@@ -42,6 +42,44 @@ conversation_store = {}
 MAX_HISTORY_MESSAGES = 20  # Keep last 20 messages per session
 SESSION_TIMEOUT = 3600  # 1 hour timeout for inactive sessions
 
+# ============================================================================
+# Token Storage (in-memory, survives for lifetime of proxy server)
+# ============================================================================
+# This allows the UI to work without sending token every request
+# Token is set via /api/set-token endpoint or read from Secrets Manager on startup
+STORED_TOKEN = None
+
+def get_stored_token():
+    """Get stored token (from memory or Secrets Manager)"""
+    global STORED_TOKEN
+    if STORED_TOKEN and len(STORED_TOKEN) > 50:
+        return STORED_TOKEN
+
+    # Try to load from Secrets Manager on first call
+    try:
+        import boto3
+        secrets_client = boto3.client('secretsmanager', region_name='us-east-1')
+        response = secrets_client.get_secret_value(SecretId='projectforce/api/credentials')
+        secret = json.loads(response['SecretString'])
+        token = secret.get('bearer_token', '')
+        if token and len(token) > 50:
+            STORED_TOKEN = token
+            logger.info(f"Loaded token from Secrets Manager (length: {len(token)})")
+            return STORED_TOKEN
+    except Exception as e:
+        logger.warning(f"Could not load token from Secrets Manager: {e}")
+
+    return None
+
+def set_stored_token(token):
+    """Set stored token in memory"""
+    global STORED_TOKEN
+    if token and len(token) > 50:
+        STORED_TOKEN = token
+        logger.info(f"Token stored in memory (length: {len(token)})")
+        return True
+    return False
+
 def get_conversation_history(session_id):
     """Get conversation history for a session"""
     if session_id not in conversation_store:
@@ -820,6 +858,82 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/set-token', methods=['POST'])
+def api_set_token():
+    """Set token in memory AND update AWS Secrets Manager (for voice/Lambda)"""
+    try:
+        data = request.json or {}
+        token = data.get('token', data.get('access_token', data.get('bearer_token', '')))
+        update_secrets = data.get('update_secrets', True)  # Default: also update Secrets Manager
+
+        if not token or len(token) < 50:
+            return jsonify({"error": "Invalid token (must be > 50 chars)"}), 400
+
+        # Store in memory
+        memory_success = set_stored_token(token)
+
+        # Also update Secrets Manager (for voice/Lambda calls)
+        secrets_success = False
+        secrets_error = None
+        if update_secrets:
+            try:
+                import boto3
+                secrets_client = boto3.client('secretsmanager', region_name='us-east-1')
+
+                # Get existing secret to preserve other fields
+                try:
+                    existing = secrets_client.get_secret_value(SecretId='projectforce/api/credentials')
+                    secret_data = json.loads(existing['SecretString'])
+                except:
+                    secret_data = {}
+
+                # Update bearer_token while preserving other fields
+                secret_data['bearer_token'] = token
+                secret_data['client_id'] = secret_data.get('client_id', '09PF05VD')
+                secret_data['REFRESH_TOKEN'] = secret_data.get('REFRESH_TOKEN', 'true')
+                secret_data['environment'] = secret_data.get('environment', 'dev')
+
+                secrets_client.update_secret(
+                    SecretId='projectforce/api/credentials',
+                    SecretString=json.dumps(secret_data)
+                )
+                secrets_success = True
+                logger.info("Token updated in AWS Secrets Manager")
+            except Exception as e:
+                secrets_error = str(e)
+                logger.error(f"Failed to update Secrets Manager: {e}")
+
+        if memory_success:
+            return jsonify({
+                "success": True,
+                "message": "Token stored",
+                "token_length": len(token),
+                "memory": True,
+                "secrets_manager": secrets_success,
+                "secrets_error": secrets_error
+            }), 200
+        else:
+            return jsonify({"error": "Failed to store token"}), 500
+
+    except Exception as e:
+        logger.error(f"Set token error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/get-token-status', methods=['GET'])
+def api_get_token_status():
+    """Check if a valid token is stored"""
+    token = get_stored_token()
+    if token:
+        return jsonify({
+            "has_token": True,
+            "token_length": len(token),
+            "token_preview": f"{token[:20]}...{token[-20:]}"
+        }), 200
+    else:
+        return jsonify({"has_token": False}), 200
+
+
 @app.route('/api/regenerate-token', methods=['POST'])
 def regenerate_token():
     """Regenerate token using client_id and user_id"""
@@ -991,7 +1105,16 @@ def invoke_agent():
         pf_user_id = data.get('pf_user_id', '1646085')
         stream = data.get('stream', False)  # Support both streaming and non-streaming
 
-        logger.info(f"🚀 Invoking Bedrock agent with message: {message[:50]}... (stream={stream})")
+        # Use stored token if not provided in request
+        if not pf_token or len(pf_token) < 50:
+            stored = get_stored_token()
+            if stored:
+                pf_token = stored
+                logger.info(f"Using stored token (length: {len(pf_token)})")
+            else:
+                logger.warning("No token provided and no stored token available")
+
+        logger.info(f"Invoking Bedrock agent with message: {message[:50]}... (stream={stream})")
 
         # Cleanup old sessions periodically
         cleanup_old_sessions()

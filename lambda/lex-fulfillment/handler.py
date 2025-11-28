@@ -863,6 +863,34 @@ def handle_weather_inquiry(
         )
 
 
+# Voice-specific prompt wrapper for natural, elderly-friendly responses
+VOICE_RESPONSE_INSTRUCTIONS = """
+[VOICE CHANNEL - Respond as if speaking on a phone call to someone who may be elderly]
+
+IMPORTANT VOICE GUIDELINES:
+- Speak naturally and conversationally, like a friendly human assistant
+- Be concise but complete - 2-3 short sentences max for the main answer
+- NO technical jargon - use simple everyday words
+- Lead with the most important information first
+- For lists: mention the count, then highlight 2-3 most relevant items
+- Offer to give more details: "Would you like to hear more about any of these?"
+- Use natural pauses with commas
+- Dates: say "November twenty-sixth" not "2025-11-26"
+- Times: say "eight in the morning" not "08:00"
+- Don't say "I found" or "I see" - just state the facts directly
+
+USER'S SPOKEN REQUEST: {input_text}
+"""
+
+
+def wrap_for_voice(input_text: str) -> str:
+    """
+    Wrap user input with voice-specific instructions for Claude.
+    This ensures natural, elderly-friendly responses without modifying orchestrator code.
+    """
+    return VOICE_RESPONSE_INSTRUCTIONS.format(input_text=input_text)
+
+
 def hand_off_to_bedrock(
     event: Dict[str, Any],
     session_id: str,
@@ -874,6 +902,8 @@ def hand_off_to_bedrock(
 
     ARCHITECTURE CHANGE: Now routes through pf-orchestrator instead of pf-voice-bedrock-bridge
     This gives voice queries the same intelligent Claude Sonnet 3.7 routing as chat queries.
+
+    VOICE ENHANCEMENT: Wraps user input with voice-specific instructions for natural responses.
 
     Used for: ScheduleAppointment, UrgentRequest, FallbackIntent
 
@@ -899,10 +929,14 @@ def hand_off_to_bedrock(
             # NEW: Route through intelligent orchestrator (Claude-based)
             logger.info(f"Routing through pf-orchestrator (intelligent Claude routing)")
 
+            # Wrap input with voice-specific instructions for natural responses
+            voice_enhanced_message = wrap_for_voice(input_text)
+            logger.info(f"Voice-enhanced message prepared for Claude")
+
             # Build orchestrator payload
             payload = {
                 'body': json.dumps({
-                    'message': input_text,
+                    'message': voice_enhanced_message,
                     'session_id': session_id,
                     'pf_token': pf_token,
                     'pf_client_id': pf_client_id,
@@ -1034,76 +1068,58 @@ def lookup_customer_by_phone(phone_number: str) -> Optional[str]:
 
 def _format_projects_for_voice(response_body: Dict[str, Any]) -> str:
     """
-    Format projects response for voice output
+    Format projects response for voice output - ELDERLY FRIENDLY
 
-    Converts structured project data into natural speech format.
-    Limits to 5 projects to avoid overwhelming the caller.
+    Natural, conversational format optimized for phone calls.
+    Prioritizes clarity over completeness - offers to elaborate.
     """
     try:
         if isinstance(response_body, str):
             response_body = json.loads(response_body)
 
         projects_data = response_body.get('projects', [])
-
-        # Use raw dictionary data (Pydantic removed for simplicity)
         projects = [p for p in projects_data if isinstance(p, dict)]
 
         if not projects:
-            return "You don't have any projects in the system right now."
+            return "You don't have any active projects right now. Would you like to start a new one?"
 
-        elif len(projects) == 1:
-            project = projects[0]
-            return (
-                f"You have 1 project: {project.get('category', 'unknown')} project {project.get('project_id', 'N/A')}, "
-                f"currently {project.get('status', 'unknown')}. Would you like to schedule an appointment for it?"
-            )
+        project_count = len(projects)
 
-        else:
-            project_count = len(projects)
+        # Group by status for smart summary
+        scheduled = [p for p in projects if 'scheduled' in p.get('status', '').lower()]
+        needs_scheduling = [p for p in projects if 'new' in p.get('status', '').lower() or 'customer' in p.get('status', '').lower()]
 
-            # Strategy: Read all projects if ≤10, use smart summarization if >10
-            if project_count <= 10:
-                # Read ALL projects in detail (up to 10 is manageable for voice)
-                descriptions = []
-                for i, project in enumerate(projects, 1):
-                    descriptions.append(
-                        f"{i}. {project.get('category', 'unknown')} project {project.get('project_id', 'N/A')}, {project.get('status', 'unknown')}"
-                    )
+        if project_count == 1:
+            p = projects[0]
+            status = p.get('status', 'unknown').lower()
+            category = p.get('category', 'home improvement')
 
-                message = f"You have {project_count} projects. Here are your projects: "
-                message += ". ".join(descriptions)
-                message += ". Would you like to schedule an appointment for any of these?"
-
+            if 'scheduled' in status:
+                date = p.get('scheduledDate', 'soon')
+                return f"You have one {category} project scheduled for {date}. Would you like to change this appointment?"
             else:
-                # >10 projects: Use smart summarization with status breakdown
-                # Group projects by status for better voice UX
-                status_counts = {}
-                for p in projects:
-                    status = p.get('status', 'Unknown')
-                    status_counts[status] = status_counts.get(status, 0) + 1
+                return f"You have one {category} project that needs scheduling. Would you like me to find available dates?"
 
-                # Read first 5 in detail, summarize the rest
-                max_detailed = 5
-                projects_to_detail = projects[:max_detailed]
+        # Multiple projects - give smart summary
+        message = f"You have {project_count} projects. "
 
-                # Start with summary including status breakdown
-                message = f"You have {project_count} projects: "
-                status_parts = [f"{count} {status}" for status, count in status_counts.items()]
-                message += f"{', '.join(status_parts)}. "
+        if scheduled:
+            message += f"{len(scheduled)} already scheduled"
+            if needs_scheduling:
+                message += f", and {len(needs_scheduling)} waiting to be scheduled. "
+            else:
+                message += ". "
+        elif needs_scheduling:
+            message += f"{len(needs_scheduling)} need scheduling. "
 
-                # Read first 5 in detail
-                message += f"Here are the first {max_detailed}: "
-                descriptions = []
-                for i, project in enumerate(projects_to_detail, 1):
-                    descriptions.append(
-                        f"{i}. {project.get('category', 'unknown')} project, {project.get('status', 'unknown')}"
-                    )
-                message += ". ".join(descriptions)
+        # Highlight the most actionable items (max 2)
+        if needs_scheduling:
+            top_project = needs_scheduling[0]
+            message += f"Your {top_project.get('category', 'first')} project is ready to schedule. "
 
-                # Mention remaining
-                message += f". You have {project_count - max_detailed} more projects. Would you like to schedule an appointment?"
+        message += "Would you like details on any of these, or shall we schedule one?"
 
-            return message
+        return message
 
     except Exception as e:
         logger.exception("Error formatting projects")
@@ -1112,53 +1128,64 @@ def _format_projects_for_voice(response_body: Dict[str, Any]) -> str:
 
 def _format_availability_for_voice(response_body: Dict[str, Any]) -> str:
     """
-    Format availability response for voice output
+    Format availability response for voice output - ELDERLY FRIENDLY
 
-    Converts available dates into natural speech format.
+    Natural date reading optimized for phone calls.
     """
     try:
         if isinstance(response_body, str):
             response_body = json.loads(response_body)
 
-        # Use raw dictionary data (Pydantic removed for simplicity)
         dates = response_body.get('available_dates', [])
 
         if not dates:
-            return "I'm sorry, there are no available dates for that project at the moment. Please check back later."
+            return "No appointments are available right now. Would you like me to check again next week?"
 
-        # Limit to 5 dates
-        dates_to_announce = dates[:5]
-
-        date_list = []
-        for date_obj in dates_to_announce:
-            date_str = date_obj.get('date') if isinstance(date_obj, dict) else date_obj.date
-            day_name = date_obj.get('day_name') if isinstance(date_obj, dict) else date_obj.day_name
-
-            # Format for voice: "Monday, December 15th"
+        # Format dates naturally
+        def format_date_natural(date_obj):
+            """Convert date to natural speech like 'Monday the twenty-fifth' """
             try:
+                date_str = date_obj.get('date') if isinstance(date_obj, dict) else str(date_obj)
+                day_name = date_obj.get('day_name', '') if isinstance(date_obj, dict) else ''
+
                 dt = datetime.strptime(date_str, '%Y-%m-%d')
-                formatted_date = dt.strftime('%B %d')
-                date_list.append(f"{day_name}, {formatted_date}")
+
+                # Natural day format
+                day = dt.day
+                month = dt.strftime('%B')
+
+                # Add ordinal suffix
+                if 4 <= day <= 20 or 24 <= day <= 30:
+                    suffix = "th"
+                else:
+                    suffix = ["st", "nd", "rd"][day % 10 - 1] if day % 10 <= 3 else "th"
+
+                if day_name:
+                    return f"{day_name} the {day}{suffix}"
+                else:
+                    return f"{month} {day}{suffix}"
             except:
-                date_list.append(f"{day_name}, {date_str}")
+                return str(date_obj)
 
-        if len(dates_to_announce) == 1:
-            message = f"There's 1 available date: {date_list[0]}. Would you like to book this date?"
+        if len(dates) == 1:
+            date_text = format_date_natural(dates[0])
+            return f"I have one opening on {date_text}. Would you like to book it?"
+
+        # Show first 3 dates max for voice
+        top_dates = dates[:3]
+        date_texts = [format_date_natural(d) for d in top_dates]
+
+        if len(dates) <= 3:
+            message = f"I have {len(dates)} openings: {', '.join(date_texts[:-1])}, and {date_texts[-1]}. Which works best for you?"
         else:
-            message = f"I found {len(dates)} available dates. Here are the first {len(dates_to_announce)}: "
-            message += ", ".join(date_list[:-1])
-            message += f", and {date_list[-1]}. "
-
-            if len(dates) > 5:
-                message += f"There are {len(dates) - 5} more dates available. "
-
-            message += "Which date would you prefer?"
+            message = f"I have {len(dates)} openings. The soonest are {', '.join(date_texts[:-1])}, and {date_texts[-1]}. "
+            message += "Would you like one of these, or should I check later dates?"
 
         return message
 
     except Exception as e:
         logger.exception("Error formatting availability")
-        return "I found available dates but had trouble reading them. Please try again."
+        return "I found some openings but had trouble reading them. Please try again."
 
 
 def _mask_phone(phone: str) -> str:

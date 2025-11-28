@@ -15,11 +15,11 @@ def format_for_voice(response_text: str, intent: str = 'unknown') -> str:
     Convert response to voice-friendly natural language
 
     Handles:
-    - JSON project lists → natural enumeration
-    - Technical terminology → plain language
-    - Numbers and IDs → spelled out clearly
-    - Long lists → summarized with details option
-    - Markdown formatting → removed
+    - JSON project lists  natural enumeration
+    - Technical terminology  plain language
+    - Numbers and IDs  spelled out clearly
+    - Long lists  summarized with details option
+    - Markdown formatting  removed
 
     Args:
         response_text: Raw response from agent or Lambda
@@ -254,16 +254,16 @@ def _format_numbers_for_voice(text: str) -> str:
 
 
 def _spell_digits(number_str: str) -> str:
-    """Spell out digits individually: "123" → "1 2 3" """
+    """Spell out digits individually: "123"  "1 2 3" """
     return ' '.join(number_str)
 
 
 def _format_temperatures(text: str) -> str:
     """Format temperatures for voice"""
-    # "75F" → "75 degrees Fahrenheit"
+    # "75F"  "75 degrees Fahrenheit"
     text = re.sub(r'(\d+)\s*F\b', r'\1 degrees Fahrenheit', text, flags=re.IGNORECASE)
 
-    # "23C" → "23 degrees Celsius"
+    # "23C"  "23 degrees Celsius"
     text = re.sub(r'(\d+)\s*C\b', r'\1 degrees Celsius', text, flags=re.IGNORECASE)
 
     return text
@@ -271,7 +271,7 @@ def _format_temperatures(text: str) -> str:
 
 def _format_dates(text: str) -> str:
     """Format dates naturally for voice"""
-    # "2025-11-14" → "November 14th, 2025"
+    # "2025-11-14"  "November 14th, 2025"
     def format_iso_date(match):
         year, month, day = match.groups()
         return _format_date_naturally(f"{year}-{month}-{day}")
@@ -305,7 +305,7 @@ def _format_time_naturally(time_str: str) -> str:
         for fmt in ['%H:%M', '%I:%M %p', '%H:%M:%S']:
             try:
                 dt = datetime.strptime(time_str, fmt)
-                # Format: "2:30 PM" or "14:30" → "2:30 in the afternoon"
+                # Format: "2:30 PM" or "14:30"  "2:30 in the afternoon"
                 hour = dt.hour
                 minute = dt.minute
 
@@ -342,7 +342,8 @@ def is_voice_mode_enabled(session_attributes: Optional[Dict] = None) -> bool:
 
     Voice mode can be enabled via:
     - Session attribute: voice_mode=true
-    - Channel detection: if from AWS Connect
+    - Channel detection: if channel is 'voice' or 'connect'
+    - Connect contact ID present
     """
     if not session_attributes:
         return False
@@ -351,8 +352,9 @@ def is_voice_mode_enabled(session_attributes: Optional[Dict] = None) -> bool:
     if session_attributes.get('voice_mode') == 'true':
         return True
 
-    # Check if request is from AWS Connect
-    if session_attributes.get('channel') == 'connect':
+    # Check if request is from voice channel (Lex via Connect)
+    channel = session_attributes.get('channel', '').lower()
+    if channel in ['voice', 'connect']:
         return True
 
     # Check if connect_contact_id is present
@@ -379,8 +381,8 @@ def format_response_for_channel(
         Formatted response appropriate for the channel
     """
     if is_voice_mode_enabled(session_attributes):
-        logger.info("📞 Voice mode detected - formatting for voice")
+        logger.info(" Voice mode detected - formatting for voice")
         return format_for_voice(response_text, intent)
     else:
-        logger.info("💬 Text mode - keeping original formatting")
+        logger.info(" Text mode - keeping original formatting")
         return response_text
