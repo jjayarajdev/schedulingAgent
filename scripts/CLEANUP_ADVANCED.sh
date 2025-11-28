@@ -23,17 +23,18 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-REGION="us-east-1"
+REGION="${AWS_REGION:-us-east-1}"
+ENV="${ENVIRONMENT:-dev}"
 
 # ============================================================================
 # AWS ACCOUNT SELECTION - Smart account detection and configuration
 # ============================================================================
 
-echo "════════════════════════════════════════════════════════════════════════════"
-echo -e "${RED}🧹 ProjectForce Advanced Cleanup Script${NC}"
-echo "════════════════════════════════════════════════════════════════════════════"
+echo "============================================================================"
+echo -e "${RED}[CLEAN] ProjectForce Advanced Cleanup Script${NC}"
+echo "============================================================================"
 echo ""
-echo -e "${CYAN}🔐 AWS ACCOUNT SELECTION${NC}"
+echo -e "${CYAN}[AUTH] AWS ACCOUNT SELECTION${NC}"
 echo ""
 
 # Get current/default profile
@@ -56,7 +57,7 @@ if [[ "$ACCOUNT_CHOICE" == "1" ]]; then
     AWS_PROFILE="$CURRENT_PROFILE"
     ACCOUNT_ID="$CURRENT_ACCOUNT"
     echo ""
-    echo -e "${GREEN}✓ Using account: ${ACCOUNT_ID}${NC}"
+    echo -e "${GREEN}[OK] Using account: ${ACCOUNT_ID}${NC}"
 else
     echo ""
     echo -e "${YELLOW}Enter the AWS Account ID you want to use:${NC}"
@@ -82,7 +83,7 @@ else
     done < <(aws configure list-profiles 2>/dev/null)
 
     if [[ -n "$FOUND_PROFILE" ]]; then
-        echo -e "${GREEN}✓ Found existing profile '${FOUND_PROFILE}' with account ${TARGET_ACCOUNT_ID}${NC}"
+        echo -e "${GREEN}[OK] Found existing profile '${FOUND_PROFILE}' with account ${TARGET_ACCOUNT_ID}${NC}"
         AWS_PROFILE="$FOUND_PROFILE"
         ACCOUNT_ID="$TARGET_ACCOUNT_ID"
     else
@@ -126,12 +127,12 @@ else
         VERIFY_ACCOUNT=$(aws sts get-caller-identity --profile "$NEW_PROFILE_NAME" --query Account --output text 2>/dev/null || echo "ERROR")
 
         if [[ "$VERIFY_ACCOUNT" == "$TARGET_ACCOUNT_ID" ]]; then
-            echo -e "${GREEN}✓ Profile '${NEW_PROFILE_NAME}' configured successfully!${NC}"
-            echo -e "${GREEN}✓ Verified account: ${VERIFY_ACCOUNT}${NC}"
+            echo -e "${GREEN}[OK] Profile '${NEW_PROFILE_NAME}' configured successfully!${NC}"
+            echo -e "${GREEN}[OK] Verified account: ${VERIFY_ACCOUNT}${NC}"
             AWS_PROFILE="$NEW_PROFILE_NAME"
             ACCOUNT_ID="$TARGET_ACCOUNT_ID"
         else
-            echo -e "${RED}❌ Credentials verification failed!${NC}"
+            echo -e "${RED}[FAIL] Credentials verification failed!${NC}"
             echo "   Expected account: $TARGET_ACCOUNT_ID"
             echo "   Got account: $VERIFY_ACCOUNT"
             exit 1
@@ -147,7 +148,7 @@ aws_cmd() {
 }
 
 # Safety confirmation
-echo -e "${RED}⚠️  WARNING: This will DELETE all ProjectForce resources!${NC}"
+echo -e "${RED}[WARN]  WARNING: This will DELETE all ProjectForce resources!${NC}"
 echo ""
 echo "  Profile:    $AWS_PROFILE"
 echo "  Account:    $ACCOUNT_ID"
@@ -167,9 +168,9 @@ echo ""
 ##############################################################################
 # Step 1: Delete Lambda Functions
 ##############################################################################
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "----------------------------------------------------------------------------"
 echo "Step 1: Deleting Lambda Functions"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "----------------------------------------------------------------------------"
 
 LAMBDAS=(
     "pf-orchestrator"
@@ -182,11 +183,11 @@ LAMBDAS=(
 
 for LAMBDA in "${LAMBDAS[@]}"; do
     if aws_cmd lambda get-function --function-name "$LAMBDA" &>/dev/null; then
-        echo "  → Deleting $LAMBDA..."
+        echo "  -> Deleting $LAMBDA..."
         aws_cmd lambda delete-function --function-name "$LAMBDA" &>/dev/null || true
-        echo -e "  ${GREEN}✓${NC} Deleted $LAMBDA"
+        echo -e "  ${GREEN}[OK]${NC} Deleted $LAMBDA"
     else
-        echo "  ⊘ $LAMBDA does not exist"
+        echo "  [-] $LAMBDA does not exist"
     fi
 done
 
@@ -195,9 +196,9 @@ echo ""
 ##############################################################################
 # Step 2: Delete IAM Roles (with policy detachment)
 ##############################################################################
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "----------------------------------------------------------------------------"
 echo "Step 2: Deleting IAM Roles"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "----------------------------------------------------------------------------"
 
 IAM_ROLES=(
     "pf-orchestrator-role"
@@ -212,30 +213,30 @@ delete_iam_role() {
     local ROLE_NAME=$1
 
     if ! aws_cmd iam get-role --role-name "$ROLE_NAME" &>/dev/null; then
-        echo "  ⊘ $ROLE_NAME does not exist"
+        echo "  [-] $ROLE_NAME does not exist"
         return 0
     fi
 
-    echo "  → Detaching policies from $ROLE_NAME..."
+    echo "  -> Detaching policies from $ROLE_NAME..."
 
     # Detach all attached managed policies
     ATTACHED_POLICIES=$(aws_cmd iam list-attached-role-policies --role-name "$ROLE_NAME" --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || echo "")
     for POLICY_ARN in $ATTACHED_POLICIES; do
-        echo "    • Detaching $POLICY_ARN"
+        echo "    - Detaching $POLICY_ARN"
         aws_cmd iam detach-role-policy --role-name "$ROLE_NAME" --policy-arn "$POLICY_ARN" &>/dev/null || true
     done
 
     # Delete all inline policies
     INLINE_POLICIES=$(aws_cmd iam list-role-policies --role-name "$ROLE_NAME" --query 'PolicyNames[]' --output text 2>/dev/null || echo "")
     for POLICY_NAME in $INLINE_POLICIES; do
-        echo "    • Deleting inline policy $POLICY_NAME"
+        echo "    - Deleting inline policy $POLICY_NAME"
         aws_cmd iam delete-role-policy --role-name "$ROLE_NAME" --policy-name "$POLICY_NAME" &>/dev/null || true
     done
 
     # Delete the role
-    echo "  → Deleting $ROLE_NAME..."
+    echo "  -> Deleting $ROLE_NAME..."
     aws_cmd iam delete-role --role-name "$ROLE_NAME" &>/dev/null || true
-    echo -e "  ${GREEN}✓${NC} Deleted $ROLE_NAME"
+    echo -e "  ${GREEN}[OK]${NC} Deleted $ROLE_NAME"
 }
 
 for ROLE in "${IAM_ROLES[@]}"; do
@@ -247,23 +248,23 @@ echo ""
 ##############################################################################
 # Step 3: Delete DynamoDB Tables
 ##############################################################################
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "----------------------------------------------------------------------------"
 echo "Step 3: Deleting DynamoDB Tables"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "----------------------------------------------------------------------------"
 
 TABLES=(
-    "pf-sessions-dev"
-    "pf-notes-dev"
-    "pf-workflow-states-dev"
+    "pf-sessions-${ENV}"
+    "pf-notes-${ENV}"
+    "pf-workflow-states-${ENV}"
 )
 
 for TABLE in "${TABLES[@]}"; do
     if aws_cmd dynamodb describe-table --table-name "$TABLE" &>/dev/null; then
-        echo "  → Deleting $TABLE..."
+        echo "  -> Deleting $TABLE..."
         aws_cmd dynamodb delete-table --table-name "$TABLE" &>/dev/null || true
-        echo -e "  ${GREEN}✓${NC} Deleted $TABLE"
+        echo -e "  ${GREEN}[OK]${NC} Deleted $TABLE"
     else
-        echo "  ⊘ $TABLE does not exist"
+        echo "  [-] $TABLE does not exist"
     fi
 done
 
@@ -272,9 +273,9 @@ echo ""
 ##############################################################################
 # Step 4: Delete Secrets Manager Secrets
 ##############################################################################
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "----------------------------------------------------------------------------"
 echo "Step 4: Deleting Secrets Manager Secrets"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "----------------------------------------------------------------------------"
 
 SECRETS=(
     "projectforce/api/credentials"
@@ -283,20 +284,20 @@ SECRETS=(
 
 for SECRET in "${SECRETS[@]}"; do
     if aws_cmd secretsmanager describe-secret --secret-id "$SECRET" &>/dev/null; then
-        echo "  → Deleting $SECRET..."
+        echo "  -> Deleting $SECRET..."
         aws_cmd secretsmanager delete-secret --secret-id "$SECRET" --force-delete-without-recovery &>/dev/null || true
-        echo -e "  ${GREEN}✓${NC} Deleted $SECRET"
+        echo -e "  ${GREEN}[OK]${NC} Deleted $SECRET"
     else
-        echo "  ⊘ $SECRET does not exist"
+        echo "  [-] $SECRET does not exist"
     fi
 done
 
 ##############################################################################
 # Step 5: Clean up temp files from failed deployments
 ##############################################################################
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "----------------------------------------------------------------------------"
 echo "Step 5: Cleaning Temp Files"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "----------------------------------------------------------------------------"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -318,14 +319,14 @@ TEMP_PATTERNS=(
 for pattern in "${TEMP_PATTERNS[@]}"; do
     FILES_FOUND=$(find . -name "$pattern" 2>/dev/null | wc -l)
     if [[ $FILES_FOUND -gt 0 ]]; then
-        echo "  → Removing $pattern files..."
+        echo "  -> Removing $pattern files..."
         find . -name "$pattern" -delete 2>/dev/null || true
-        echo -e "  ${GREEN}✓${NC} Removed $FILES_FOUND file(s)"
+        echo -e "  ${GREEN}[OK]${NC} Removed $FILES_FOUND file(s)"
     fi
 done
 
 echo ""
-echo "════════════════════════════════════════════════════════════════════════════"
-echo -e "${GREEN}✅ Cleanup Complete!${NC}"
-echo "════════════════════════════════════════════════════════════════════════════"
+echo "============================================================================"
+echo -e "${GREEN}[OK] Cleanup Complete!${NC}"
+echo "============================================================================"
 echo ""

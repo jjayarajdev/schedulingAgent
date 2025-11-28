@@ -24,11 +24,11 @@ NC='\033[0m'
 # AWS ACCOUNT SELECTION - Smart account detection and configuration
 # ============================================================================
 
-echo -e "${RED}════════════════════════════════════════════════════════════════════════════${NC}"
-echo -e "${RED}🧹 ProjectForce Advanced Voice Cleanup Script${NC}"
-echo -e "${RED}════════════════════════════════════════════════════════════════════════════${NC}"
+echo -e "${RED}============================================================================${NC}"
+echo -e "${RED}[CLEAN] ProjectForce Advanced Voice Cleanup Script${NC}"
+echo -e "${RED}============================================================================${NC}"
 echo ""
-echo -e "${CYAN}🔐 AWS ACCOUNT SELECTION${NC}"
+echo -e "${CYAN}[AUTH] AWS ACCOUNT SELECTION${NC}"
 echo ""
 
 # Get current/default profile
@@ -51,7 +51,7 @@ if [[ "$ACCOUNT_CHOICE" == "1" ]]; then
     AWS_PROFILE="$CURRENT_PROFILE"
     SELECTED_ACCOUNT_ID="$CURRENT_ACCOUNT"
     echo ""
-    echo -e "${GREEN}✓ Using account: ${SELECTED_ACCOUNT_ID}${NC}"
+    echo -e "${GREEN}[OK] Using account: ${SELECTED_ACCOUNT_ID}${NC}"
 else
     echo ""
     echo -e "${YELLOW}Enter the AWS Account ID you want to use:${NC}"
@@ -77,7 +77,7 @@ else
     done < <(aws configure list-profiles 2>/dev/null)
 
     if [[ -n "$FOUND_PROFILE" ]]; then
-        echo -e "${GREEN}✓ Found existing profile '${FOUND_PROFILE}' with account ${TARGET_ACCOUNT_ID}${NC}"
+        echo -e "${GREEN}[OK] Found existing profile '${FOUND_PROFILE}' with account ${TARGET_ACCOUNT_ID}${NC}"
         AWS_PROFILE="$FOUND_PROFILE"
         SELECTED_ACCOUNT_ID="$TARGET_ACCOUNT_ID"
     else
@@ -121,12 +121,12 @@ else
         VERIFY_ACCOUNT=$(aws sts get-caller-identity --profile "$NEW_PROFILE_NAME" --query Account --output text 2>/dev/null || echo "ERROR")
 
         if [[ "$VERIFY_ACCOUNT" == "$TARGET_ACCOUNT_ID" ]]; then
-            echo -e "${GREEN}✓ Profile '${NEW_PROFILE_NAME}' configured successfully!${NC}"
-            echo -e "${GREEN}✓ Verified account: ${VERIFY_ACCOUNT}${NC}"
+            echo -e "${GREEN}[OK] Profile '${NEW_PROFILE_NAME}' configured successfully!${NC}"
+            echo -e "${GREEN}[OK] Verified account: ${VERIFY_ACCOUNT}${NC}"
             AWS_PROFILE="$NEW_PROFILE_NAME"
             SELECTED_ACCOUNT_ID="$TARGET_ACCOUNT_ID"
         else
-            echo -e "${RED}❌ Credentials verification failed!${NC}"
+            echo -e "${RED}[FAIL] Credentials verification failed!${NC}"
             echo "   Expected account: $TARGET_ACCOUNT_ID"
             echo "   Got account: $VERIFY_ACCOUNT"
             exit 1
@@ -143,7 +143,7 @@ export AWS_PROFILE
 # Configuration
 # ============================================================================
 REGION="${AWS_REGION:-us-east-1}"
-ENVIRONMENT="dev"
+ENVIRONMENT="${ENVIRONMENT:-dev}"
 PREFIX="pf"
 
 # Lambda function names
@@ -182,22 +182,22 @@ get_account_id() {
 delete_lambda_function() {
     local FUNCTION_NAME=$1
 
-    echo -n "  → Checking $FUNCTION_NAME... "
+    echo -n "  -> Checking $FUNCTION_NAME... "
 
     # Check if function exists
     if aws_cmd lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" &>/dev/null; then
         echo ""
-        echo "  → Deleting $FUNCTION_NAME..."
+        echo "  -> Deleting $FUNCTION_NAME..."
 
         if aws_cmd lambda delete-function \
             --function-name "$FUNCTION_NAME" \
             --region "$REGION" 2>&1 | tee "./lambda-delete-$FUNCTION_NAME.log"; then
-            echo -e "  ${GREEN}✓${NC} Deleted $FUNCTION_NAME"
+            echo -e "  ${GREEN}[OK]${NC} Deleted $FUNCTION_NAME"
         else
-            echo -e "  ${RED}⊘${NC} Failed to delete $FUNCTION_NAME"
+            echo -e "  ${RED}[-]${NC} Failed to delete $FUNCTION_NAME"
         fi
     else
-        echo -e "${CYAN}⊘${NC} does not exist"
+        echo -e "${CYAN}[-]${NC} does not exist"
     fi
 }
 
@@ -205,15 +205,15 @@ delete_lambda_function() {
 delete_iam_role() {
     local ROLE_NAME=$1
 
-    echo -n "  → Checking $ROLE_NAME... "
+    echo -n "  -> Checking $ROLE_NAME... "
 
     # Check if role exists
     if aws_cmd iam get-role --role-name "$ROLE_NAME" &>/dev/null; then
         echo ""
-        echo "  → Deleting $ROLE_NAME..."
+        echo "  -> Deleting $ROLE_NAME..."
 
         # Step 1: Detach all attached managed policies
-        echo "    → Detaching managed policies..."
+        echo "    -> Detaching managed policies..."
         ATTACHED_POLICIES=$(aws_cmd iam list-attached-role-policies \
             --role-name "$ROLE_NAME" \
             --query 'AttachedPolicies[].PolicyArn' \
@@ -226,13 +226,13 @@ delete_iam_role() {
                     --role-name "$ROLE_NAME" \
                     --policy-arn "$POLICY_ARN" &>/dev/null || true
             done
-            echo "    ✓ Managed policies detached"
+            echo "    [OK] Managed policies detached"
         else
-            echo "    ℹ️  No managed policies to detach"
+            echo "    [INFO]  No managed policies to detach"
         fi
 
         # Step 2: Delete all inline policies
-        echo "    → Deleting inline policies..."
+        echo "    -> Deleting inline policies..."
         INLINE_POLICIES=$(aws_cmd iam list-role-policies \
             --role-name "$ROLE_NAME" \
             --query 'PolicyNames[]' \
@@ -245,20 +245,20 @@ delete_iam_role() {
                     --role-name "$ROLE_NAME" \
                     --policy-name "$POLICY_NAME" &>/dev/null || true
             done
-            echo "    ✓ Inline policies deleted"
+            echo "    [OK] Inline policies deleted"
         else
-            echo "    ℹ️  No inline policies to delete"
+            echo "    [INFO]  No inline policies to delete"
         fi
 
         # Step 3: Delete the role itself
-        echo "    → Deleting role..."
+        echo "    -> Deleting role..."
         if aws_cmd iam delete-role --role-name "$ROLE_NAME" &>/dev/null; then
-            echo -e "  ${GREEN}✓${NC} Deleted $ROLE_NAME"
+            echo -e "  ${GREEN}[OK]${NC} Deleted $ROLE_NAME"
         else
-            echo -e "  ${RED}⊘${NC} Failed to delete $ROLE_NAME"
+            echo -e "  ${RED}[-]${NC} Failed to delete $ROLE_NAME"
         fi
     else
-        echo -e "${CYAN}⊘${NC} does not exist"
+        echo -e "${CYAN}[-]${NC} does not exist"
     fi
 }
 
@@ -266,7 +266,7 @@ delete_iam_role() {
 delete_log_group() {
     local LOG_GROUP=$1
 
-    echo -n "  → Checking $LOG_GROUP... "
+    echo -n "  -> Checking $LOG_GROUP... "
 
     # Check if log group exists
     if aws_cmd logs describe-log-groups \
@@ -276,17 +276,17 @@ delete_log_group() {
         --output text 2>/dev/null | grep -q "$LOG_GROUP"; then
 
         echo ""
-        echo "  → Deleting $LOG_GROUP..."
+        echo "  -> Deleting $LOG_GROUP..."
 
         if aws_cmd logs delete-log-group \
             --log-group-name "$LOG_GROUP" \
             --region "$REGION" 2>&1 | tee "./log-delete-$(basename $LOG_GROUP).log"; then
-            echo -e "  ${GREEN}✓${NC} Deleted $LOG_GROUP"
+            echo -e "  ${GREEN}[OK]${NC} Deleted $LOG_GROUP"
         else
-            echo -e "  ${RED}⊘${NC} Failed to delete $LOG_GROUP"
+            echo -e "  ${RED}[-]${NC} Failed to delete $LOG_GROUP"
         fi
     else
-        echo -e "${CYAN}⊘${NC} does not exist"
+        echo -e "${CYAN}[-]${NC} does not exist"
     fi
 }
 
@@ -294,22 +294,22 @@ delete_log_group() {
 delete_dynamodb_table() {
     local TABLE_NAME=$1
 
-    echo -n "  → Checking $TABLE_NAME... "
+    echo -n "  -> Checking $TABLE_NAME... "
 
     # Check if table exists
     if aws_cmd dynamodb describe-table --table-name "$TABLE_NAME" --region "$REGION" &>/dev/null; then
         echo ""
-        echo "  → Deleting $TABLE_NAME..."
+        echo "  -> Deleting $TABLE_NAME..."
 
         if aws_cmd dynamodb delete-table \
             --table-name "$TABLE_NAME" \
             --region "$REGION" 2>&1 | tee "./dynamodb-delete-$TABLE_NAME.log"; then
-            echo -e "  ${GREEN}✓${NC} Deleted $TABLE_NAME"
+            echo -e "  ${GREEN}[OK]${NC} Deleted $TABLE_NAME"
         else
-            echo -e "  ${RED}⊘${NC} Failed to delete $TABLE_NAME"
+            echo -e "  ${RED}[-]${NC} Failed to delete $TABLE_NAME"
         fi
     else
-        echo -e "${CYAN}⊘${NC} does not exist"
+        echo -e "${CYAN}[-]${NC} does not exist"
     fi
 }
 
@@ -319,8 +319,9 @@ delete_dynamodb_table() {
 
 echo -e "${YELLOW}WARNING: This will delete:${NC}"
 echo "  - Lambda functions: $LEX_FULFILLMENT_FUNCTION, $VOICE_BRIDGE_FUNCTION, $CUSTOMER_LOOKUP_FUNCTION"
-echo "  - IAM roles: $LEX_FULFILLMENT_ROLE, $VOICE_BRIDGE_ROLE, $CUSTOMER_LOOKUP_ROLE"
+echo "  - IAM roles: $LEX_FULFILLMENT_ROLE, $VOICE_BRIDGE_ROLE, $CUSTOMER_LOOKUP_ROLE, pf-lex-bot-role-${ENVIRONMENT}"
 echo "  - DynamoDB tables: $CUSTOMER_TABLE"
+echo "  - Lex bot: pf-scheduling-assistant-${ENVIRONMENT}"
 echo "  - CloudWatch Log Groups for all functions"
 echo ""
 echo -e "${RED}This action cannot be undone!${NC}"
@@ -338,9 +339,9 @@ echo ""
 # Step 1: Delete Lambda Functions
 # ============================================================================
 
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 echo -e "${YELLOW}Step 1: Deleting Lambda Functions${NC}"
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 
 delete_lambda_function "$LEX_FULFILLMENT_FUNCTION"
 delete_lambda_function "$VOICE_BRIDGE_FUNCTION"
@@ -352,9 +353,9 @@ echo ""
 # Step 2: Delete IAM Roles
 # ============================================================================
 
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 echo -e "${YELLOW}Step 2: Deleting IAM Roles${NC}"
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 
 delete_iam_role "$LEX_FULFILLMENT_ROLE"
 delete_iam_role "$VOICE_BRIDGE_ROLE"
@@ -366,9 +367,9 @@ echo ""
 # Step 3: Delete CloudWatch Log Groups
 # ============================================================================
 
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 echo -e "${YELLOW}Step 3: Deleting CloudWatch Log Groups${NC}"
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 
 delete_log_group "$LEX_FULFILLMENT_LOG_GROUP"
 delete_log_group "$VOICE_BRIDGE_LOG_GROUP"
@@ -380,11 +381,53 @@ echo ""
 # Step 3.5: Delete DynamoDB Tables
 # ============================================================================
 
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 echo -e "${YELLOW}Step 3.5: Deleting DynamoDB Tables${NC}"
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 
 delete_dynamodb_table "$CUSTOMER_TABLE"
+
+echo ""
+
+# ============================================================================
+# Step 3.6: Delete Lex Bot
+# ============================================================================
+
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo -e "${YELLOW}Step 3.6: Deleting Lex Bot${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+
+LEX_BOT_NAME="pf-scheduling-assistant-${ENVIRONMENT}"
+echo "  -> Checking for Lex bot: $LEX_BOT_NAME..."
+
+LEX_BOT_ID=$(aws_cmd lexv2-models list-bots --region "$REGION" --query "botSummaries[?botName=='${LEX_BOT_NAME}'].botId" --output text 2>/dev/null || echo "")
+
+if [[ -n "$LEX_BOT_ID" && "$LEX_BOT_ID" != "None" ]]; then
+    echo "  -> Found bot ID: $LEX_BOT_ID"
+    echo "  -> Deleting bot aliases..."
+
+    # Delete all bot aliases first
+    ALIAS_IDS=$(aws_cmd lexv2-models list-bot-aliases --bot-id "$LEX_BOT_ID" --region "$REGION" --query "botAliasSummaries[].botAliasId" --output text 2>/dev/null || echo "")
+    for ALIAS_ID in $ALIAS_IDS; do
+        if [[ -n "$ALIAS_ID" && "$ALIAS_ID" != "None" ]]; then
+            echo "    Deleting alias: $ALIAS_ID"
+            aws_cmd lexv2-models delete-bot-alias --bot-id "$LEX_BOT_ID" --bot-alias-id "$ALIAS_ID" --region "$REGION" --skip-resource-in-use-check &>/dev/null || true
+        fi
+    done
+
+    echo "  -> Deleting bot..."
+    if aws_cmd lexv2-models delete-bot --bot-id "$LEX_BOT_ID" --region "$REGION" --skip-resource-in-use-check &>/dev/null; then
+        echo "  [OK] Deleted Lex bot: $LEX_BOT_NAME"
+    else
+        echo "  [WARN] Could not delete Lex bot (may still be in use)"
+    fi
+else
+    echo "  [SKIP] Lex bot does not exist"
+fi
+
+# Delete Lex bot IAM role
+LEX_BOT_ROLE_NAME="pf-lex-bot-role-${ENVIRONMENT}"
+delete_iam_role "$LEX_BOT_ROLE_NAME"
 
 echo ""
 
@@ -392,46 +435,46 @@ echo ""
 # Step 4: Clean up local deployment files
 # ============================================================================
 
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 echo -e "${YELLOW}Step 4: Cleaning up local files${NC}"
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 
 # Remove Lambda deployment packages
-echo "  → Removing Lambda deployment packages..."
+echo "  -> Removing Lambda deployment packages..."
 
 if [ -d "lambda/lex-fulfillment" ]; then
     rm -f lambda/lex-fulfillment/function.zip
     rm -rf lambda/lex-fulfillment/package
-    echo "  ✓ Removed: lambda/lex-fulfillment/function.zip"
+    echo "  [OK] Removed: lambda/lex-fulfillment/function.zip"
 fi
 
 if [ -d "lambda/voice-bedrock-bridge" ]; then
     rm -f lambda/voice-bedrock-bridge/function.zip
     rm -rf lambda/voice-bedrock-bridge/package
-    echo "  ✓ Removed: lambda/voice-bedrock-bridge/function.zip"
+    echo "  [OK] Removed: lambda/voice-bedrock-bridge/function.zip"
 fi
 
 if [ -d "lambda/customer-lookup" ]; then
     rm -f lambda/customer-lookup/function.zip
     rm -rf lambda/customer-lookup/package
-    echo "  ✓ Removed: lambda/customer-lookup/function.zip"
+    echo "  [OK] Removed: lambda/customer-lookup/function.zip"
 fi
 
 # Remove log files from current directory
-echo "  → Removing log files..."
+echo "  -> Removing log files..."
 rm -f ./lambda-*.log
 rm -f ./iam-*.log
 rm -f ./log-*.log
 rm -f ./pip-install-*.log
 rm -f ./trust-policy-*.json
 rm -f ./policy-*.json
-echo "  ✓ Removed: All cleanup log files"
+echo "  [OK] Removed: All cleanup log files"
 
 # Clean up temp files from deployment (if any remain)
-echo "  → Cleaning deployment temp files..."
+echo "  -> Cleaning deployment temp files..."
 find . -name "trust-policy-*.json" -delete 2>/dev/null || true
 find . -name "policy-*.json" -delete 2>/dev/null || true
-echo "  ✓ Removed: All temp policy files"
+echo "  [OK] Removed: All temp policy files"
 
 echo ""
 
@@ -439,38 +482,38 @@ echo ""
 # Cleanup Summary
 # ============================================================================
 
-echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}✅ Cleanup Complete!${NC}"
-echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}============================================================================${NC}"
+echo -e "${GREEN}[OK] Cleanup Complete!${NC}"
+echo -e "${BLUE}============================================================================${NC}"
 echo ""
 
 echo "What was deleted:"
-echo "  ✅ Lambda Functions (3):"
+echo "  [OK] Lambda Functions (3):"
 echo "     - $LEX_FULFILLMENT_FUNCTION"
 echo "     - $VOICE_BRIDGE_FUNCTION"
 echo "     - $CUSTOMER_LOOKUP_FUNCTION"
 echo ""
-echo "  ✅ IAM Roles (3):"
+echo "  [OK] IAM Roles (3):"
 echo "     - $LEX_FULFILLMENT_ROLE"
 echo "     - $VOICE_BRIDGE_ROLE"
 echo "     - $CUSTOMER_LOOKUP_ROLE"
 echo ""
-echo "  ✅ DynamoDB Tables (1):"
+echo "  [OK] DynamoDB Tables (1):"
 echo "     - $CUSTOMER_TABLE"
 echo ""
-echo "  ✅ CloudWatch Log Groups (3):"
+echo "  [OK] CloudWatch Log Groups (3):"
 echo "     - $LEX_FULFILLMENT_LOG_GROUP"
 echo "     - $VOICE_BRIDGE_LOG_GROUP"
 echo "     - $CUSTOMER_LOOKUP_LOG_GROUP"
 echo ""
-echo "  ✅ Local deployment files and logs"
+echo "  [OK] Local deployment files and logs"
 echo ""
 
 echo -e "${CYAN}What remains unchanged:${NC}"
-echo "  ✅ Lex bot configuration (if deployed)"
-echo "  ✅ AWS Connect instance (if deployed)"
-echo "  ✅ Phone number configuration (if claimed)"
-echo "  ✅ Secrets Manager secrets"
+echo "  [OK] Lex bot configuration (if deployed)"
+echo "  [OK] AWS Connect instance (if deployed)"
+echo "  [OK] Phone number configuration (if claimed)"
+echo "  [OK] Secrets Manager secrets"
 echo ""
 
 echo -e "${GREEN}Voice Lambda cleanup completed successfully!${NC}"

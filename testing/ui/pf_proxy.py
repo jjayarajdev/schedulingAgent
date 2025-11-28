@@ -20,15 +20,17 @@ CORS(app)  # Enable CORS for all routes
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Environment-based API URLs (matches lambda/scheduling-actions/config.py)
+# Environment-based configuration
 ENVIRONMENT = os.getenv('ENVIRONMENT', 'dev')
+AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+
 API_BASE_URLS = {
     "dev": "https://api-cx-portal.dev.projectsforce.com",
     "staging": "https://api-cx-portal.staging.projectsforce.com",
     "prod": "https://api-cx-portal.projectsforce.com"
 }
 PF_API_BASE = API_BASE_URLS.get(ENVIRONMENT, API_BASE_URLS["dev"])
-logger.info(f"🌍 Environment: {ENVIRONMENT} | API Base: {PF_API_BASE}")
+logger.info(f"🌍 Environment: {ENVIRONMENT} | Region: {AWS_REGION} | API Base: {PF_API_BASE}")
 
 # ============================================================================
 # Conversation History Management
@@ -58,7 +60,7 @@ def get_stored_token():
     # Try to load from Secrets Manager on first call
     try:
         import boto3
-        secrets_client = boto3.client('secretsmanager', region_name='us-east-1')
+        secrets_client = boto3.client('secretsmanager', region_name=AWS_REGION)
         response = secrets_client.get_secret_value(SecretId='projectforce/api/credentials')
         secret = json.loads(response['SecretString'])
         token = secret.get('bearer_token', '')
@@ -579,7 +581,7 @@ For filters: Match natural language to field values (e.g., "scheduled" → "Sche
 Respond ONLY with the JSON object, nothing else."""
 
     try:
-        bedrock_runtime = boto3.client('bedrock-runtime', region_name='us-east-1')
+        bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
         response = bedrock_runtime.invoke_model(
             modelId='us.anthropic.claude-3-5-sonnet-20241022-v2:0',
             body=json.dumps({
@@ -625,7 +627,7 @@ def call_lambda_directly(action, params):
     """
     import boto3
 
-    lambda_client = boto3.client('lambda', region_name='us-east-1')
+    lambda_client = boto3.client('lambda', region_name=AWS_REGION)
 
     # Map action to Lambda function
     lambda_functions = {
@@ -722,7 +724,7 @@ def login():
         password = data.get('password', '')
         logger.info(f"Login request for: {email}")
 
-        secrets_client = boto3.client('secretsmanager', region_name='us-east-1')
+        secrets_client = boto3.client('secretsmanager', region_name=AWS_REGION)
 
         # Step 1: Try to load existing token from Secrets Manager
         try:
@@ -878,7 +880,7 @@ def api_set_token():
         if update_secrets:
             try:
                 import boto3
-                secrets_client = boto3.client('secretsmanager', region_name='us-east-1')
+                secrets_client = boto3.client('secretsmanager', region_name=AWS_REGION)
 
                 # Get existing secret to preserve other fields
                 try:
@@ -989,7 +991,7 @@ def save_token_to_secrets():
         import boto3
         import time
 
-        secrets_client = boto3.client('secretsmanager', region_name='us-east-1')
+        secrets_client = boto3.client('secretsmanager', region_name=AWS_REGION)
         # Use environment-aware URL
         api_url = PF_API_BASE
         logger.info(f"📝 Using API URL for {ENVIRONMENT}: {api_url}")
@@ -1128,7 +1130,7 @@ def invoke_agent():
 
         # Initialize Bedrock client
         init_start = time.time()
-        bedrock_client = boto3.client('bedrock-agent-runtime', region_name='us-east-1')
+        bedrock_client = boto3.client('bedrock-agent-runtime', region_name=AWS_REGION)
         timing['boto3_init'] = time.time() - init_start
 
         # Determine routing based on config
@@ -1142,7 +1144,7 @@ def invoke_agent():
 
         try:
             lambda_start = time.time()
-            lambda_client = boto3.client('lambda', region_name='us-east-1')
+            lambda_client = boto3.client('lambda', region_name=AWS_REGION)
 
             # Prepare orchestrator event (API Gateway format)
             request_body = {

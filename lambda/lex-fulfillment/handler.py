@@ -302,6 +302,13 @@ def handle_project_inquiry(
         customer_id = credentials['user_id']
         logger.info(f"Using customer ID from Secrets Manager: {customer_id}")
 
+    # If still no customer_id (Secrets Manager was empty), ask user
+    if not customer_id:
+        return LexResponseBuilder.build_response(
+            event,
+            "I'll need your customer ID to look up your projects. What's your customer ID?"
+        )
+
     logger.info(f"Handling ProjectInquiry for customer {customer_id}")
 
     # Extract status filter from slots if provided
@@ -411,10 +418,13 @@ def handle_check_availability(
     Returns:
         Lex response with availability or error
     """
-    # Use default customer ID if not provided
-    if not customer_id and DEFAULT_CUSTOMER_ID:
-        customer_id = DEFAULT_CUSTOMER_ID
-        logger.info(f"Using default customer ID: {customer_id}")
+    # Get credentials from Secrets Manager for customer_id fallback
+    credentials = get_credentials_from_secrets()
+
+    # Use user_id from Secrets Manager if customer_id not provided
+    if not customer_id:
+        customer_id = credentials['user_id']
+        logger.info(f"Using customer ID from Secrets Manager: {customer_id}")
 
     logger.info(f"Handling CheckAvailability for customer {customer_id}")
 
@@ -503,15 +513,19 @@ def handle_project_status_inquiry(
     session_attributes = event.get('sessionState', {}).get('sessionAttributes', {}) or {}
     slots = event.get('sessionState', {}).get('intent', {}).get('slots', {})
 
-    # Use default customer ID if not provided
-    if not customer_id and DEFAULT_CUSTOMER_ID:
-        customer_id = DEFAULT_CUSTOMER_ID
-        logger.info(f"Using default customer ID: {customer_id}")
+    # Get credentials from Secrets Manager for customer_id fallback
+    credentials = get_credentials_from_secrets()
 
+    # Use user_id from Secrets Manager if customer_id not provided
+    if not customer_id:
+        customer_id = credentials['user_id']
+        logger.info(f"Using customer ID from Secrets Manager: {customer_id}")
+
+    # If still no customer_id (Secrets Manager was empty), ask user
     if not customer_id:
         return LexResponseBuilder.build_response(
             event,
-            "I'll need your customer ID to look up project status. What's your customer ID?"
+            "I'll need your customer ID to look up project details. What's your customer ID?"
         )
 
     # Extract project_id and status filter from slots
@@ -557,8 +571,7 @@ def handle_project_status_inquiry(
                 # Direct project ID or number
                 project_id = project_id_raw
 
-        # Get credentials from Secrets Manager
-        credentials = get_credentials_from_secrets()
+        # Use credentials already fetched at start of function
         client_id = credentials['client_id']
         pf_token = credentials['bearer_token']
 
@@ -706,11 +719,15 @@ def handle_appointment_inquiry(
     """
     session_attributes = event.get('sessionState', {}).get('sessionAttributes', {})
 
-    # Use default customer ID if not provided
-    if not customer_id and DEFAULT_CUSTOMER_ID:
-        customer_id = DEFAULT_CUSTOMER_ID
-        logger.info(f"Using default customer ID: {customer_id}")
+    # Get credentials from Secrets Manager
+    credentials = get_credentials_from_secrets()
 
+    # Use user_id from Secrets Manager if customer_id not provided
+    if not customer_id:
+        customer_id = credentials['user_id']
+        logger.info(f"Using customer ID from Secrets Manager: {customer_id}")
+
+    # If still no customer_id (Secrets Manager was empty), ask user
     if not customer_id:
         return LexResponseBuilder.build_response(
             event,
@@ -718,8 +735,6 @@ def handle_appointment_inquiry(
         )
 
     try:
-        # Get credentials from Secrets Manager
-        credentials = get_credentials_from_secrets()
         client_id = credentials['client_id']
         pf_token = credentials['bearer_token']
 
@@ -803,10 +818,18 @@ def handle_weather_inquiry(
     try:
         # Extract location from slots if provided
         slots = event.get('sessionState', {}).get('intent', {}).get('slots', {})
+        location_slot = slots.get('location', {}).get('value', {}) if slots.get('location') else None
+        location = location_slot.get('interpretedValue') if location_slot else None
 
         # Get bearer token from Secrets Manager
         credentials = get_credentials_from_secrets()
         pf_token = credentials['bearer_token']
+
+        # Build parameters - include location if provided
+        parameters = []
+        if location:
+            parameters.append({'name': 'location', 'value': location})
+            logger.info(f"Weather query for location: {location}")
 
         # Call information-actions Lambda for weather
         payload = {
@@ -816,7 +839,7 @@ def handle_weather_inquiry(
             'sessionAttributes': {
                 'pf_bearer_token': pf_token
             },
-            'parameters': []
+            'parameters': parameters
         }
 
         logger.debug(f"Invoking information-actions Lambda for weather")
@@ -924,14 +947,24 @@ def hand_off_to_bedrock(
         pf_client_id = credentials['client_id']
         pf_token = credentials['bearer_token']
 
+        # Get session attributes for context (e.g., last_project_ids)
+        session_attributes = event.get('sessionState', {}).get('sessionAttributes', {}) or {}
+
         # Decide which routing to use based on feature flag
         if USE_ORCHESTRATOR_FOR_VOICE:
             # NEW: Route through intelligent orchestrator (Claude-based)
             logger.info(f"Routing through pf-orchestrator (intelligent Claude routing)")
 
+            # Build context from session (for ordinal references like "second project")
+            context_parts = []
+            if session_attributes.get('last_project_ids'):
+                project_ids = session_attributes['last_project_ids'].split(',')
+                context_parts.append(f"[Context: User's project IDs from last query: {', '.join(project_ids)}. 'first'=ID {project_ids[0] if project_ids else 'none'}, 'second'=ID {project_ids[1] if len(project_ids) > 1 else 'none'}]")
+
             # Wrap input with voice-specific instructions for natural responses
-            voice_enhanced_message = wrap_for_voice(input_text)
-            logger.info(f"Voice-enhanced message prepared for Claude")
+            context_prefix = ' '.join(context_parts) + ' ' if context_parts else ''
+            voice_enhanced_message = wrap_for_voice(context_prefix + input_text)
+            logger.info(f"Voice-enhanced message prepared for Claude with context")
 
             # Build orchestrator payload
             payload = {
@@ -941,7 +974,8 @@ def hand_off_to_bedrock(
                     'pf_token': pf_token,
                     'pf_client_id': pf_client_id,
                     'pf_user_id': customer_id or '0',
-                    'channel': 'voice'
+                    'channel': 'voice',
+                    'session_context': session_attributes  # Pass Lex session context
                 })
             }
 
@@ -1087,7 +1121,8 @@ def _format_projects_for_voice(response_body: Dict[str, Any]) -> str:
 
         # Group by status for smart summary
         scheduled = [p for p in projects if 'scheduled' in p.get('status', '').lower()]
-        needs_scheduling = [p for p in projects if 'new' in p.get('status', '').lower() or 'customer' in p.get('status', '').lower()]
+        # Everything not scheduled needs scheduling
+        not_scheduled = [p for p in projects if 'scheduled' not in p.get('status', '').lower()]
 
         if project_count == 1:
             p = projects[0]
@@ -1105,16 +1140,16 @@ def _format_projects_for_voice(response_body: Dict[str, Any]) -> str:
 
         if scheduled:
             message += f"{len(scheduled)} already scheduled"
-            if needs_scheduling:
-                message += f", and {len(needs_scheduling)} waiting to be scheduled. "
+            if not_scheduled:
+                message += f", and {len(not_scheduled)} waiting to be scheduled. "
             else:
                 message += ". "
-        elif needs_scheduling:
-            message += f"{len(needs_scheduling)} need scheduling. "
+        elif not_scheduled:
+            message += f"{len(not_scheduled)} need scheduling. "
 
         # Highlight the most actionable items (max 2)
-        if needs_scheduling:
-            top_project = needs_scheduling[0]
+        if not_scheduled:
+            top_project = not_scheduled[0]
             message += f"Your {top_project.get('category', 'first')} project is ready to schedule. "
 
         message += "Would you like details on any of these, or shall we schedule one?"

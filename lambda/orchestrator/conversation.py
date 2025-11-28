@@ -5,6 +5,7 @@ Replaces Redis/ElastiCache for serverless session storage
 import json
 import time
 import logging
+import os
 from typing import List, Dict, Optional
 import boto3
 from botocore.exceptions import ClientError
@@ -21,14 +22,16 @@ class ConversationManager:
         self.config = get_config()
         self._dynamodb = None
         self._table = None
+        # Get table name from environment (set by deploy script)
+        self.table_name = os.environ.get('DYNAMODB_TABLE', 'pf-sessions-dev')
 
     @property
     def table(self):
         """Lazy-load DynamoDB table (reused across Lambda invocations)"""
         if self._table is None:
-            self._dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
-            self._table = self._dynamodb.Table('pf-sessions-dev')
-            logger.info(f"DynamoDB table connected: pf-sessions-dev")
+            self._dynamodb = boto3.resource('dynamodb', region_name=self.config.region)
+            self._table = self._dynamodb.Table(self.table_name)
+            logger.info(f"DynamoDB table connected: {self.table_name}")
         return self._table
 
     def get_conversation_history(self, session_id: str, limit: Optional[int] = None) -> List[Dict]:
