@@ -1005,7 +1005,9 @@ def save_token_to_secrets():
         if not access_token or len(access_token) < 100:
             return jsonify({"error": "Invalid token"}), 400
 
-        logger.info(f"Saving token to Secrets Manager (length: {len(access_token)})")
+        # ALSO set token in memory (same as /api/set-token)
+        set_stored_token(access_token)
+        logger.info(f"Saving token to Secrets Manager AND memory (length: {len(access_token)})")
 
         import boto3
         import time
@@ -1257,6 +1259,11 @@ def invoke_agent():
                 }
             )
 
+            # Include projects array if returned by orchestrator (for welcome/list_projects)
+            projects = body.get('projects', [])
+            if projects:
+                logger.info(f"📋 Returning {len(projects)} projects to UI")
+
             return jsonify({
                 "response": str(response_text),
                 "agent_name": agent_name_from_orch,
@@ -1264,7 +1271,8 @@ def invoke_agent():
                 "action": action,
                 "session_id": session_id,
                 "performance": timing,
-                "orchestrator": True
+                "orchestrator": True,
+                "projects": projects  # Pass through projects for UI rendering
             })
 
         except Exception as e:
