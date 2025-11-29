@@ -402,7 +402,7 @@ echo -e "${YELLOW}Opening Browser${NC}"
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
 # Open the browser
-URL="http://localhost:$HTTP_PORT/index.local.html"
+URL="http://localhost:$HTTP_PORT/index_advanced.local.html"
 echo "  → Opening $URL..."
 open_browser "$URL"
 echo -e "  ${GREEN}✓${NC} Browser launched"
@@ -419,7 +419,7 @@ echo "  • Web Server:     http://localhost:$HTTP_PORT (PID: $HTTP_PID)"
 echo ""
 
 echo -e "${CYAN}🌐 Access Points:${NC}"
-echo "  • LOCAL (Proxy):  http://localhost:$HTTP_PORT/index.local.html"
+echo "  • LOCAL (Proxy):  http://localhost:$HTTP_PORT/index_advanced.local.html"
 echo "  • AWS (Gateway):  http://localhost:$HTTP_PORT/index.aws.html"
 echo "  • Auth Demo:      http://localhost:$HTTP_PORT/pf_auth_demo.html"
 echo "  • Test UI:        http://localhost:$HTTP_PORT/test_ui.html"

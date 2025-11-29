@@ -505,8 +505,11 @@
     <!-- Header -->
     <div class="header">
         <div class="header-content">
-            <div class="logo">ProjectForce Agent Demo</div>
-            <div class="user-badge" id="user-display">Not Logged In</div>
+            <div class="logo">ProjectForce Agent Demo (LOCAL)</div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <button onclick="promptSetToken()" style="padding: 8px 16px; border-radius: 20px; border: 1px solid #0066cc; background: white; color: #0066cc; cursor: pointer; font-size: 14px;">Set Token</button>
+                <div class="user-badge" id="user-display">Not Logged In</div>
+            </div>
         </div>
     </div>
 
@@ -533,7 +536,7 @@
             <div class="chat-panel">
                 <div class="chat-messages" id="chat-messages">
                     <div class="empty-state">
-                        <div style="font-size: 36px; margin-bottom: 16px; color: #667;">[Chat]</div>
+                        <div style="font-size: 48px; margin-bottom: 16px;">💭</div>
                         <p>Start chatting with the agent!</p>
                         <p style="margin-top: 12px; color: #ccc;">Try: "Show me my projects"</p>
                     </div>
@@ -563,7 +566,6 @@
         let accessToken = null;
         let clientId = '09PF05VD';
         let userId = '1646085';
-        let userName = '';  // User's display name for personalized greetings
         let sessionId = 'session-' + Date.now();
 
         // Switch between views
@@ -575,7 +577,7 @@
             event.target.classList.add('active');
         }
 
-        // Credential Manager - Load saved credentials (tokens only, not userName)
+        // Credential Manager - Load saved credentials
         function loadSavedCredentials() {
             const savedCreds = localStorage.getItem('pf_credentials');
             if (savedCreds) {
@@ -584,8 +586,13 @@
                     accessToken = creds.accessToken;
                     clientId = creds.clientId;
                     userId = creds.userId;
-                    // userName will be fetched fresh from login/refresh response
-                    console.log('[OK] Loaded saved credentials from localStorage');
+                    console.log('Loaded saved credentials from localStorage');
+
+                    // Also sync to pf_proxy on load
+                    if (accessToken && accessToken.length > 50) {
+                        syncTokenToProxy(accessToken);
+                        updateUIStatus(`User: ${userId}`, true);
+                    }
                     return true;
                 } catch (e) {
                     console.error('Failed to parse saved credentials:', e);
@@ -596,7 +603,7 @@
             return false;
         }
 
-        // Credential Manager - Save credentials (tokens only)
+        // Credential Manager - Save credentials
         function saveCredentials() {
             const creds = {
                 accessToken: accessToken,
@@ -605,7 +612,77 @@
                 timestamp: Date.now()
             };
             localStorage.setItem('pf_credentials', JSON.stringify(creds));
-            console.log('[SAVE] Credentials saved to localStorage');
+            console.log('Credentials saved to localStorage');
+
+            // Also sync token to pf_proxy for Lambda calls
+            syncTokenToProxy(accessToken);
+        }
+
+        // Sync token to pf_proxy (so Lambda uses this token, not Secrets Manager)
+        async function syncTokenToProxy(token) {
+            if (!token || token.length < 50) return;
+            try {
+                const response = await fetch(`${API_URL.replace('/api', '')}/api/set-token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: token })
+                });
+                if (response.ok) {
+                    console.log('Token synced to pf_proxy');
+                }
+            } catch (e) {
+                console.log('Could not sync to pf_proxy:', e.message);
+            }
+        }
+
+        // Manual token entry (for when auto-login fails)
+        async function promptSetToken() {
+            const token = prompt('Paste your ProjectForce bearer token from browser:');
+            if (token && token.length > 50) {
+                accessToken = token;
+
+                // Save to localStorage
+                const creds = { accessToken, clientId, userId, timestamp: Date.now() };
+                localStorage.setItem('pf_credentials', JSON.stringify(creds));
+
+                // Sync to pf_proxy AND Secrets Manager
+                try {
+                    const response = await fetch(`${API_URL.replace('/api', '')}/api/set-token`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token: token, update_secrets: true })
+                    });
+                    const result = await response.json();
+
+                    if (result.success) {
+                        updateUIStatus(`User: ${userId}`, true);
+                        if (result.secrets_manager) {
+                            alert('Token saved to:\n- Browser localStorage\n- pf_proxy memory\n- AWS Secrets Manager (for voice)\n\nBoth web UI and voice calls will use this token!');
+                        } else {
+                            alert(`Token saved to localStorage and pf_proxy.\n\nSecrets Manager update failed: ${result.secrets_error || 'Unknown error'}\n\nVoice calls may not work.`);
+                        }
+                        loadProjects();
+                    } else {
+                        alert('Failed to save token: ' + (result.error || 'Unknown error'));
+                    }
+                } catch (e) {
+                    // pf_proxy not running, just save to localStorage
+                    updateUIStatus(`User: ${userId}`, true);
+                    alert('Token saved to localStorage only.\n\npf_proxy not running - restart webapp to sync.');
+                    loadProjects();
+                }
+            } else if (token) {
+                alert('Invalid token (too short). Please paste the full bearer token.');
+            }
+        }
+
+        function updateUIStatus(message, success) {
+            const badge = document.querySelector('.user-badge');
+            if (badge) {
+                badge.textContent = message;
+                badge.style.background = success ? '#d4edda' : '#f8d7da';
+                badge.style.color = success ? '#155724' : '#721c24';
+            }
         }
 
         // Credential Manager - Clear credentials (logout)
@@ -614,8 +691,7 @@
             accessToken = null;
             clientId = '09PF05VD';
             userId = '1646085';
-            userName = '';  // Clear user name
-            console.log('[CLEAR] Credentials cleared from localStorage');
+            console.log('🗑️ Credentials cleared from localStorage');
             // Reload page to force re-login
             window.location.reload();
         }
@@ -627,19 +703,17 @@
                 document.getElementById('user-display').textContent = `User: ${userId} (cached)`;
 
                 // Check if token is still valid by refreshing it
-                console.log('[REFRESH] Checking token validity...');
+                console.log('🔄 Checking token validity...');
                 const refreshed = await refreshToken();
                 if (refreshed) {
-                    console.log('[OK] Token refreshed on startup, userName=' + userName);
-                    document.getElementById('user-display').textContent = userName ? `User: ${userName}` : `User: ${userId} (refreshed)`;
+                    console.log('✅ Token refreshed on startup');
+                    document.getElementById('user-display').textContent = `User: ${userId} (refreshed)`;
                 } else {
-                    console.warn('[WARN] Token refresh failed, using cached token');
+                    console.warn('⚠️ Token refresh failed, using cached token');
                     document.getElementById('user-display').textContent = `User: ${userId} (cached - may be expired)`;
                 }
 
-                // Send welcome request with personalized greeting
-                console.log('[WELCOME] Sending welcome with userName=' + userName);
-                sendWelcomeRequest();
+                loadProjects();
                 return;
             }
 
@@ -661,10 +735,8 @@
                     if (data.user) {
                         clientId = data.user.client_id;
                         userId = data.user.customer_id;
-                        // Extract user name if available (first_name, name, or full_name)
-                        userName = data.user.first_name || data.user.name || data.user.full_name || '';
                     }
-                    document.getElementById('user-display').textContent = userName ? `User: ${userName}` : `User: ${userId}`;
+                    document.getElementById('user-display').textContent = `User: ${userId}`;
 
                     // Save credentials to localStorage
                     saveCredentials();
@@ -680,62 +752,15 @@
                                 customer_id: userId
                             })
                         });
-                        console.log('[OK] Initial token saved to Secrets Manager');
+                        console.log('✅ Initial token saved to Secrets Manager');
                     } catch (e) {
-                        console.warn('[WARN] Failed to save initial token to Secrets Manager:', e);
+                        console.warn('⚠️ Failed to save initial token to Secrets Manager:', e);
                     }
 
-                    // Send welcome request with personalized greeting
-                    sendWelcomeRequest();
+                    loadProjects();
                 }
             } catch (error) {
                 console.error('Login failed:', error);
-            }
-        }
-
-        // Send welcome request after login to get personalized greeting
-        async function sendWelcomeRequest() {
-            console.log('[WELCOME] Sending welcome request...');
-            try {
-                const response = await fetch(`${API_URL}/invoke-agent`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        message: '__WELCOME__',
-                        session_id: sessionId,
-                        pf_token: accessToken,
-                        pf_client_id: clientId,
-                        pf_user_id: userId,
-                        pf_user_name: userName
-                    })
-                });
-
-                const data = await response.json();
-                console.log('[WELCOME] Welcome response:', data);
-
-                // Display the welcome greeting in chat
-                if (data.response) {
-                    addMessage('agent', data.response);
-                    // Switch to chat view to show the welcome message
-                    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                    document.getElementById('chat-view').classList.add('active');
-                    document.querySelector('.tab:nth-child(2)').classList.add('active');
-                }
-
-                // Update projects display if projects were returned
-                if (data.projects && data.projects.length > 0) {
-                    displayProjects(data.projects);
-                } else {
-                    // Fallback to loading projects separately
-                    loadProjects();
-                }
-
-            } catch (error) {
-                console.error('Welcome request failed:', error);
-                // Fallback: show a simple greeting and load projects
-                addMessage('agent', 'Hello! Welcome to ProjectForce. I\'m here to help with your home service projects.');
-                loadProjects();
             }
         }
 
@@ -836,7 +861,7 @@
 
         // Token refresh function
         async function refreshToken() {
-            console.log('[REFRESH] Token expired, refreshing...');
+            console.log('🔄 Token expired, refreshing...');
             try {
                 const response = await fetch(`${API_URL}/login`, {
                     method: 'POST',
@@ -849,18 +874,14 @@
                 });
 
                 const data = await response.json();
-                console.log('[DEBUG] Login/refresh response:', JSON.stringify(data.user, null, 2));
                 if (data.accesstoken) {
                     accessToken = data.accesstoken;
                     if (data.user) {
                         clientId = data.user.client_id;
                         userId = data.user.customer_id;
-                        // Extract first_name from login response
-                        userName = data.user.first_name || '';
-                        console.log(`[USER] Extracted first_name: "${userName}" from data.user.first_name`);
                     }
 
-                    // Save credentials to localStorage (tokens only)
+                    // Save credentials to localStorage
                     saveCredentials();
 
                     // Save to AWS Secrets Manager
@@ -874,16 +895,16 @@
                                 customer_id: userId
                             })
                         });
-                        console.log('[OK] Token refreshed and saved to Secrets Manager');
+                        console.log('✅ Token refreshed and saved to Secrets Manager');
                     } catch (e) {
-                        console.warn('[WARN] Failed to save token to Secrets Manager:', e);
+                        console.warn('⚠️ Failed to save token to Secrets Manager:', e);
                     }
 
                     return true;
                 }
                 return false;
             } catch (error) {
-                console.error('[ERROR] Token refresh failed:', error);
+                console.error('❌ Token refresh failed:', error);
                 return false;
             }
         }
@@ -935,12 +956,12 @@
                     (data.error && data.error.toLowerCase().includes('auth'))) {
 
                     if (!isRetry) {
-                        console.log('[REFRESH] Token expired, attempting refresh...');
+                        console.log('🔄 Token expired, attempting refresh...');
                         messagesContainer.removeChild(messageDiv);
 
                         const refreshed = await refreshToken();
                         if (refreshed) {
-                            console.log('[OK] Token refreshed, retrying request...');
+                            console.log('✅ Token refreshed, retrying request...');
                             // Save message back to input for retry
                             input.value = message;
                             return await sendMessage(true);
@@ -981,103 +1002,6 @@
             }
         }
 
-        // Helper function for batch scheduling - formats individual JSON blocks
-        function formatBatchJsonBlock(data, statusColors) {
-            let html = '';
-
-            // Handle confirmation/success messages (status can be "success" or "confirmed")
-            if ((data.status === 'success' || data.status === 'confirmed') && data.appointment) {
-                const appt = data.appointment;
-                html += `<div style="background: linear-gradient(135deg, #28a745 0%, #218838 100%); color: white; padding: 18px 24px; border-radius: 12px; margin: 16px 0; font-weight: 600; font-size: 17px; box-shadow: 0 4px 12px rgba(40,167,69,0.3);">
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                        <span style="font-size: 28px; color: #28a745;">&#10003;</span>
-                        <span>${data.message || 'Appointment confirmed!'}</span>
-                    </div>
-                </div>`;
-                if (appt.confirmationNumber) {
-                    html += `<div style="background: #d4edda; padding: 12px 16px; border-radius: 8px; margin: 12px 0; font-size: 14px; color: #155724;">
-                        <strong>Confirmation:</strong> ${appt.confirmationNumber}
-                    </div>`;
-                }
-                if (appt.date || appt.formattedDate || appt.time || appt.formattedTime) {
-                    html += `<div style="background: white; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin: 12px 0;">
-                        <div style="font-size: 13px; color: #666; margin-bottom: 8px;">&#8505; Appointment Details</div>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
-                            ${appt.formattedDate || appt.date ? `<div><span style="font-size: 20px;">&#9632;</span> <strong>Project</strong><br>#${appt.projectId} - ${appt.projectName || 'undefined'}</div>` : ''}
-                            ${appt.formattedDate || appt.date ? `<div><span style="font-size: 20px;">&#9744;</span> <strong>Date</strong><br>${appt.formattedDate || appt.date}</div>` : ''}
-                            ${appt.formattedTime || appt.time ? `<div><span style="font-size: 20px;">&#9719;</span> <strong>Time</strong><br>${appt.formattedTime || appt.time}</div>` : ''}
-                        </div>
-                    </div>`;
-                }
-                return html;
-            }
-
-            // Handle available dates with weather indicators
-            if (data.dates || data.available_dates || data.dates_with_weather) {
-                if (data.message) {
-                    html += `<div style="background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white; padding: 18px 24px; border-radius: 12px; margin: 16px 0; font-weight: 600; font-size: 17px;">
-                        <div style="display: flex; align-items: center; gap: 12px;">
-                            <span style="font-size: 20px; color: #2196F3; font-weight: bold;">&#9744;</span>
-                            <span>${data.message}</span>
-                        </div>
-                    </div>`;
-                }
-
-                // Display dates
-                const dates = data.dates_with_weather || data.dates || data.available_dates;
-                if (dates && dates.length > 0) {
-                    html += `<div style="background: white; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin: 12px 0;">`;
-                    for (const date of dates) {
-                        if (typeof date === 'object') {
-                            const indicator = date.weatherIndicator || date.indicator || '';
-                            const warningsList = date.weatherWarnings || date.warnings || [];
-                            const warnings = warningsList.length > 0 ? ` - ${warningsList.join(', ')}` : '';
-                            const highTemp = date.highTemp || date.high_temp;
-                            const tempInfo = highTemp ? ` (${highTemp}°F)` : '';
-                            const dayName = date.dayName || date.day_name || '';
-                            const monthDay = date.monthDay || date.month_day || date.date;
-                            const condition = date.weatherCondition || date.condition || '';
-
-                            html += `<div style="padding: 10px 0; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 8px;">
-                                <span style="font-size: 18px;">${indicator}</span>
-                                <strong>${dayName} ${monthDay}</strong>${tempInfo}
-                                ${condition ? ` - <span style="color: #666;">${condition}</span>` : ''}
-                                ${warnings ? `<span style="color: #dc3545; font-size: 13px;">${warnings}</span>` : ''}
-                            </div>`;
-                        } else {
-                            html += `<div style="padding: 10px 0; border-bottom: 1px solid #eee;">${date}</div>`;
-                        }
-                    }
-                    html += `</div>`;
-                }
-
-                // Weather summary
-                const weatherSummary = data.weatherSummary || data.weather_summary;
-                if (weatherSummary) {
-                    const unsuitable = weatherSummary.unsuitableDateCount || weatherSummary.unsuitable_count || 0;
-                    const total = weatherSummary.totalDates || data.dateCount || (dates ? dates.length : 0);
-                    if (unsuitable > 0) {
-                        html += `<div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 12px; margin: 12px 0;">
-                            <strong>&#9888; Weather Notice:</strong> ${unsuitable} of ${total} dates have weather concerns for outdoor work.
-                        </div>`;
-                    }
-                }
-
-                return html;
-            }
-
-            // Generic message fallback
-            if (data.message) {
-                html += `<div style="background: #f8f9fa; border-radius: 12px; padding: 16px; margin: 12px 0;">
-                    ${data.message}
-                </div>`;
-                return html;
-            }
-
-            // Unknown JSON - show formatted
-            return `<pre style="background: #f8f9fa; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 12px;">${JSON.stringify(data, null, 2)}</pre>`;
-        }
-
         function formatAgentMessage(content) {
             // Safety check: ensure content is defined
             if (!content || typeof content !== 'string') {
@@ -1096,57 +1020,6 @@
                 'Completed': '#6c757d',
                 'In Progress': '#ffc107'
             };
-
-            // BATCH SCHEDULING FIX: Check for multiple JSON blocks first
-            const jsonBlockCount = (content.match(/```json/g) || []).length;
-            console.log('JSON block count:', jsonBlockCount);
-
-            if (jsonBlockCount >= 2) {
-                console.log('[REFRESH] BATCH MODE: Processing multiple JSON blocks');
-                // Split content into segments and process each
-                const segments = [];
-                const jsonBlockRegex = /```json\s*([\s\S]*?)```/g;
-                let lastIndex = 0;
-                let match;
-
-                while ((match = jsonBlockRegex.exec(content)) !== null) {
-                    // Add text before this JSON block
-                    const textBefore = content.substring(lastIndex, match.index).trim();
-                    if (textBefore) {
-                        segments.push({ type: 'text', content: textBefore });
-                    }
-                    // Add the JSON block
-                    segments.push({ type: 'json', content: match[1] });
-                    lastIndex = match.index + match[0].length;
-                }
-                // Add any remaining text after the last JSON block
-                const textAfter = content.substring(lastIndex).trim();
-                if (textAfter) {
-                    segments.push({ type: 'text', content: textAfter });
-                }
-
-                // Process each segment and build HTML
-                let html = '';
-                for (const segment of segments) {
-                    if (segment.type === 'text') {
-                        // Format text segments
-                        let textHtml = segment.content
-                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                            .replace(/^---$/gm, '<hr style="margin: 20px 0; border: none; border-top: 2px solid #e9ecef;">')
-                            .replace(/\n/g, '<br>');
-                        html += `<div style="margin: 12px 0; padding: 12px; background: #f8f9fa; border-radius: 8px;">${textHtml}</div>`;
-                    } else if (segment.type === 'json') {
-                        try {
-                            const data = JSON.parse(segment.content);
-                            html += formatBatchJsonBlock(data, statusColors);
-                        } catch (e) {
-                            console.error('Failed to parse JSON segment:', e);
-                            html += `<pre style="background: #f8f9fa; padding: 12px; border-radius: 8px;">${segment.content}</pre>`;
-                        }
-                    }
-                }
-                return html;
-            }
 
             // 0. Robustly detect JSON in multiple formats (handles inconsistent Supervisor responses)
             let jsonData = null;
@@ -1220,7 +1093,7 @@
                         if (data.message) {
                             html += `<div style="background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white; padding: 18px 24px; border-radius: 12px; margin: 16px 0; font-weight: 600; font-size: 17px; box-shadow: 0 4px 12px rgba(0,102,204,0.3);">
                                 <div style="display: flex; align-items: center; gap: 12px;">
-                                    <span style="font-size: 20px; color: #1976D2;">&#8505;</span>
+                                    <span style="font-size: 28px;">📋</span>
                                     <span>${data.message}</span>
                                 </div>
                             </div>`;
@@ -1240,22 +1113,31 @@
                         };
                         const statusColor = statusColors[proj.status] || '#6c757d';
 
-                        // Header: Category as hero, project type and ID as subtitle
                         html += `<div style="display: flex; justify-content: space-between; align-items: start; padding-bottom: 16px; border-bottom: 2px solid #e9ecef;">
                             <div>
-                                <div style="font-size: 24px; font-weight: 700; color: #212529; margin-bottom: 6px;">${proj.category || 'Project'} Project</div>
-                                <div style="font-size: 14px; color: #6c757d;">${proj.projectType || ''} &#183; #${proj.id}</div>
+                                <div style="font-size: 24px; font-weight: 700; color: #212529; margin-bottom: 6px;">Project #${proj.id}</div>
+                                <div style="font-size: 14px; color: #6c757d; font-family: monospace;">${proj.projectNumber || ''}</div>
                             </div>
                             <span style="background: ${statusColor}; color: white; padding: 6px 14px; border-radius: 16px; font-size: 13px; font-weight: 600; white-space: nowrap;">${proj.status}</span>
                         </div>`;
 
-                        // Category and Type are now in the header - removed separate boxes
+                        // Category and Type
+                        html += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+                            <div style="background: #f8f9fa; padding: 14px; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Category</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #333;">${proj.category || '-'}</div>
+                            </div>
+                            <div style="background: #f8f9fa; padding: 14px; border-radius: 8px;">
+                                <div style="font-size: 12px; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Project Type</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #333;">${proj.projectType || '-'}</div>
+                            </div>
+                        </div>`;
 
                         // Scheduled Date/Time
                         if (proj.scheduledDate) {
                             html += `<div style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 16px; border-radius: 10px; border-left: 4px solid #2196f3;">
                                 <div style="display: flex; align-items: center; gap: 12px;">
-                                    <span style="font-size: 20px; color: #2196F3; font-weight: bold;">&#9744;</span>
+                                    <span style="font-size: 28px;">📅</span>
                                     <div style="flex: 1;">
                                         <div style="font-size: 12px; color: #1976d2; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Scheduled Appointment</div>
                                         <div style="font-size: 16px; font-weight: 700; color: #0d47a1;">${proj.scheduledDate}${proj.scheduledEndDate ? ` - ${proj.scheduledEndDate}` : ''}</div>
@@ -1265,15 +1147,18 @@
                             </div>`;
                         }
 
-                        // Technician Information (name only, no ID for customers)
+                        // Technician Information
                         if (proj.technician && proj.technician.name) {
                             const tech = proj.technician;
                             html += `<div style="background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); padding: 16px; border-radius: 10px; border-left: 4px solid #9c27b0;">
                                 <div style="display: flex; align-items: start; gap: 12px;">
-                                    <span style="font-size: 20px; color: #7b1fa2;">&#9733;</span>
+                                    <span style="font-size: 28px;">👷</span>
                                     <div style="flex: 1;">
-                                        <div style="font-size: 12px; color: #7b1fa2; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Your Technician</div>
-                                        <div style="font-size: 16px; font-weight: 700; color: #4a148c;">${tech.name}</div>
+                                        <div style="font-size: 12px; color: #7b1fa2; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Assigned Technician</div>
+                                        <div style="font-size: 16px; font-weight: 700; color: #4a148c; margin-bottom: 8px;">${tech.display_name || tech.name}</div>
+                                        ${tech.email ? `<div style="font-size: 14px; color: #6a1b9a; margin-bottom: 4px;">📧 ${tech.email}</div>` : ''}
+                                        ${tech.phone ? `<div style="font-size: 14px; color: #6a1b9a; margin-bottom: 4px;">📞 ${tech.phone}</div>` : ''}
+                                        ${tech.bio ? `<div style="font-size: 13px; color: #7b1fa2; margin-top: 8px; padding-top: 8px; border-top: 1px solid #ce93d8;">${tech.bio}</div>` : ''}
                                     </div>
                                 </div>
                             </div>`;
@@ -1285,7 +1170,7 @@
                             const fullAddr = addr.fullAddress || `${addr.address1 || ''}, ${addr.city || ''}, ${addr.state || ''} ${addr.zipcode || ''}`;
                             html += `<div style="background: #f8f9fa; padding: 16px; border-radius: 10px;">
                                 <div style="display: flex; align-items: start; gap: 12px;">
-                                    <span style="font-size: 20px; color: #e53935;">&#9679;</span>
+                                    <span style="font-size: 28px;">📍</span>
                                     <div style="flex: 1;">
                                         <div style="font-size: 12px; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Installation Address</div>
                                         <div style="font-size: 16px; font-weight: 600; color: #333;">${fullAddr}</div>
@@ -1294,12 +1179,33 @@
                             </div>`;
                         }
 
-                        // Store, Date Sold, Source System - REMOVED (internal info, not for customers)
+                        // Store and Date Sold
+                        html += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">`;
+                        if (proj.store) {
+                            const store = proj.store;
+                            html += `<div style="background: #fff3e0; padding: 14px; border-radius: 8px; border-left: 3px solid #ff9800;">
+                                <div style="font-size: 12px; color: #e65100; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Store</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #e65100;">${store.storeName || store.storeNumber || '-'}</div>
+                            </div>`;
+                        }
+                        if (proj.dateSold) {
+                            html += `<div style="background: #e8f5e9; padding: 14px; border-radius: 8px; border-left: 3px solid #4caf50;">
+                                <div style="font-size: 12px; color: #2e7d32; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Date Sold</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #2e7d32;">${proj.dateSold}</div>
+                            </div>`;
+                        }
+                        if (proj.sourceSystem) {
+                            html += `<div style="background: #fce4ec; padding: 14px; border-radius: 8px; border-left: 3px solid #e91e63;">
+                                <div style="font-size: 12px; color: #c2185b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Source System</div>
+                                <div style="font-size: 16px; font-weight: 600; color: #c2185b;">${proj.sourceSystem}</div>
+                            </div>`;
+                        }
+                        html += `</div>`;
 
                         // Has Documents
                         if (proj.hasDocuments) {
                             html += `<div style="background: linear-gradient(135deg, #fff9c4 0%, #fff59d 100%); padding: 12px 16px; border-radius: 8px; display: flex; align-items: center; gap: 10px;">
-                                <span style="font-size: 20px;">&#9634;</span>
+                                <span style="font-size: 20px;">📄</span>
                                 <span style="font-size: 14px; font-weight: 600; color: #f57f17;">This project has attached documents</span>
                             </div>`;
                         }
@@ -1331,7 +1237,7 @@
                             data.dates.forEach(weekObj => totalDates += weekObj.dates.length);
 
                             html += `<div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 20px; border-radius: 12px; margin: 16px 0;">
-                                <div style="font-weight: 600; color: #495057; margin-bottom: 14px; font-size: 16px;">&#9744; Available Dates (${totalDates})</div>`;
+                                <div style="font-weight: 600; color: #495057; margin-bottom: 14px; font-size: 16px;">📅 Available Dates (${totalDates})</div>`;
 
                             data.dates.forEach(weekObj => {
                                 html += `<div style="margin-bottom: 16px;">
@@ -1349,7 +1255,7 @@
                         } else {
                             // Old format: flat array of date objects or strings
                             html += `<div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 20px; border-radius: 12px; margin: 16px 0;">
-                                <div style="font-weight: 600; color: #495057; margin-bottom: 14px; font-size: 16px;">&#9744; Available Dates (${data.dateCount || data.dates.length})</div>
+                                <div style="font-weight: 600; color: #495057; margin-bottom: 14px; font-size: 16px;">📅 Available Dates (${data.dateCount || data.dates.length})</div>
                                 <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px;">`;
 
                             data.dates.forEach(dateObj => {
@@ -1386,14 +1292,14 @@
                         }
 
                         html += `<div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 20px; border-radius: 12px; margin: 16px 0;">
-                            <div style="font-weight: 600; color: #495057; margin-bottom: 14px; font-size: 16px;"><span style="color: #ff9800;">&#9719;</span> Available Time Slots${data.slotCount ? ` (${data.slotCount})` : ''}</div>`;
+                            <div style="font-weight: 600; color: #495057; margin-bottom: 14px; font-size: 16px;">⏰ Available Time Slots${data.slotCount ? ` (${data.slotCount})` : ''}</div>`;
 
                         // Use grouped slots if available, otherwise show flat list
                         if (data.timeSlotsGrouped) {
                             const groups = [
-                                { key: 'morning', icon: '&#9680;', color: '#ffc107' },
-                                { key: 'afternoon', icon: '&#9788;', color: '#ff9800' },
-                                { key: 'evening', icon: '&#9681;', color: '#673ab7' }
+                                { key: 'morning', icon: '🌅', color: '#ffc107' },
+                                { key: 'afternoon', icon: '☀️', color: '#ff9800' },
+                                { key: 'evening', icon: '🌙', color: '#673ab7' }
                             ];
 
                             groups.forEach(group => {
@@ -1407,7 +1313,7 @@
                                         <div style="display: flex; flex-wrap: wrap; gap: 10px;">`;
 
                                     groupData.slots.forEach(time => {
-                                        html += `<button style="background: white; color: ${group.color}; border: 2px solid ${group.color}; padding: 12px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,0,0,0.1);" onmouseover="this.style.background='${group.color}'; this.style.color='white'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.2)';" onmouseout="this.style.background='white'; this.style.color='${group.color}'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 6px rgba(0,0,0,0.1)';">&#9719; ${time}</button>`;
+                                        html += `<button style="background: white; color: ${group.color}; border: 2px solid ${group.color}; padding: 12px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,0,0,0.1);" onmouseover="this.style.background='${group.color}'; this.style.color='white'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.2)';" onmouseout="this.style.background='white'; this.style.color='${group.color}'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 6px rgba(0,0,0,0.1)';">🕐 ${time}</button>`;
                                     });
 
                                     html += `</div></div>`;
@@ -1417,7 +1323,7 @@
                             // Fallback to flat list
                             html += `<div style="display: flex; flex-wrap: wrap; gap: 12px;">`;
                             data.timeSlots.forEach(time => {
-                                html += `<button style="background: white; color: #0066cc; border: 2px solid #0066cc; padding: 12px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,102,204,0.15);" onmouseover="this.style.background='#0066cc'; this.style.color='white'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.3)';" onmouseout="this.style.background='white'; this.style.color='#0066cc'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 6px rgba(0,102,204,0.15)';">&#9719; ${time}</button>`;
+                                html += `<button style="background: white; color: #0066cc; border: 2px solid #0066cc; padding: 12px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,102,204,0.15);" onmouseover="this.style.background='#0066cc'; this.style.color='white'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.3)';" onmouseout="this.style.background='white'; this.style.color='#0066cc'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 6px rgba(0,102,204,0.15)';">🕐 ${time}</button>`;
                             });
                             html += `</div>`;
                         }
@@ -1440,7 +1346,7 @@
                         if (data.message) {
                             html += `<div style="background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white; padding: 18px 24px; border-radius: 12px; margin: 16px 0; font-weight: 600; font-size: 17px; box-shadow: 0 4px 12px rgba(0,102,204,0.3);">
                                 <div style="display: flex; align-items: center; gap: 12px;">
-                                    <span style="font-size: 20px; color: #ff9800;">&#9632;</span>
+                                    <span style="font-size: 28px;">📦</span>
                                     <span>${data.message}</span>
                                 </div>
                             </div>`;
@@ -1505,7 +1411,7 @@
                         // Location summary if available
                         if (data.location) {
                             html += `<div style="background: #f8f9fa; border-left: 4px solid #0066cc; padding: 12px 16px; border-radius: 8px; margin: 16px 0; font-size: 14px; color: #495057;">
-                                <strong>&#9679; Location:</strong> ${data.location.address || data.location}
+                                <strong>📍 Location:</strong> ${data.location.address || data.location}
                             </div>`;
                         }
 
@@ -1526,7 +1432,7 @@
                         // Header
                         html += `<div style="background: linear-gradient(135deg, #4A90E2 0%, #357ABD 100%); color: white; padding: 20px 28px; border-radius: 12px; margin: 20px 0; box-shadow: 0 4px 16px rgba(74,144,226,0.3);">
                             <div style="display: flex; align-items: center; gap: 14px;">
-                                <span style="font-size: 48px;">&#9788;</span>
+                                <span style="font-size: 48px;">☀️</span>
                                 <div style="flex: 1;">
                                     <div style="font-size: 24px; font-weight: 700; margin-bottom: 4px;">${data.location}</div>
                                     <div style="font-size: 14px; opacity: 0.9;">Current Weather</div>
@@ -1536,31 +1442,31 @@
 
                         // Current weather card
                         const condition = data.current.condition || 'Clear';
-                        const conditionIcon = {
-                            'Clear': '&#9788;',
-                            'Partly cloudy': '&#9680;',
-                            'Cloudy': '&#9676;',
-                            'Overcast': '&#9676;',
-                            'Rain': '&#8779;',
-                            'Snow': '&#10035;',
-                            'Thunderstorm': '&#9889;'
+                        const conditionEmoji = {
+                            'Clear': '☀️',
+                            'Partly cloudy': '⛅',
+                            'Cloudy': '☁️',
+                            'Overcast': '☁️',
+                            'Rain': '🌧️',
+                            'Snow': '❄️',
+                            'Thunderstorm': '⛈️'
                         };
-                        const weatherIcon = conditionIcon[condition] || '&#9788;';
+                        const emoji = conditionEmoji[condition] || '🌤️';
 
                         html += `<div style="background: white; border-radius: 12px; padding: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); margin: 20px 0;">
                             <div style="text-align: center; margin-bottom: 24px;">
-                                <div style="font-size: 72px; margin-bottom: 12px; color: #f39c12;">${weatherIcon}</div>
+                                <div style="font-size: 72px; margin-bottom: 12px;">${emoji}</div>
                                 <div style="font-size: 56px; font-weight: 700; color: #2c3e50; margin-bottom: 8px;">${data.current.temperature}°F</div>
                                 <div style="font-size: 20px; color: #7f8c8d; font-weight: 500;">${condition}</div>
                             </div>
 
                             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; padding-top: 20px; border-top: 2px solid #ecf0f1;">
                                 <div style="text-align: center; padding: 12px; background: #f8f9fa; border-radius: 8px;">
-                                    <div style="font-size: 12px; color: #7f8c8d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;"><span style="color: #3498db;">&#8776;</span> Humidity</div>
+                                    <div style="font-size: 12px; color: #7f8c8d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">💧 Humidity</div>
                                     <div style="font-size: 20px; font-weight: 700; color: #2c3e50;">${data.current.humidity}%</div>
                                 </div>
                                 <div style="text-align: center; padding: 12px; background: #f8f9fa; border-radius: 8px;">
-                                    <div style="font-size: 12px; color: #7f8c8d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;"><span style="color: #95a5a6;">&#8779;</span> Wind Speed</div>
+                                    <div style="font-size: 12px; color: #7f8c8d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">💨 Wind Speed</div>
                                     <div style="font-size: 20px; font-weight: 700; color: #2c3e50;">${data.current.windSpeed} mph</div>
                                 </div>
                             </div>
@@ -1570,16 +1476,16 @@
                         if (data.forecast && Array.isArray(data.forecast) && data.forecast.length > 0) {
                             html += `<div style="background: white; border-radius: 12px; padding: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); margin: 20px 0;">
                                 <div style="font-size: 18px; font-weight: 700; color: #2c3e50; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid #ecf0f1;">
-                                    <span style="color: #2196F3;">&#9744;</span> 7-Day Forecast
+                                    📅 7-Day Forecast
                                 </div>
                                 <div style="display: grid; gap: 12px;">`;
 
                             data.forecast.forEach(day => {
-                                const dayIcon = conditionIcon[day.condition] || '&#9788;';
+                                const dayEmoji = conditionEmoji[day.condition] || '🌤️';
                                 html += `<div style="display: grid; grid-template-columns: 80px 1fr 100px 100px 80px; gap: 16px; align-items: center; padding: 14px; background: #f8f9fa; border-radius: 8px; transition: all 0.2s;" onmouseover="this.style.background='#e9ecef'" onmouseout="this.style.background='#f8f9fa'">
                                     <div style="font-weight: 600; color: #495057;">${day.day}</div>
                                     <div style="display: flex; align-items: center; gap: 10px;">
-                                        <span style="font-size: 28px; color: #f39c12;">${dayIcon}</span>
+                                        <span style="font-size: 28px;">${dayEmoji}</span>
                                         <span style="color: #6c757d; font-size: 14px;">${day.condition}</span>
                                     </div>
                                     <div style="text-align: center;">
@@ -1589,7 +1495,7 @@
                                         <span style="font-size: 18px; font-weight: 700; color: #007bff;">${day.low}°</span>
                                     </div>
                                     <div style="text-align: center; color: #17a2b8; font-size: 13px; font-weight: 600;">
-                                        <span style="color: #3498db;">&#8776;</span> ${day.precipitation}%
+                                        💧 ${day.precipitation}%
                                     </div>
                                 </div>`;
                             });
@@ -1610,7 +1516,7 @@
                         let html = `
                             <div style="background: linear-gradient(135deg, #28a745 0%, #218838 100%); color: white; padding: 20px 28px; border-radius: 12px; margin: 20px 0; box-shadow: 0 4px 16px rgba(40,167,69,0.3);">
                                 <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
-                                    <span style="font-size: 32px;">&#10003;</span>
+                                    <span style="font-size: 32px;">✅</span>
                                     <div>
                                         <div style="font-size: 20px; font-weight: 700;">${data.message || 'Appointment Confirmed!'}</div>
                                         <div style="font-size: 14px; opacity: 0.9; margin-top: 4px;">Confirmation: ${apt.confirmationNumber}</div>
@@ -1620,12 +1526,12 @@
 
                             <div style="background: white; border-radius: 12px; padding: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); margin: 20px 0;">
                                 <div style="font-size: 18px; font-weight: 700; color: #333; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid #e0e0e0;">
-                                    &#8505; Appointment Details
+                                    📋 Appointment Details
                                 </div>
 
                                 <div style="display: grid; gap: 16px;">
                                     <div style="display: flex; align-items: start; gap: 12px;">
-                                        <span style="font-size: 24px;">&#9632;</span>
+                                        <span style="font-size: 24px;">🏗️</span>
                                         <div style="flex: 1;">
                                             <div style="font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Project</div>
                                             <div style="font-size: 16px; font-weight: 600; color: #333;">#${apt.projectId} - ${apt.projectName || apt.category}</div>
@@ -1634,7 +1540,7 @@
                                     </div>
 
                                     <div style="display: flex; align-items: start; gap: 12px;">
-                                        <span style="font-size: 24px;">&#9744;</span>
+                                        <span style="font-size: 24px;">📅</span>
                                         <div style="flex: 1;">
                                             <div style="font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Date</div>
                                             <div style="font-size: 16px; font-weight: 600; color: #333;">${apt.dateFormatted || apt.date}</div>
@@ -1642,7 +1548,7 @@
                                     </div>
 
                                     <div style="display: flex; align-items: start; gap: 12px;">
-                                        <span style="font-size: 24px;">&#9719;</span>
+                                        <span style="font-size: 24px;">⏰</span>
                                         <div style="flex: 1;">
                                             <div style="font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Time</div>
                                             <div style="font-size: 16px; font-weight: 600; color: #333;">${apt.time}${apt.timeEnd ? ` - ${apt.timeEnd}` : ''}</div>
@@ -1651,7 +1557,7 @@
 
                                     ${apt.address ? `
                                     <div style="display: flex; align-items: start; gap: 12px;">
-                                        <span style="font-size: 24px;">&#9679;</span>
+                                        <span style="font-size: 24px;">📍</span>
                                         <div style="flex: 1;">
                                             <div style="font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Location</div>
                                             <div style="font-size: 16px; font-weight: 600; color: #333;">${apt.address.address1}</div>
@@ -1662,7 +1568,7 @@
 
                                     ${apt.installer ? `
                                     <div style="display: flex; align-items: start; gap: 12px;">
-                                        <span style="font-size: 24px;">&#9733;</span>
+                                        <span style="font-size: 24px;">👷</span>
                                         <div style="flex: 1;">
                                             <div style="font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Technician</div>
                                             <div style="font-size: 16px; font-weight: 600; color: #333;">${apt.installer.name}</div>
@@ -1676,7 +1582,7 @@
                         if (data.nextSteps && Array.isArray(data.nextSteps) && data.nextSteps.length > 0) {
                             html += `
                             <div style="background: #f8f9fa; border-left: 4px solid #0066cc; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                                <div style="font-size: 14px; font-weight: 600; color: #333; margin-bottom: 12px;">&#9998; Next Steps:</div>
+                                <div style="font-size: 14px; font-weight: 600; color: #333; margin-bottom: 12px;">📝 Next Steps:</div>
                                 <ul style="margin: 0; padding-left: 20px; color: #555; font-size: 14px; line-height: 1.8;">
                                     ${data.nextSteps.map(step => `<li>${step}</li>`).join('')}
                                 </ul>
@@ -1696,10 +1602,10 @@
             }
 
             // 1. Format summary headers FIRST (Pattern: "You have 8 Decking...")
-            content = content.replace(/(&#9632;\s*)?(You have \d+.+?projects.+?:)/gi, function(match, emoji, text) {
+            content = content.replace(/(📦\s*)?(You have \d+.+?projects.+?:)/gi, function(match, emoji, text) {
                 return `<div style="background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white; padding: 18px 24px; border-radius: 12px; margin: 16px 0 20px 0; font-weight: 600; font-size: 17px; box-shadow: 0 4px 12px rgba(0,102,204,0.3);">
                     <div style="display: flex; align-items: center; gap: 12px;">
-                        <span style="font-size: 20px; color: #ff9800;">&#9632;</span>
+                        <span style="font-size: 28px;">📦</span>
                         <span>${text}</span>
                     </div>
                 </div>`;
@@ -1801,19 +1707,19 @@
             let detailsMatch = content.match(/(Type:|Category:|Status:|Address:|Order Number:)/);
             if (detailsMatch) {
                 content = content.replace(/(Type:)\s*([^\n]+)/g,
-                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;">&#9881; Type</span><span style="color: #333; font-weight: 500;">$2</span></div>');
+                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;">🔧 Type</span><span style="color: #333; font-weight: 500;">$2</span></div>');
 
                 content = content.replace(/(Category:)\s*([^\n]+)/g,
-                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;">&#8505; Category</span><span style="color: #333; font-weight: 500;">$2</span></div>');
+                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;">📋 Category</span><span style="color: #333; font-weight: 500;">$2</span></div>');
 
                 content = content.replace(/(Status:)\s*([^\n]+)/g,
-                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;">&#9641; Status</span><span style="color: #333; font-weight: 500;">$2</span></div>');
+                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;">📊 Status</span><span style="color: #333; font-weight: 500;">$2</span></div>');
 
                 content = content.replace(/(Address:)\s*([^\n]+)/g,
-                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;">&#9679; Address</span><span style="color: #333; font-weight: 500;">$2</span></div>');
+                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;">📍 Address</span><span style="color: #333; font-weight: 500;">$2</span></div>');
 
                 content = content.replace(/(Order Number:)\s*([^\n]+)/g,
-                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;"># Order</span><span style="color: #333; font-family: monospace; font-size: 12px;">$2</span></div>');
+                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;">🔢 Order</span><span style="color: #333; font-family: monospace; font-size: 12px;">$2</span></div>');
             }
 
             // 6. Format available dates (Pattern: "Week 1: Nov 10-15")
@@ -1823,7 +1729,7 @@
                     dates.push(i);
                 }
                 return `<div style="margin: 16px 0;">
-                    <div style="font-weight: 600; color: #555; margin-bottom: 10px; font-size: 15px;">&#9744; Week ${week}</div>
+                    <div style="font-weight: 600; color: #555; margin-bottom: 10px; font-size: 15px;">📅 Week ${week}</div>
                     <div style="display: flex; flex-wrap: wrap; gap: 10px;">
                         ${dates.map(d => `<button style="background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white; border: none; padding: 14px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,102,204,0.3); min-width: 65px; font-size: 14px;" onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.5)';" onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 2px 6px rgba(0,102,204,0.3)';">Nov ${d}</button>`).join('')}
                     </div>
@@ -1835,9 +1741,9 @@
                 const times = slots.split(/\s*-\s*/).filter(t => t.trim() && t.match(/\d+:\d+\s*[AP]M/i));
                 if (times.length === 0) return match;
                 return `<div style="margin: 16px 0;">
-                    <div style="font-weight: 600; color: #555; margin-bottom: 10px; font-size: 15px;">&#9719; Available Time Slots</div>
+                    <div style="font-weight: 600; color: #555; margin-bottom: 10px; font-size: 15px;">⏰ Available Time Slots</div>
                     <div style="display: flex; flex-wrap: wrap; gap: 12px;">
-                        ${times.map(time => `<button style="background: white; color: #0066cc; border: 2px solid #0066cc; padding: 14px 24px; border-radius: 10px; font-weight: 600; font-size: 15px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(0,102,204,0.15);" onmouseover="this.style.background='#0066cc'; this.style.color='white'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.3)';" onmouseout="this.style.background='white'; this.style.color='#0066cc'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,102,204,0.15)';">&#9719; ${time.trim()}</button>`).join('')}
+                        ${times.map(time => `<button style="background: white; color: #0066cc; border: 2px solid #0066cc; padding: 14px 24px; border-radius: 10px; font-weight: 600; font-size: 15px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(0,102,204,0.15);" onmouseover="this.style.background='#0066cc'; this.style.color='white'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.3)';" onmouseout="this.style.background='white'; this.style.color='#0066cc'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,102,204,0.15)';">🕐 ${time.trim()}</button>`).join('')}
                     </div>
                 </div>
                 Please`;
@@ -1849,13 +1755,13 @@
                     '<div style="background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); padding: 24px; border-radius: 12px; margin: 16px 0; border: 2px solid #28a745; box-shadow: 0 4px 12px rgba(40,167,69,0.2);"><div style="font-size: 20px; font-weight: 700; color: #155724; margin-bottom: 16px; display: flex; align-items: center; gap: 10px;"><span style="font-size: 28px;">✨</span><span>$1</span></div>');
 
                 content = content.replace(/(Date:)\s*([^\n]+)/g,
-                    '<div style="background: rgba(255,255,255,0.7); padding: 12px 16px; margin: 8px 0; border-radius: 8px; border-left: 4px solid #28a745; display: grid; grid-template-columns: 140px 1fr; gap: 12px;"><span style="color: #155724; font-weight: 600;">&#9744; Date</span><span style="color: #155724; font-weight: 600; font-size: 15px;">$2</span></div>');
+                    '<div style="background: rgba(255,255,255,0.7); padding: 12px 16px; margin: 8px 0; border-radius: 8px; border-left: 4px solid #28a745; display: grid; grid-template-columns: 140px 1fr; gap: 12px;"><span style="color: #155724; font-weight: 600;">📅 Date</span><span style="color: #155724; font-weight: 600; font-size: 15px;">$2</span></div>');
 
                 content = content.replace(/(Time:)\s*([^\n]+)/g,
-                    '<div style="background: rgba(255,255,255,0.7); padding: 12px 16px; margin: 8px 0; border-radius: 8px; border-left: 4px solid #28a745; display: grid; grid-template-columns: 140px 1fr; gap: 12px;"><span style="color: #155724; font-weight: 600;">&#9719; Time</span><span style="color: #155724; font-weight: 600; font-size: 15px;">$2</span></div>');
+                    '<div style="background: rgba(255,255,255,0.7); padding: 12px 16px; margin: 8px 0; border-radius: 8px; border-left: 4px solid #28a745; display: grid; grid-template-columns: 140px 1fr; gap: 12px;"><span style="color: #155724; font-weight: 600;">⏰ Time</span><span style="color: #155724; font-weight: 600; font-size: 15px;">$2</span></div>');
 
                 content = content.replace(/(Confirmation Number:)\s*([^\n]+)/g,
-                    '<div style="background: rgba(255,255,255,0.7); padding: 12px 16px; margin: 8px 0; border-radius: 8px; border-left: 4px solid #28a745; display: grid; grid-template-columns: 140px 1fr; gap: 12px;"><span style="color: #155724; font-weight: 600;">&#10003; Confirmation</span><span style="color: #155724; font-family: monospace; font-size: 14px; font-weight: 600;">$2</span></div>');
+                    '<div style="background: rgba(255,255,255,0.7); padding: 12px 16px; margin: 8px 0; border-radius: 8px; border-left: 4px solid #28a745; display: grid; grid-template-columns: 140px 1fr; gap: 12px;"><span style="color: #155724; font-weight: 600;">✅ Confirmation</span><span style="color: #155724; font-family: monospace; font-size: 14px; font-weight: 600;">$2</span></div>');
 
                 // Close the success card div
                 content = content.replace(/(Is there anything else)/g, '</div>$1');
@@ -1863,19 +1769,19 @@
 
             // 9. Format error messages
             content = content.replace(/(I encountered an error[^\.]+\.)/gi,
-                '<div style="background: linear-gradient(135deg, #fff0f0 0%, #ffe0e0 100%); padding: 16px 20px; border-radius: 10px; margin: 14px 0; border-left: 4px solid #dc3545; box-shadow: 0 2px 8px rgba(220,53,69,0.2);"><span style="font-size: 20px; margin-right: 10px;">&#9888;</span><span style="color: #721c24; font-weight: 500; font-size: 14px;">$1</span></div>');
+                '<div style="background: linear-gradient(135deg, #fff0f0 0%, #ffe0e0 100%); padding: 16px 20px; border-radius: 10px; margin: 14px 0; border-left: 4px solid #dc3545; box-shadow: 0 2px 8px rgba(220,53,69,0.2);"><span style="font-size: 20px; margin-right: 10px;">⚠️</span><span style="color: #721c24; font-weight: 500; font-size: 14px;">$1</span></div>');
 
             // 10. Format "Would you like..." questions - Better styling
             content = content.replace(/(Would you like[^?]+\?)/gi,
-                '<div style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 18px 22px; border-radius: 12px; margin: 16px 0; border-left: 4px solid #2196f3; box-shadow: 0 3px 10px rgba(33,150,243,0.25);"><div style="display: flex; align-items: center; gap: 12px;"><span style="font-size: 24px;">&#9674;</span><span style="color: #0d47a1; font-weight: 600; font-size: 15px; line-height: 1.5;">$1</span></div></div>');
+                '<div style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 18px 22px; border-radius: 12px; margin: 16px 0; border-left: 4px solid #2196f3; box-shadow: 0 3px 10px rgba(33,150,243,0.25);"><div style="display: flex; align-items: center; gap: 12px;"><span style="font-size: 24px;">💬</span><span style="color: #0d47a1; font-weight: 600; font-size: 15px; line-height: 1.5;">$1</span></div></div>');
 
             // 11. Format scheduling information responses
             content = content.replace(/(this project is scheduled for|scheduled for) ([^\.]+\d{4}[^\.]*from \d{1,2}:\d{2} [AP]M to \d{1,2}:\d{2} [AP]M[^\.]*)/gi,
-                '<div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 20px 24px; border-radius: 12px; margin: 16px 0; border-left: 4px solid #4caf50; box-shadow: 0 3px 10px rgba(76,175,80,0.25);"><div style="display: flex; align-items: start; gap: 14px;"><span style="font-size: 20px; color: #2196F3; font-weight: bold;">&#9744;</span><div style="flex: 1;"><div style="color: #1b5e20; font-weight: 600; font-size: 16px; margin-bottom: 8px;">Project Schedule</div><div style="color: #2e7d32; font-weight: 500; font-size: 15px; line-height: 1.6;">$2</div></div></div></div>');
+                '<div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 20px 24px; border-radius: 12px; margin: 16px 0; border-left: 4px solid #4caf50; box-shadow: 0 3px 10px rgba(76,175,80,0.25);"><div style="display: flex; align-items: start; gap: 14px;"><span style="font-size: 28px;">📅</span><div style="flex: 1;"><div style="color: #1b5e20; font-weight: 600; font-size: 16px; margin-bottom: 8px;">Project Schedule</div><div style="color: #2e7d32; font-weight: 500; font-size: 15px; line-height: 1.6;">$2</div></div></div></div>');
 
             // 12. Format technician information
             content = content.replace(/(The technician assigned to this project is) ([^\.]+\.)/gi,
-                '<div style="background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); padding: 18px 22px; border-radius: 12px; margin: 16px 0; border-left: 4px solid #9c27b0; box-shadow: 0 3px 10px rgba(156,39,176,0.25);"><div style="display: flex; align-items: start; gap: 14px;"><span style="font-size: 20px; color: #7b1fa2;">&#9733;</span><div style="flex: 1;"><div style="color: #4a148c; font-weight: 600; font-size: 15px; line-height: 1.6;">$2</div></div></div></div>');
+                '<div style="background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); padding: 18px 22px; border-radius: 12px; margin: 16px 0; border-left: 4px solid #9c27b0; box-shadow: 0 3px 10px rgba(156,39,176,0.25);"><div style="display: flex; align-items: start; gap: 14px;"><span style="font-size: 28px;">👷</span><div style="flex: 1;"><div style="color: #4a148c; font-weight: 600; font-size: 15px; line-height: 1.6;">$2</div></div></div></div>');
 
             // 13. Highlight Project #XXXXX mentions in text (7-digit IDs)
             content = content.replace(/#(\d{7})/g,
