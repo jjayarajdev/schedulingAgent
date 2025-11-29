@@ -14,6 +14,7 @@ from config import get_config
 from classifier import classify_intent_and_action
 from context_extraction import extract_location_from_history, extract_pronoun_reference
 from context_resolver import resolve_context_references
+from voice_formatter import format_for_voice
 
 logger = logging.getLogger()
 
@@ -968,6 +969,20 @@ def route_request(
                 conversation_history=conversation_history
             )
 
+            # VOICE ADAPTATION: For voice channel, format the response
+            if channel == 'voice' and 'response' in intelligent_result:
+                response_text = intelligent_result['response']
+                # Strip JSON block and keep only conversational text
+                if '```json' in response_text:
+                    voice_response = response_text.split('```json')[0].strip()
+                else:
+                    voice_response = response_text
+                # Apply voice formatting
+                voice_response = format_for_voice(voice_response, intelligent_result.get('intent', 'unknown'))
+                intelligent_result['response'] = voice_response
+                intelligent_result['channel'] = channel
+                logger.info(f"[VOICE] Adapted intelligent orchestrator response for voice")
+
             return intelligent_result
 
         except Exception as e:
@@ -1014,6 +1029,18 @@ def route_request(
             formatted_response = format_lambda_response(action, response_body, message)
             logger.debug(f"Formatted response: {formatted_response[:200]}...")
 
+            # VOICE ADAPTATION: For voice channel, extract conversational text only
+            if channel == 'voice':
+                # Strip JSON block and keep only conversational text
+                if '```json' in formatted_response:
+                    voice_response = formatted_response.split('```json')[0].strip()
+                else:
+                    voice_response = formatted_response
+                # Apply voice formatting (natural dates, numbers, etc.)
+                voice_response = format_for_voice(voice_response, intent)
+                formatted_response = voice_response
+                logger.info(f"[VOICE] Adapted response for voice channel ({len(formatted_response)} chars)")
+
             logger.info(f"[TIMING]  Direct Lambda Performance: Total={timing['total']:.2f}s | "
                         f"Lambda={timing['lambda_direct']:.2f}s | "
                         f"Classification={timing['classification']:.3f}s")
@@ -1024,7 +1051,8 @@ def route_request(
                 'action': action,
                 'agent_name': 'Direct Lambda',
                 'direct_call': True,
-                'timing': timing
+                'timing': timing,
+                'channel': channel
             }
 
         except Exception as e:

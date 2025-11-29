@@ -188,30 +188,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if intent_name == "Welcome":
             response = handle_welcome(event, session_id, customer_id, customer_phone)
 
-        elif intent_name == "ProjectInquiry":
-            response = handle_project_inquiry(event, session_id, customer_id)
-
-        elif intent_name == "ProjectStatusInquiry":
-            response = handle_project_status_inquiry(event, session_id, customer_id)
-
-        elif intent_name == "AppointmentInquiry":
-            response = handle_appointment_inquiry(event, session_id, customer_id)
-
-        elif intent_name == "CheckAvailability":
-            response = handle_check_availability(event, session_id, customer_id)
-
-        elif intent_name == "WeatherInquiry":
-            response = handle_weather_inquiry(event, session_id, customer_id)
-
-        elif intent_name == "RescheduleAppointment":
-            response = handle_reschedule_appointment(event, session_id, customer_id)
-
-        elif intent_name == "CancelAppointment":
-            response = handle_cancel_appointment(event, session_id, customer_id)
-
-        elif intent_name == "BusinessHours":
-            response = handle_business_hours(event, session_id)
-
+        # Simple chitchat intents - handle locally (fast, no orchestrator needed)
         elif intent_name == "ThankYou":
             response = handle_thank_you(event, session_id)
 
@@ -221,8 +198,42 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         elif intent_name == "Goodbye":
             response = handle_goodbye(event, session_id)
 
-        elif intent_name in ["ScheduleAppointment", "UrgentRequest", "FallbackIntent"]:
-            response = hand_off_to_bedrock(event, session_id, customer_id, input_transcript)
+        # ALL other intents: Try orchestrator first (single source of truth)
+        # Fallback to local handlers if orchestrator fails
+        elif intent_name in [
+            "ProjectInquiry", "ProjectStatusInquiry", "AppointmentInquiry",
+            "CheckAvailability", "WeatherInquiry", "RescheduleAppointment",
+            "CancelAppointment", "BusinessHours", "ScheduleAppointment",
+            "UrgentRequest", "FallbackIntent"
+        ]:
+            try:
+                logger.info(f"Routing {intent_name} through orchestrator (primary path)")
+                response = hand_off_to_bedrock(event, session_id, customer_id, input_transcript)
+            except Exception as orch_error:
+                logger.warning(f"Orchestrator failed for {intent_name}: {orch_error}, using fallback handler")
+                # Fallback to local handlers
+                if intent_name == "ProjectInquiry":
+                    response = handle_project_inquiry(event, session_id, customer_id)
+                elif intent_name == "ProjectStatusInquiry":
+                    response = handle_project_status_inquiry(event, session_id, customer_id)
+                elif intent_name == "AppointmentInquiry":
+                    response = handle_appointment_inquiry(event, session_id, customer_id)
+                elif intent_name == "CheckAvailability":
+                    response = handle_check_availability(event, session_id, customer_id)
+                elif intent_name == "WeatherInquiry":
+                    response = handle_weather_inquiry(event, session_id, customer_id)
+                elif intent_name == "RescheduleAppointment":
+                    response = handle_reschedule_appointment(event, session_id, customer_id)
+                elif intent_name == "CancelAppointment":
+                    response = handle_cancel_appointment(event, session_id, customer_id)
+                elif intent_name == "BusinessHours":
+                    response = handle_business_hours(event, session_id)
+                else:
+                    # ScheduleAppointment, UrgentRequest, FallbackIntent - no local fallback
+                    response = LexResponseBuilder.build_error_response(
+                        event,
+                        "I'm having trouble processing your request. Please try again in a moment."
+                    )
 
         else:
             logger.warning(f"Unknown intent: {intent_name}")
@@ -549,6 +560,19 @@ def handle_project_status_inquiry(
     # Extract project_id and status filter from slots
     project_id_raw = slots.get('project_id', {}).get('value', {}).get('interpretedValue') if slots.get('project_id') else None
     status_filter = slots.get('status', {}).get('value', {}).get('interpretedValue') if slots.get('status') else None
+
+    # FALLBACK: If no slot value, try to extract ordinal from user's input transcript
+    if not project_id_raw:
+        input_transcript = event.get('inputTranscript', '').lower()
+        # Look for ordinals in the transcript
+        ordinal_words = ['first', '1st', 'second', '2nd', 'third', '3rd', 'fourth', '4th',
+                        'fifth', '5th', 'sixth', '6th', 'seventh', '7th', 'eighth', '8th',
+                        'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight']
+        for ordinal in ordinal_words:
+            if ordinal in input_transcript:
+                project_id_raw = ordinal
+                logger.info(f"Extracted ordinal '{ordinal}' from transcript: {input_transcript}")
+                break
 
     try:
         # Resolve ordinal references (first, second, third, etc.)
@@ -1071,6 +1095,7 @@ def hand_off_to_bedrock(
         credentials = get_credentials_from_secrets()
         pf_client_id = credentials['client_id']
         pf_token = credentials['bearer_token']
+        pf_user_id = credentials['user_id']  # Get user_id from Secrets Manager
 
         # Get session attributes for context (e.g., last_project_ids)
         session_attributes = event.get('sessionState', {}).get('sessionAttributes', {}) or {}
@@ -1091,6 +1116,10 @@ def hand_off_to_bedrock(
             voice_enhanced_message = wrap_for_voice(context_prefix + input_text)
             logger.info(f"Voice-enhanced message prepared for Claude with context")
 
+            # Use customer_id from session, fallback to Secrets Manager user_id
+            effective_user_id = customer_id or pf_user_id
+            logger.info(f"Using user_id: {effective_user_id} (from {'session' if customer_id else 'Secrets Manager'})")
+
             # Build orchestrator payload
             payload = {
                 'body': json.dumps({
@@ -1098,7 +1127,7 @@ def hand_off_to_bedrock(
                     'session_id': session_id,
                     'pf_token': pf_token,
                     'pf_client_id': pf_client_id,
-                    'pf_user_id': customer_id or '0',
+                    'pf_user_id': effective_user_id,
                     'channel': 'voice',
                     'session_context': session_attributes  # Pass Lex session context
                 })

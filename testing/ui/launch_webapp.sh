@@ -10,11 +10,36 @@
 ##############################################################################
  
 set -e
- 
+
 cd "$(dirname "$0")"
- 
+
+# Detect OS for cross-platform compatibility
+detect_os() {
+    case "$(uname -s)" in
+        Linux*)     OS="linux";;
+        Darwin*)    OS="mac";;
+        CYGWIN*|MINGW*|MSYS*) OS="windows";;
+        *)          OS="unknown";;
+    esac
+    echo "$OS"
+}
+
+OS=$(detect_os)
+
+# Detect Python command (python3 on Mac/Linux, python on Windows)
+if command -v python3 &>/dev/null; then
+    PYTHON="python3"
+    PIP="pip3"
+elif command -v python &>/dev/null; then
+    PYTHON="python"
+    PIP="pip"
+else
+    echo "❌ Python not found. Please install Python 3."
+    exit 1
+fi
+
 echo "════════════════════════════════════════════════════════════════════════════"
-echo "🚀 ProjectForce Web Application Launcher"
+echo "🚀 ProjectForce Web Application Launcher (OS: $OS, Python: $PYTHON)"
 echo "════════════════════════════════════════════════════════════════════════════"
 echo ""
  
@@ -45,49 +70,101 @@ echo "────────────────────────�
 echo ""
  
 # Check if flask and flask-cors are installed
-if ! python3 -c "import flask" 2>/dev/null; then
+if ! $PYTHON -c "import flask" 2>/dev/null; then
     echo "⚠️  Flask not installed. Installing..."
-    pip3 install flask flask-cors requests
+    $PIP install flask flask-cors requests
 fi
- 
-if ! python3 -c "import flask_cors" 2>/dev/null; then
+
+if ! $PYTHON -c "import flask_cors" 2>/dev/null; then
     echo "⚠️  Flask-CORS not installed. Installing..."
-    pip3 install flask-cors
+    $PIP install flask-cors
 fi
  
-# Check if port 5003 is already in use
-if lsof -Pi :5003 -sTCP:LISTEN -t >/dev/null ; then
-    echo "⚠️  Port 5003 is already in use. Killing existing process..."
-    kill $(lsof -t -i:5003) 2>/dev/null || true
-    sleep 1
+# Cross-platform function to check and kill process on port
+kill_port() {
+    local port=$1
+    if [ "$OS" = "windows" ]; then
+        # Windows: use netstat and taskkill
+        local pid=$(netstat -ano 2>/dev/null | grep ":$port " | grep LISTENING | awk '{print $5}' | head -1)
+        if [ -n "$pid" ] && [ "$pid" != "0" ]; then
+            echo "⚠️  Port $port is in use (PID: $pid). Killing..."
+            taskkill //F //PID "$pid" 2>/dev/null || true
+            sleep 1
+        fi
+    elif [ "$OS" = "mac" ]; then
+        # Mac: use lsof
+        if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+            echo "⚠️  Port $port is already in use. Killing existing process..."
+            kill $(lsof -t -i:$port) 2>/dev/null || true
+            sleep 1
+        fi
+    else
+        # Linux: use lsof or ss
+        if command -v lsof &>/dev/null; then
+            if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+                echo "⚠️  Port $port is already in use. Killing existing process..."
+                kill $(lsof -t -i:$port) 2>/dev/null || true
+                sleep 1
+            fi
+        elif command -v ss &>/dev/null; then
+            local pid=$(ss -tlnp 2>/dev/null | grep ":$port " | grep -oP 'pid=\K[0-9]+' | head -1)
+            if [ -n "$pid" ]; then
+                echo "⚠️  Port $port is in use (PID: $pid). Killing..."
+                kill "$pid" 2>/dev/null || true
+                sleep 1
+            fi
+        fi
+    fi
+}
+
+# Check and kill processes on ports 5003 and 8000
+kill_port 5003
+kill_port 8000
+
+# Set up cross-platform temp directory for logs
+if [ "$OS" = "windows" ]; then
+    # Windows: use TEMP or current directory
+    LOG_DIR="${TEMP:-$(pwd)}"
+else
+    # Mac/Linux: use /tmp
+    LOG_DIR="/tmp"
 fi
- 
-# Check if port 8000 is already in use
-if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null ; then
-    echo "⚠️  Port 8000 is already in use. Killing existing process..."
-    kill $(lsof -t -i:8000) 2>/dev/null || true
-    sleep 1
-fi
- 
+
 # Start the CORS proxy server
 echo "🔌 Starting CORS proxy server on port 5003..."
-python3 pf_proxy.py > /tmp/pf_proxy.log 2>&1 &
+# Set UTF-8 encoding for Windows to handle emojis in Python output
+export PYTHONIOENCODING=utf-8
+$PYTHON pf_proxy.py > "$LOG_DIR/pf_proxy.log" 2>&1 &
 PROXY_PID=$!
- 
+
 # Wait for proxy to start
 sleep 2
- 
+
 # Start the HTTP server on port 8000
 echo "🌐 Starting HTTP server on port 8000..."
-python3 -m http.server 8000 > /tmp/http_server.log 2>&1 &
+$PYTHON -m http.server 8000 > "$LOG_DIR/http_server.log" 2>&1 &
 HTTP_PID=$!
  
 # Wait for HTTP server to start
 sleep 2
  
-# Open the browser
+# Cross-platform browser opening
+open_browser() {
+    local url=$1
+    if [ "$OS" = "windows" ]; then
+        # Windows Git Bash: use explorer.exe or start with proper escaping
+        explorer.exe "$url" 2>/dev/null || start "$url" 2>/dev/null || echo "⚠️  Could not open browser. Please open: $url"
+    elif [ "$OS" = "mac" ]; then
+        # Mac: use open command
+        open "$url" 2>/dev/null || echo "⚠️  Could not open browser. Please open: $url"
+    else
+        # Linux: use xdg-open
+        xdg-open "$url" 2>/dev/null || echo "⚠️  Could not open browser. Please open: $url"
+    fi
+}
+
 echo "🌐 Opening UI in browser..."
-open "http://localhost:8000/index.local.html"
+open_browser "http://localhost:8000/index.local.html"
  
 echo ""
 echo "════════════════════════════════════════════════════════════════════════════"
@@ -105,8 +182,8 @@ echo "  • Auth Demo:      http://localhost:8000/pf_auth_demo.html"
 echo "  • Test UI:        http://localhost:8000/test_ui.html"
 echo ""
 echo "📋 Logs:"
-echo "  • Proxy:      /tmp/pf_proxy.log"
-echo "  • HTTP:       /tmp/http_server.log"
+echo "  • Proxy:      $LOG_DIR/pf_proxy.log"
+echo "  • HTTP:       $LOG_DIR/http_server.log"
 echo ""
 echo "Press Ctrl+C to stop all servers"
 echo ""
