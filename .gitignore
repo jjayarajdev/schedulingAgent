@@ -23,6 +23,11 @@ wheels/
 venv/
 ENV/
 env/
+env.bak/
+venv.bak/
+virtualenv/
+.virtualenv/
+pythonenv*/
 agent-improvements/
 archive/
 utils/

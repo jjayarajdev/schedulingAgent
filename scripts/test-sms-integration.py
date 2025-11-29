@@ -510,13 +510,13 @@ def run_comprehensive_test(environment: str, phone: str, message: str, verbose: 
     print(f"Timestamp: {datetime.utcnow().isoformat()}")
     print("="*80 + "\n")
 
-    # Test messages to send
+    # Test messages to send - realistic scheduling queries
     test_messages = [
-        f"{message} - Test 1",
-        f"{message} - Test 2",
-        f"{message} - Test 3",
-        f"{message} - Test 4",
-        f"{message} - Test 5"
+        "List out all projects",
+        "please schedule the availability of project2",
+        "What projects are available?",
+        "Show me my schedule",
+        "What's the weather today?"
     ]
 
     tests = [
