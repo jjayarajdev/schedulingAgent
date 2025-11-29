@@ -63,7 +63,7 @@ def get_stored_token():
         secrets_client = boto3.client('secretsmanager', region_name=AWS_REGION)
         response = secrets_client.get_secret_value(SecretId='projectforce/api/credentials')
         secret = json.loads(response['SecretString'])
-        token = secret.get('bearer_token', '')
+        token = secret.get('pf_token', '') or secret.get('bearer_token', '')
         if token and len(token) > 50:
             STORED_TOKEN = token
             logger.info(f"Loaded token from Secrets Manager (length: {len(token)})")
