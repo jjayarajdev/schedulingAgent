@@ -1253,13 +1253,13 @@
 
                         // Scheduled Date/Time
                         if (proj.scheduledDate) {
-                            html += `<div style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 16px; border-radius: 10px; border-left: 4px solid #2196f3;">
+                            html += `<div style="background: #f8f9fa; padding: 16px; border-radius: 10px; border: 1px solid #e1e4e8;">
                                 <div style="display: flex; align-items: center; gap: 12px;">
-                                    <span style="font-size: 20px; color: #2196F3; font-weight: bold;">&#9744;</span>
+                                    <span style="font-size: 20px; color: #059669; font-weight: bold;">&#9744;</span>
                                     <div style="flex: 1;">
-                                        <div style="font-size: 12px; color: #1976d2; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Scheduled Appointment</div>
-                                        <div style="font-size: 16px; font-weight: 700; color: #0d47a1;">${proj.scheduledDate}${proj.scheduledEndDate ? ` - ${proj.scheduledEndDate}` : ''}</div>
-                                        ${proj.estimatedDuration ? `<div style="font-size: 13px; color: #1976d2; margin-top: 4px;">Duration: ${proj.estimatedDuration}</div>` : ''}
+                                        <div style="font-size: 12px; color: #666; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Scheduled Appointment</div>
+                                        <div style="font-size: 16px; font-weight: 700; color: #1a1a1a;">${proj.scheduledDate}${proj.scheduledEndDate ? ` - ${proj.scheduledEndDate}` : ''}</div>
+                                        ${proj.estimatedDuration ? `<div style="font-size: 13px; color: #666; margin-top: 4px;">Duration: ${proj.estimatedDuration}</div>` : ''}
                                     </div>
                                 </div>
                             </div>`;
@@ -1307,7 +1307,7 @@
                         html += `</div></div>`;
 
                         // Display conversational text FIRST, then structured data
-                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="background: linear-gradient(135deg, #f0f7ff 0%, #e3f2fd 100%); padding: 18px 24px; border-radius: 12px; margin-bottom: 20px; font-size: 15px; line-height: 1.7; color: #1a1a1a; border-left: 4px solid #2196f3; box-shadow: 0 2px 6px rgba(33, 150, 243, 0.1);">
+                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="padding: 12px 0; font-size: 15px; line-height: 1.7; color: #333;">
                             ${textBeforeJson.replace(/\n/g, '<br>')}
                         </div>` : '';
                         return conversationalHtml + html;
@@ -1370,7 +1370,7 @@
                         }
 
                         // Display conversational text FIRST, then structured data
-                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="background: linear-gradient(135deg, #f0f7ff 0%, #e3f2fd 100%); padding: 18px 24px; border-radius: 12px; margin-bottom: 20px; font-size: 15px; line-height: 1.7; color: #1a1a1a; border-left: 4px solid #2196f3; box-shadow: 0 2px 6px rgba(33, 150, 243, 0.1);">
+                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="padding: 12px 0; font-size: 15px; line-height: 1.7; color: #333;">
                             ${textBeforeJson.replace(/\n/g, '<br>')}
                         </div>` : '';
                         return conversationalHtml + html;
@@ -1425,7 +1425,7 @@
                         html += `</div>`;
 
                         // Display conversational text FIRST, then structured data
-                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="background: linear-gradient(135deg, #f0f7ff 0%, #e3f2fd 100%); padding: 18px 24px; border-radius: 12px; margin-bottom: 20px; font-size: 15px; line-height: 1.7; color: #1a1a1a; border-left: 4px solid #2196f3; box-shadow: 0 2px 6px rgba(33, 150, 243, 0.1);">
+                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="padding: 12px 0; font-size: 15px; line-height: 1.7; color: #333;">
     ${textBeforeJson.replace(/\n/g, '<br>')}
 </div>` : '';
                         return conversationalHtml + html;
@@ -1504,13 +1504,13 @@
 
                         // Location summary if available
                         if (data.location) {
-                            html += `<div style="background: #f8f9fa; border-left: 4px solid #0066cc; padding: 12px 16px; border-radius: 8px; margin: 16px 0; font-size: 14px; color: #495057;">
+                            html += `<div style="background: #f8f9fa; border: 1px solid #e1e4e8; padding: 12px 16px; border-radius: 8px; margin: 16px 0; font-size: 14px; color: #495057;">
                                 <strong>&#9679; Location:</strong> ${data.location.address || data.location}
                             </div>`;
                         }
 
                         // Display conversational text FIRST, then structured data
-                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="background: linear-gradient(135deg, #f0f7ff 0%, #e3f2fd 100%); padding: 18px 24px; border-radius: 12px; margin-bottom: 20px; font-size: 15px; line-height: 1.7; color: #1a1a1a; border-left: 4px solid #2196f3; box-shadow: 0 2px 6px rgba(33, 150, 243, 0.1);">
+                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="padding: 12px 0; font-size: 15px; line-height: 1.7; color: #333;">
     ${textBeforeJson.replace(/\n/g, '<br>')}
 </div>` : '';
                         const finalHtml = conversationalHtml + html;
@@ -1598,7 +1598,7 @@
                         }
 
                         // Display conversational text FIRST, then structured data
-                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="background: linear-gradient(135deg, #f0f7ff 0%, #e3f2fd 100%); padding: 18px 24px; border-radius: 12px; margin-bottom: 20px; font-size: 15px; line-height: 1.7; color: #1a1a1a; border-left: 4px solid #2196f3; box-shadow: 0 2px 6px rgba(33, 150, 243, 0.1);">
+                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="padding: 12px 0; font-size: 15px; line-height: 1.7; color: #333;">
     ${textBeforeJson.replace(/\n/g, '<br>')}
 </div>` : '';
                         return conversationalHtml + html;
@@ -1675,7 +1675,7 @@
 
                         if (data.nextSteps && Array.isArray(data.nextSteps) && data.nextSteps.length > 0) {
                             html += `
-                            <div style="background: #f8f9fa; border-left: 4px solid #0066cc; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+                            <div style="background: #f8f9fa; border: 1px solid #e1e4e8; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
                                 <div style="font-size: 14px; font-weight: 600; color: #333; margin-bottom: 12px;">&#9998; Next Steps:</div>
                                 <ul style="margin: 0; padding-left: 20px; color: #555; font-size: 14px; line-height: 1.8;">
                                     ${data.nextSteps.map(step => `<li>${step}</li>`).join('')}
@@ -1684,7 +1684,7 @@
                         }
 
                         // Display conversational text FIRST, then structured data
-                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="background: linear-gradient(135deg, #f0f7ff 0%, #e3f2fd 100%); padding: 18px 24px; border-radius: 12px; margin-bottom: 20px; font-size: 15px; line-height: 1.7; color: #1a1a1a; border-left: 4px solid #2196f3; box-shadow: 0 2px 6px rgba(33, 150, 243, 0.1);">
+                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="padding: 12px 0; font-size: 15px; line-height: 1.7; color: #333;">
     ${textBeforeJson.replace(/\n/g, '<br>')}
 </div>` : '';
                         return conversationalHtml + html;
@@ -1801,19 +1801,19 @@
             let detailsMatch = content.match(/(Type:|Category:|Status:|Address:|Order Number:)/);
             if (detailsMatch) {
                 content = content.replace(/(Type:)\s*([^\n]+)/g,
-                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;">&#9881; Type</span><span style="color: #333; font-weight: 500;">$2</span></div>');
+                    '<div style="background: #f8f9fa; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border: 1px solid #e1e4e8;"><span style="color: #666; font-weight: 600; font-size: 14px;">&#9881; Type</span><span style="color: #333; font-weight: 500;">$2</span></div>');
 
                 content = content.replace(/(Category:)\s*([^\n]+)/g,
-                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;">&#8505; Category</span><span style="color: #333; font-weight: 500;">$2</span></div>');
+                    '<div style="background: #f8f9fa; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border: 1px solid #e1e4e8;"><span style="color: #666; font-weight: 600; font-size: 14px;">&#8505; Category</span><span style="color: #333; font-weight: 500;">$2</span></div>');
 
                 content = content.replace(/(Status:)\s*([^\n]+)/g,
-                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;">&#9641; Status</span><span style="color: #333; font-weight: 500;">$2</span></div>');
+                    '<div style="background: #f8f9fa; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border: 1px solid #e1e4e8;"><span style="color: #666; font-weight: 600; font-size: 14px;">&#9641; Status</span><span style="color: #333; font-weight: 500;">$2</span></div>');
 
                 content = content.replace(/(Address:)\s*([^\n]+)/g,
-                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;">&#9679; Address</span><span style="color: #333; font-weight: 500;">$2</span></div>');
+                    '<div style="background: #f8f9fa; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border: 1px solid #e1e4e8;"><span style="color: #666; font-weight: 600; font-size: 14px;">&#9679; Address</span><span style="color: #333; font-weight: 500;">$2</span></div>');
 
                 content = content.replace(/(Order Number:)\s*([^\n]+)/g,
-                    '<div style="background: #f0f7ff; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border-left: 3px solid #0066cc;"><span style="color: #0066cc; font-weight: 600; font-size: 14px;"># Order</span><span style="color: #333; font-family: monospace; font-size: 12px;">$2</span></div>');
+                    '<div style="background: #f8f9fa; padding: 14px 18px; margin: 8px 0; border-radius: 8px; display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; border: 1px solid #e1e4e8;"><span style="color: #666; font-weight: 600; font-size: 14px;"># Order</span><span style="color: #333; font-family: monospace; font-size: 12px;">$2</span></div>');
             }
 
             // 6. Format available dates (Pattern: "Week 1: Nov 10-15")
@@ -1865,15 +1865,41 @@
             content = content.replace(/(I encountered an error[^\.]+\.)/gi,
                 '<div style="background: linear-gradient(135deg, #fff0f0 0%, #ffe0e0 100%); padding: 16px 20px; border-radius: 10px; margin: 14px 0; border-left: 4px solid #dc3545; box-shadow: 0 2px 8px rgba(220,53,69,0.2);"><span style="font-size: 20px; margin-right: 10px;">&#9888;</span><span style="color: #721c24; font-weight: 500; font-size: 14px;">$1</span></div>');
 
-            // 10. Format "Would you like..." questions - Better styling
+            // 10. Format "Would you like..." questions - Clean styling
             content = content.replace(/(Would you like[^?]+\?)/gi,
-                '<div style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 18px 22px; border-radius: 12px; margin: 16px 0; border-left: 4px solid #2196f3; box-shadow: 0 3px 10px rgba(33,150,243,0.25);"><div style="display: flex; align-items: center; gap: 12px;"><span style="font-size: 24px;">&#9674;</span><span style="color: #0d47a1; font-weight: 600; font-size: 15px; line-height: 1.5;">$1</span></div></div>');
+                '<div style="background: #f8f9fa; padding: 18px 22px; border-radius: 12px; margin: 16px 0; border: 1px solid #e1e4e8;"><div style="display: flex; align-items: center; gap: 12px;"><span style="font-size: 24px;">&#9674;</span><span style="color: #333; font-weight: 600; font-size: 15px; line-height: 1.5;">$1</span></div></div>');
 
-            // 11. Format scheduling information responses
+            // 11. Format scheduling information responses (old format with from...to)
             content = content.replace(/(this project is scheduled for|scheduled for) ([^\.]+\d{4}[^\.]*from \d{1,2}:\d{2} [AP]M to \d{1,2}:\d{2} [AP]M[^\.]*)/gi,
                 '<div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 20px 24px; border-radius: 12px; margin: 16px 0; border-left: 4px solid #4caf50; box-shadow: 0 3px 10px rgba(76,175,80,0.25);"><div style="display: flex; align-items: start; gap: 14px;"><span style="font-size: 20px; color: #2196F3; font-weight: bold;">&#9744;</span><div style="flex: 1;"><div style="color: #1b5e20; font-weight: 600; font-size: 16px; margin-bottom: 8px;">Project Schedule</div><div style="color: #2e7d32; font-weight: 500; font-size: 15px; line-height: 1.6;">$2</div></div></div></div>');
 
-            // 12. Format technician information
+            // 11b. Format "Your [Type] project (#ID) is scheduled for **Date at Time**" responses
+            content = content.replace(/Your ([^(]+)project \(#(\d+)\) is scheduled for \*\*([^*]+)\*\*/gi,
+                '<div style="font-size: 15px; line-height: 1.6; color: #333; margin-bottom: 12px;">Here\'s the schedule for your $1project:</div>' +
+                '<div style="background: #f8f9fa; border-radius: 12px; padding: 20px; margin: 16px 0; border: 1px solid #e1e4e8;">' +
+                '<div style="display: flex; align-items: center; gap: 16px;">' +
+                '<div style="width: 52px; height: 52px; background: linear-gradient(135deg, #059669 0%, #10b981 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><span style="color: white; font-size: 24px;">&#128197;</span></div>' +
+                '<div style="flex: 1;">' +
+                '<div style="font-size: 13px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Scheduled Appointment</div>' +
+                '<div style="font-size: 18px; font-weight: 600; color: #059669;">$3</div>' +
+                '<div style="font-size: 14px; color: #666; margin-top: 4px;">$1<span style="background: #e8f4fd; padding: 3px 8px; border-radius: 4px; color: #0066cc; font-weight: 600; font-size: 12px; margin-left: 8px;">#$2</span></div>' +
+                '</div></div></div>');
+
+            // 12a. Format technician + schedule combined message (new pattern with markdown bold)
+            content = content.replace(/\*\*([^*]+)\*\* is the technician assigned to your ([^(]+)project \(#(\d+)\)\. They're scheduled to arrive on \*\*([^*]+)\*\*\./gi,
+                '<div style="font-size: 15px; line-height: 1.6; color: #333; margin-bottom: 16px;">Here are the details for your $2project:</div>' +
+                '<div style="background: #f8f9fa; border-radius: 12px; padding: 20px; margin: 16px 0; border: 1px solid #e1e4e8;">' +
+                '<div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px;">' +
+                '<div style="width: 52px; height: 52px; background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><span style="color: white; font-size: 24px;">&#128100;</span></div>' +
+                '<div><div style="font-size: 18px; font-weight: 600; color: #1a1a1a;">$1</div><div style="font-size: 13px; color: #666; margin-top: 2px;">Your Assigned Technician</div></div>' +
+                '</div>' +
+                '<div style="background: white; border-radius: 8px; padding: 16px; border: 1px solid #e1e4e8;">' +
+                '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">' +
+                '<div><div style="color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Project</div><div style="font-weight: 600; font-size: 15px;">$2<span style="background: #e8f4fd; padding: 3px 8px; border-radius: 4px; color: #0066cc; font-weight: 600; font-size: 12px; margin-left: 8px;">#$3</span></div></div>' +
+                '<div><div style="color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Scheduled Arrival</div><div style="font-weight: 600; font-size: 15px; color: #059669;">$4</div></div>' +
+                '</div></div></div>');
+
+            // 12b. Format technician information (fallback for other patterns)
             content = content.replace(/(The technician assigned to this project is) ([^\.]+\.)/gi,
                 '<div style="background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); padding: 18px 22px; border-radius: 12px; margin: 16px 0; border-left: 4px solid #9c27b0; box-shadow: 0 3px 10px rgba(156,39,176,0.25);"><div style="display: flex; align-items: start; gap: 14px;"><span style="font-size: 20px; color: #7b1fa2;">&#9733;</span><div style="flex: 1;"><div style="color: #4a148c; font-weight: 600; font-size: 15px; line-height: 1.6;">$2</div></div></div></div>');
 
