@@ -825,11 +825,20 @@ def login():
                     "updated_by": "pf_proxy.py login"
                 }
 
-                secrets_client.put_secret_value(
-                    SecretId='projectforce/api/credentials',
-                    SecretString=json.dumps(secret_value)
-                )
-                logger.info("✓ Fresh token saved to Secrets Manager")
+                # Try put first, create if doesn't exist
+                try:
+                    secrets_client.put_secret_value(
+                        SecretId='projectforce/api/credentials',
+                        SecretString=json.dumps(secret_value)
+                    )
+                except secrets_client.exceptions.ResourceNotFoundException:
+                    secrets_client.create_secret(
+                        Name='projectforce/api/credentials',
+                        Description='ProjectForce API credentials for scheduling agent',
+                        SecretString=json.dumps(secret_value)
+                    )
+                    logger.info("Created new secret: projectforce/api/credentials")
+                logger.info("Fresh token saved to Secrets Manager")
             except Exception as save_err:
                 logger.error(f"Failed to save token to Secrets Manager: {save_err}")
                 # Continue anyway - UI can still use the token
@@ -895,12 +904,22 @@ def api_set_token():
                 secret_data['REFRESH_TOKEN'] = secret_data.get('REFRESH_TOKEN', 'true')
                 secret_data['environment'] = secret_data.get('environment', 'dev')
 
-                secrets_client.update_secret(
-                    SecretId='projectforce/api/credentials',
-                    SecretString=json.dumps(secret_data)
-                )
+                # Try update first, create if doesn't exist
+                try:
+                    secrets_client.update_secret(
+                        SecretId='projectforce/api/credentials',
+                        SecretString=json.dumps(secret_data)
+                    )
+                    logger.info("Token updated in AWS Secrets Manager")
+                except secrets_client.exceptions.ResourceNotFoundException:
+                    # Secret doesn't exist, create it
+                    secrets_client.create_secret(
+                        Name='projectforce/api/credentials',
+                        Description='ProjectForce API credentials for scheduling agent',
+                        SecretString=json.dumps(secret_data)
+                    )
+                    logger.info("Token saved to NEW Secrets Manager secret")
                 secrets_success = True
-                logger.info("Token updated in AWS Secrets Manager")
             except Exception as e:
                 secrets_error = str(e)
                 logger.error(f"Failed to update Secrets Manager: {e}")
@@ -996,6 +1015,22 @@ def save_token_to_secrets():
         api_url = PF_API_BASE
         logger.info(f"📝 Using API URL for {ENVIRONMENT}: {api_url}")
 
+        # Helper function to create or update secret
+        def save_secret(secret_id, secret_name, secret_data, description):
+            try:
+                secrets_client.put_secret_value(
+                    SecretId=secret_id,
+                    SecretString=json.dumps(secret_data)
+                )
+            except secrets_client.exceptions.ResourceNotFoundException:
+                # Secret doesn't exist, create it
+                secrets_client.create_secret(
+                    Name=secret_name,
+                    Description=description,
+                    SecretString=json.dumps(secret_data)
+                )
+                logger.info(f"Created new secret: {secret_name}")
+
         # Update target secret
         secret_value = {
             "pf_token": access_token,
@@ -1007,9 +1042,11 @@ def save_token_to_secrets():
             "notes": "Saved from UI login"
         }
 
-        secrets_client.put_secret_value(
-            SecretId='scheduling-agent/pf360/api-credentials',
-            SecretString=json.dumps(secret_value)
+        save_secret(
+            'scheduling-agent/pf360/api-credentials',
+            'scheduling-agent/pf360/api-credentials',
+            secret_value,
+            'ProjectForce API credentials (target)'
         )
 
         # Also update source secret
@@ -1020,12 +1057,14 @@ def save_token_to_secrets():
             "api_base_url": api_url
         }
 
-        secrets_client.put_secret_value(
-            SecretId='projectforce/api/credentials',
-            SecretString=json.dumps(source_secret)
+        save_secret(
+            'projectforce/api/credentials',
+            'projectforce/api/credentials',
+            source_secret,
+            'ProjectForce API credentials for scheduling agent'
         )
 
-        logger.info("✅ Token saved to both secrets")
+        logger.info("Token saved to both secrets")
 
         return jsonify({"status": "success", "message": "Token saved to AWS Secrets Manager"}), 200
 
