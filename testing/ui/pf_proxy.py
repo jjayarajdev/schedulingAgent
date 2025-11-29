@@ -738,15 +738,16 @@ def login():
             logger.info(f"✓ Loaded credentials from Secrets Manager: client_id={client_id}, user_id={user_id}")
             logger.info(f"✓ Bearer token loaded (length: {len(bearer_token)})")
 
-            # Step 2: Validate the token - try to use it
+            # Step 2: Validate the token - try to use it against the DASHBOARD API
+            # (not auth endpoint, which returns 200 for stale tokens)
             if bearer_token and len(bearer_token) > 100:
-                logger.info("⏳ Validating existing token...")
+                logger.info("⏳ Validating existing token against dashboard API...")
                 validation_response = requests.get(
-                    f"{PF_API_BASE}/authentication/token/{user_id}",
-                    params={"identifier": "projectsforce-validation"},
+                    f"{PF_API_BASE}/dashboard/get/{client_id}/{user_id}",
                     headers={
                         "Authorization": f"Bearer {bearer_token}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
+                        "client_id": client_id
                     },
                     timeout=5
                 )
@@ -798,7 +799,8 @@ def login():
 
         if login_response.status_code == 200:
             login_data = login_response.json()
-            fresh_token = login_data.get('access_token', login_data.get('token', ''))
+            # API returns 'accesstoken' (no underscore) - check all variants
+            fresh_token = login_data.get('accesstoken', login_data.get('access_token', login_data.get('token', '')))
 
             if not fresh_token or len(fresh_token) < 100:
                 logger.error(f"Login successful but no valid token in response: {login_data}")
@@ -811,9 +813,10 @@ def login():
 
             # Step 4: Save fresh token to Secrets Manager
             try:
-                # Get client_id and user_id from login response or use defaults
-                response_client_id = login_data.get('client_id', credentials.get('client_id', '09PF05VD'))
-                response_user_id = login_data.get('user_id', login_data.get('customer_id', credentials.get('user_id', '1646085')))
+                # Get client_id and user_id from login response (inside 'user' object)
+                user_data = login_data.get('user', {})
+                response_client_id = user_data.get('client_id', credentials.get('client_id', '09PF05VD'))
+                response_user_id = user_data.get('customer_id', user_data.get('user_id', credentials.get('user_id', '1646085')))
 
                 secret_value = {
                     "bearer_token": fresh_token,
