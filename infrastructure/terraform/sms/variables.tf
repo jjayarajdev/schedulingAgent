@@ -11,16 +11,10 @@ variable "environment" {
   }
 }
 
-variable "supervisor_agent_id" {
-  description = "Bedrock Supervisor Agent ID"
+variable "orchestrator_lambda_name" {
+  description = "Name of the multi-agent orchestrator Lambda function"
   type        = string
-  default     = "5VTIWONUMO"
-}
-
-variable "supervisor_alias_id" {
-  description = "Bedrock Supervisor Agent Alias ID"
-  type        = string
-  default     = "HH2U7EZXMW"
+  default     = "scheduling-agent-orchestrator-dev"
 }
 
 variable "additional_tags" {

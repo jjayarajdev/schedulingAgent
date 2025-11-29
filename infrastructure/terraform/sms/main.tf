@@ -1,5 +1,6 @@
-# Phase 2: AWS End User Messaging SMS Infrastructure
-# This Terraform configuration sets up AWS SMS services for two-way messaging
+# Simplified SMS Infrastructure for Development
+# This version excludes phone number provisioning for faster testing
+# Use this for development, then switch to main.tf for production
 
 terraform {
   required_version = ">= 1.5.0"
@@ -20,133 +21,17 @@ data "aws_caller_identity" "current" {}
 locals {
   project_name = "scheduling-agent"
   environment  = var.environment
+  # Phone number for development (matches the provisioned number)
+  phone_number = "+14255556160"
   tags = merge(
     var.additional_tags,
     {
       Project     = local.project_name
       Environment = var.environment
       ManagedBy   = "Terraform"
-      Phase       = "Phase2-SMS"
+      Phase       = "Phase2-SMS-Dev"
     }
   )
-}
-
-#==============================================================================
-# AWS End User Messaging SMS - Phone Number Pool
-#==============================================================================
-
-# Pool for phone numbers
-resource "aws_pinpointsmsvoicev2_phone_number" "main" {
-  iso_country_code         = "US"
-  message_type            = "TRANSACTIONAL"
-  number_type             = "TOLL_FREE"
-  number_capabilities     = ["SMS", "MMS", "VOICE"]
-  deletion_protection_enabled = var.environment == "prod" ? true : false
-
-  tags = merge(
-    local.tags,
-    {
-      Name = "${local.project_name}-toll-free-${var.environment}"
-    }
-  )
-}
-
-#==============================================================================
-# Opt-Out List
-#==============================================================================
-
-resource "aws_pinpointsmsvoicev2_opt_out_list" "main" {
-  opt_out_list_name = "${local.project_name}-opt-out-${var.environment}"
-
-  tags = local.tags
-}
-
-# Associate phone number with opt-out list
-resource "aws_pinpointsmsvoicev2_phone_number_association" "opt_out" {
-  phone_number_id   = aws_pinpointsmsvoicev2_phone_number.main.id
-  opt_out_list_name = aws_pinpointsmsvoicev2_opt_out_list.main.opt_out_list_name
-}
-
-#==============================================================================
-# Configuration Set for Event Tracking
-#==============================================================================
-
-resource "aws_pinpointsmsvoicev2_configuration_set" "main" {
-  name = "${local.project_name}-sms-config-${var.environment}"
-
-  tags = local.tags
-}
-
-# CloudWatch event destination for delivery events
-resource "aws_pinpointsmsvoicev2_event_destination" "cloudwatch" {
-  configuration_set_name = aws_pinpointsmsvoicev2_configuration_set.main.name
-  event_destination_name = "cloudwatch-logs"
-
-  matching_event_types = [
-    "TEXT_SENT",
-    "TEXT_SUCCESSFUL",
-    "TEXT_DELIVERED",
-    "TEXT_TTL_EXPIRED",
-    "TEXT_INVALID",
-    "TEXT_UNREACHABLE",
-    "TEXT_CARRIER_UNREACHABLE",
-    "TEXT_BLOCKED",
-    "TEXT_CARRIER_BLOCKED",
-    "TEXT_SPAM",
-    "TEXT_UNKNOWN",
-  ]
-
-  cloud_watch_logs_destination {
-    iam_role_arn   = aws_iam_role.sms_cloudwatch.arn
-    log_group_arn  = aws_cloudwatch_log_group.sms_events.arn
-  }
-}
-
-# CloudWatch log group
-resource "aws_cloudwatch_log_group" "sms_events" {
-  name              = "/aws/sms/${local.project_name}/${var.environment}"
-  retention_in_days = 30
-
-  tags = local.tags
-}
-
-# IAM role for CloudWatch logging
-resource "aws_iam_role" "sms_cloudwatch" {
-  name = "${local.project_name}-sms-cloudwatch-${var.environment}"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "sms-voice.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
-
-  tags = local.tags
-}
-
-resource "aws_iam_role_policy" "sms_cloudwatch" {
-  name = "cloudwatch-logs"
-  role = aws_iam_role.sms_cloudwatch.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "${aws_cloudwatch_log_group.sms_events.arn}:*"
-      }
-    ]
-  })
 }
 
 #==============================================================================
@@ -154,14 +39,13 @@ resource "aws_iam_role_policy" "sms_cloudwatch" {
 #==============================================================================
 
 resource "aws_sns_topic" "sms_inbound" {
-  name              = "${local.project_name}-sms-inbound-${var.environment}"
-  display_name      = "Inbound SMS Messages"
-  kms_master_key_id = "alias/aws/sns"
+  name         = "${local.project_name}-sms-inbound-${var.environment}"
+  display_name = "Inbound SMS Messages"
+  # KMS encryption removed for dev environment
 
   tags = local.tags
 }
 
-# SNS topic policy
 resource "aws_sns_topic_policy" "sms_inbound" {
   arn = aws_sns_topic.sms_inbound.arn
 
@@ -169,7 +53,6 @@ resource "aws_sns_topic_policy" "sms_inbound" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "AllowSMSPublish"
         Effect = "Allow"
         Principal = {
           Service = "sms-voice.amazonaws.com"
@@ -179,19 +62,6 @@ resource "aws_sns_topic_policy" "sms_inbound" {
       }
     ]
   })
-}
-
-# Associate phone number with SNS topic for inbound messages
-resource "aws_pinpointsmsvoicev2_phone_number_association" "sns" {
-  phone_number_id = aws_pinpointsmsvoicev2_phone_number.main.id
-
-  # Two-way configuration
-  # Note: This must be configured via AWS Console or CLI after phone number is provisioned
-  # The association with SNS topic for inbound messages happens through the console
-  depends_on = [
-    aws_sns_topic.sms_inbound,
-    aws_pinpointsmsvoicev2_phone_number.main
-  ]
 }
 
 #==============================================================================
@@ -236,16 +106,9 @@ resource "aws_dynamodb_table" "sms_consent" {
     enabled        = true
   }
 
-  point_in_time_recovery {
-    enabled = var.environment == "prod" ? true : false
-  }
-
-  tags = merge(
-    local.tags,
-    {
-      Name = "${local.project_name}-sms-consent-${var.environment}"
-    }
-  )
+  tags = merge(local.tags, {
+    Name = "${local.project_name}-sms-consent-${var.environment}"
+  })
 }
 
 # Opt-Out Tracking Table
@@ -277,19 +140,12 @@ resource "aws_dynamodb_table" "opt_out_tracking" {
     projection_type = "ALL"
   }
 
-  point_in_time_recovery {
-    enabled = var.environment == "prod" ? true : false
-  }
-
-  tags = merge(
-    local.tags,
-    {
-      Name = "${local.project_name}-opt-out-tracking-${var.environment}"
-    }
-  )
+  tags = merge(local.tags, {
+    Name = "${local.project_name}-opt-out-tracking-${var.environment}"
+  })
 }
 
-# SMS Messages Table (for audit trail)
+# SMS Messages Table
 resource "aws_dynamodb_table" "sms_messages" {
   name           = "${local.project_name}-sms-messages-${var.environment}"
   billing_mode   = "PAY_PER_REQUEST"
@@ -334,19 +190,12 @@ resource "aws_dynamodb_table" "sms_messages" {
     enabled        = true
   }
 
-  point_in_time_recovery {
-    enabled = var.environment == "prod" ? true : false
-  }
-
-  tags = merge(
-    local.tags,
-    {
-      Name = "${local.project_name}-sms-messages-${var.environment}"
-    }
-  )
+  tags = merge(local.tags, {
+    Name = "${local.project_name}-sms-messages-${var.environment}"
+  })
 }
 
-# SMS Sessions Table (for conversation state)
+# SMS Sessions Table
 resource "aws_dynamodb_table" "sms_sessions" {
   name           = "${local.project_name}-sms-sessions-${var.environment}"
   billing_mode   = "PAY_PER_REQUEST"
@@ -373,19 +222,26 @@ resource "aws_dynamodb_table" "sms_sessions" {
     enabled        = true
   }
 
-  tags = merge(
-    local.tags,
-    {
-      Name = "${local.project_name}-sms-sessions-${var.environment}"
-    }
-  )
+  tags = merge(local.tags, {
+    Name = "${local.project_name}-sms-sessions-${var.environment}"
+  })
 }
 
 #==============================================================================
-# Lambda Functions
+# CloudWatch Logs
 #==============================================================================
 
-# Lambda execution role
+resource "aws_cloudwatch_log_group" "lambda_sms_inbound" {
+  name              = "/aws/lambda/${local.project_name}-sms-inbound-${var.environment}"
+  retention_in_days = 7  # Shorter retention for dev
+
+  tags = local.tags
+}
+
+#==============================================================================
+# Lambda IAM Role
+#==============================================================================
+
 resource "aws_iam_role" "lambda_sms" {
   name = "${local.project_name}-lambda-sms-${var.environment}"
 
@@ -405,13 +261,11 @@ resource "aws_iam_role" "lambda_sms" {
   tags = local.tags
 }
 
-# Lambda basic execution policy
 resource "aws_iam_role_policy_attachment" "lambda_basic" {
   role       = aws_iam_role.lambda_sms.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Lambda SMS permissions policy
 resource "aws_iam_role_policy" "lambda_sms_permissions" {
   name = "sms-permissions"
   role = aws_iam_role.lambda_sms.id
@@ -451,9 +305,12 @@ resource "aws_iam_role_policy" "lambda_sms_permissions" {
       {
         Effect = "Allow"
         Action = [
-          "bedrock-agent-runtime:InvokeAgent"
+          "lambda:InvokeFunction"
         ]
-        Resource = "arn:aws:bedrock:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:agent/*"
+        Resource = [
+          "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:pf-orchestrator",
+          "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:*-orchestrator-*"
+        ]
       },
       {
         Effect = "Allow"
@@ -461,12 +318,22 @@ resource "aws_iam_role_policy" "lambda_sms_permissions" {
           "sns:Publish"
         ]
         Resource = aws_sns_topic.sms_inbound.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:projectforce/api/credentials-*"
       }
     ]
   })
 }
 
-# Inbound SMS Processor Lambda
+#==============================================================================
+# Lambda Function
+#==============================================================================
+
 resource "aws_lambda_function" "sms_inbound_processor" {
   filename      = "${path.module}/../../../lambda/sms-inbound-processor/lambda.zip"
   function_name = "${local.project_name}-sms-inbound-${var.environment}"
@@ -476,41 +343,34 @@ resource "aws_lambda_function" "sms_inbound_processor" {
   timeout       = 30
   memory_size   = 512
 
+  source_code_hash = filebase64sha256("${path.module}/../../../lambda/sms-inbound-processor/lambda.zip")
+
   environment {
     variables = {
       ENVIRONMENT             = var.environment
-      SUPERVISOR_AGENT_ID     = var.supervisor_agent_id
-      SUPERVISOR_ALIAS_ID     = var.supervisor_alias_id
-      ORIGINATION_NUMBER      = aws_pinpointsmsvoicev2_phone_number.main.phone_number
+      ORCHESTRATOR_LAMBDA     = "pf-orchestrator"  # Using existing pf-orchestrator lambda
+      ORIGINATION_NUMBER      = local.phone_number
       CONSENT_TABLE           = aws_dynamodb_table.sms_consent.name
       OPT_OUT_TRACKING_TABLE  = aws_dynamodb_table.opt_out_tracking.name
       MESSAGES_TABLE          = aws_dynamodb_table.sms_messages.name
       SESSIONS_TABLE          = aws_dynamodb_table.sms_sessions.name
       AWS_REGION_NAME         = data.aws_region.current.name
+      SMS_CONFIGURATION_SET   = "${local.project_name}-sms-config-${var.environment}"
+      PF_SECRET_NAME          = "projectforce/api/credentials"
     }
   }
 
-  depends_on = [
-    aws_iam_role_policy_attachment.lambda_basic,
-    aws_iam_role_policy.lambda_sms_permissions
-  ]
-
-  tags = merge(
-    local.tags,
-    {
-      Name = "${local.project_name}-sms-inbound-${var.environment}"
-    }
-  )
+  tags = local.tags
 }
 
-# SNS subscription for inbound messages
+# SNS subscription to trigger Lambda
 resource "aws_sns_topic_subscription" "sms_inbound_lambda" {
   topic_arn = aws_sns_topic.sms_inbound.arn
   protocol  = "lambda"
   endpoint  = aws_lambda_function.sms_inbound_processor.arn
 }
 
-# Lambda permission for SNS to invoke
+# Grant SNS permission to invoke Lambda
 resource "aws_lambda_permission" "sns_invoke" {
   statement_id  = "AllowExecutionFromSNS"
   action        = "lambda:InvokeFunction"
@@ -519,10 +379,41 @@ resource "aws_lambda_permission" "sns_invoke" {
   source_arn    = aws_sns_topic.sms_inbound.arn
 }
 
-# CloudWatch log group for Lambda
-resource "aws_cloudwatch_log_group" "lambda_sms_inbound" {
-  name              = "/aws/lambda/${aws_lambda_function.sms_inbound_processor.function_name}"
-  retention_in_days = 30
+#==============================================================================
+# Outputs
+#==============================================================================
 
-  tags = local.tags
+output "sns_topic_arn" {
+  description = "SNS topic ARN for testing"
+  value       = aws_sns_topic.sms_inbound.arn
+}
+
+output "lambda_function_name" {
+  description = "Lambda function name"
+  value       = aws_lambda_function.sms_inbound_processor.function_name
+}
+
+output "lambda_function_arn" {
+  description = "Lambda function ARN"
+  value       = aws_lambda_function.sms_inbound_processor.arn
+}
+
+output "dynamodb_tables" {
+  description = "DynamoDB table names"
+  value = {
+    consent      = aws_dynamodb_table.sms_consent.name
+    opt_out      = aws_dynamodb_table.opt_out_tracking.name
+    messages     = aws_dynamodb_table.sms_messages.name
+    sessions     = aws_dynamodb_table.sms_sessions.name
+  }
+}
+
+output "phone_number" {
+  description = "Phone number for SMS messaging"
+  value       = local.phone_number
+}
+
+output "test_command" {
+  description = "Command to test the SMS processor"
+  value       = "python scripts/test-sms-sns-trigger.py --environment ${var.environment} --phone +15555551234 --message 'Test message'"
 }
