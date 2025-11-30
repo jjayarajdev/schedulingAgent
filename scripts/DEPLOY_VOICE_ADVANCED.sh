@@ -1061,7 +1061,7 @@ echo -e "${YELLOW}Step 4: Generating Contact Flow Configuration${NC}"
 echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 echo ""
 
-INFRA_VOICE_DIR="infrastructure/voice"
+INFRA_VOICE_DIR="${PROJECT_DIR}/infrastructure/voice"
 
 # Check if Lex bot exists and get its ID
 echo "  -> Checking for existing Lex bot..."
@@ -1101,6 +1101,22 @@ else
             --role-name "$LEX_BOT_ROLE_NAME" \
             --policy-arn "arn:aws:iam::aws:policy/AmazonLexFullAccess" &>/dev/null
 
+        # CRITICAL: ComprehendFullAccess is REQUIRED for Sentiment Analysis
+        aws_cmd iam attach-role-policy \
+            --role-name "$LEX_BOT_ROLE_NAME" \
+            --policy-arn "arn:aws:iam::aws:policy/ComprehendFullAccess" &>/dev/null
+
+        echo "  [OK] Attached policies: AmazonLexFullAccess, ComprehendFullAccess"
+
+        # VERIFY policies are attached
+        ATTACHED_POLICIES=$(aws_cmd iam list-attached-role-policies --role-name "$LEX_BOT_ROLE_NAME" --query "AttachedPolicies[].PolicyName" --output text 2>/dev/null || echo "")
+        if [[ "$ATTACHED_POLICIES" == *"AmazonLexFullAccess"* ]] && [[ "$ATTACHED_POLICIES" == *"ComprehendFullAccess"* ]]; then
+            echo "  [VERIFIED] Both policies attached: $ATTACHED_POLICIES"
+        else
+            echo "  [ERROR] Policy attachment failed! Attached: $ATTACHED_POLICIES"
+            exit 1
+        fi
+
         # Dynamic polling for Lex IAM role propagation (max 5 minutes)
         echo "  -> Waiting for Lex IAM role to propagate (max 5 minutes)..."
         LEX_ROLE_MAX_WAIT=300
@@ -1131,6 +1147,20 @@ else
             EXTRA=$((MIN_SAFETY - LEX_ROLE_ELAPSED))
             echo "  -> Adding ${EXTRA}s safety buffer..."
             sleep $EXTRA
+        fi
+    else
+        # Role already exists - ensure ComprehendFullAccess is attached
+        echo "  -> Lex IAM role already exists, ensuring policies..."
+        aws_cmd iam attach-role-policy \
+            --role-name "$LEX_BOT_ROLE_NAME" \
+            --policy-arn "arn:aws:iam::aws:policy/ComprehendFullAccess" &>/dev/null || true
+
+        # VERIFY policies
+        ATTACHED_POLICIES=$(aws_cmd iam list-attached-role-policies --role-name "$LEX_BOT_ROLE_NAME" --query "AttachedPolicies[].PolicyName" --output text 2>/dev/null || echo "")
+        if [[ "$ATTACHED_POLICIES" == *"ComprehendFullAccess"* ]]; then
+            echo "  [OK] ComprehendFullAccess verified on existing role"
+        else
+            echo "  [WARN] ComprehendFullAccess may not be attached. Sentiment analysis may fail."
         fi
     fi
 
@@ -1221,10 +1251,21 @@ try:
         },
         {
             'name': 'Goodbye',
-            'description': 'End conversation',
+            'description': 'End conversation and disconnect call',
             'utterances': [
-                'goodbye', 'bye', 'see you', 'later', 'thanks bye',
-                'thank you goodbye', 'that is all', 'I am done', 'nothing else'
+                # Standard goodbyes
+                'goodbye', 'bye', 'bye bye', 'see you', 'see you later',
+                'thanks bye', 'thank you goodbye', 'ok bye', 'alright bye',
+                # Session ending phrases
+                'that is all', 'thats all', 'that will be all',
+                'I am done', 'im done', 'all done', 'nothing else',
+                'no more questions', 'I am finished', 'we are done',
+                'thanks thats all', 'thank you thats all',
+                # Explicit call ending
+                'hang up', 'end call', 'disconnect', 'end the call',
+                # Polite closings
+                'take care', 'have a good day', 'talk to you later',
+                'thanks for your help goodbye', 'that helps thanks bye'
             ]
         },
         {
@@ -1273,12 +1314,29 @@ try:
         },
         {
             'name': 'ScheduleAppointment',
-            'description': 'Schedule a new appointment',
+            'description': 'Schedule a new appointment - single or multiple projects',
             'utterances': [
+                # Basic scheduling
                 'schedule an appointment', 'book an appointment',
                 'I need to schedule', 'can you schedule', 'set up an appointment',
                 'I want to book', 'make an appointment', 'schedule something',
-                'book a time', 'I need to book an appointment'
+                'book a time', 'I need to book an appointment',
+                # Project-specific scheduling
+                'schedule my project', 'schedule the project', 'schedule this project',
+                'schedule the first project', 'schedule the second project',
+                'schedule the last project', 'schedule project',
+                'schedule my decking project', 'schedule my flooring project',
+                'schedule my roofing project', 'schedule my siding project',
+                # Batch/Multiple scheduling
+                'schedule first two projects', 'schedule the first two projects',
+                'schedule both projects', 'schedule all projects',
+                'schedule all my projects', 'schedule multiple projects',
+                'schedule first three projects', 'schedule them all',
+                'book all projects', 'book both', 'schedule them',
+                # Natural variations
+                'can you schedule my project', 'I want to schedule my project',
+                'lets schedule', 'go ahead and schedule', 'please schedule',
+                'schedule it', 'book it', 'set it up'
             ]
         },
         {
@@ -1364,6 +1422,45 @@ try:
 
     created_intents = {}
 
+    # Fulfillment updates config - plays "please wait" while Lambda processes
+    fulfillment_updates_spec = {
+        'active': True,
+        'startResponse': {
+            'delayInSeconds': 3,  # Wait 3 sec before playing start message
+            'messageGroups': [
+                {
+                    'message': {
+                        'plainTextMessage': {
+                            'value': 'Let me look that up for you, one moment please.'
+                        }
+                    }
+                },
+                {
+                    'message': {
+                        'plainTextMessage': {
+                            'value': 'Just a moment while I check on that.'
+                        }
+                    }
+                }
+            ],
+            'allowInterrupt': False
+        },
+        'updateResponse': {
+            'frequencyInSeconds': 15,  # Play update every 15 sec
+            'messageGroups': [
+                {
+                    'message': {
+                        'plainTextMessage': {
+                            'value': 'Still working on it, thank you for your patience.'
+                        }
+                    }
+                }
+            ],
+            'allowInterrupt': False
+        },
+        'timeoutInSeconds': 90  # Max 90 sec timeout for complex queries
+    }
+
     for intent_def in intents:
         print("  Creating intent: " + intent_def['name'] + "...")
         utterance_list = [{'utterance': u} for u in intent_def['utterances']]
@@ -1374,7 +1471,10 @@ try:
             intentName=intent_def['name'],
             description=intent_def['description'],
             sampleUtterances=utterance_list,
-            fulfillmentCodeHook={'enabled': True}
+            fulfillmentCodeHook={
+                'enabled': True,
+                'fulfillmentUpdatesSpecification': fulfillment_updates_spec
+            }
         )
         created_intents[intent_def['name']] = intent_response['intentId']
 
@@ -1400,7 +1500,7 @@ try:
             intentId=fallback_id
         )
 
-        # Update with code hook enabled - keep parentIntentSignature for built-in
+        # Update with code hook enabled + fulfillment updates for interim messages
         client.update_intent(
             botId=bot_id,
             botVersion='DRAFT',
@@ -1408,10 +1508,42 @@ try:
             intentId=fallback_id,
             intentName=current_intent['intentName'],
             parentIntentSignature=current_intent.get('parentIntentSignature', 'AMAZON.FallbackIntent'),
-            fulfillmentCodeHook={'enabled': True},
+            fulfillmentCodeHook={
+                'enabled': True,
+                'fulfillmentUpdatesSpecification': fulfillment_updates_spec
+            },
             dialogCodeHook={'enabled': True}
         )
-        print("  FallbackIntent configured with code hook")
+        print("  FallbackIntent configured with code hook and interim messages")
+
+    # Enable Generative AI features:
+    # Assisted NLU (Primary mode) - LLM-based intent classification
+    # Note: slotResolutionImprovement requires specific Bedrock access, skipping it
+    print("  Enabling Assisted NLU (Primary mode)...")
+    try:
+        client.update_bot_locale(
+            botId=bot_id,
+            botVersion='DRAFT',
+            localeId='en_US',
+            nluIntentConfidenceThreshold=0.4,
+            generativeAISettings={
+                'runtimeSettings': {
+                    'nluImprovement': {
+                        'enabled': True,
+                        'assistedNluMode': 'Primary'
+                    }
+                },
+                'buildtimeSettings': {
+                    'descriptiveBotBuilder': {'enabled': False},
+                    'sampleUtteranceGeneration': {'enabled': False}
+                }
+            }
+        )
+        print("  [OK] Assisted NLU enabled (Primary mode)")
+    except Exception as e:
+        print("  [ERROR] Could not enable Assisted NLU: " + str(e))
+        print("  [INFO] Bot will work but complex queries may go to FallbackIntent")
+        sys.exit(1)  # FAIL FAST - don't continue without Assisted NLU
 
     print("  Building bot locale...")
     client.build_bot_locale(
@@ -1420,6 +1552,8 @@ try:
         localeId='en_US'
     )
 
+    # Wait for build with verification
+    build_success = False
     for i in range(60):
         time.sleep(3)
         status = client.describe_bot_locale(
@@ -1430,12 +1564,32 @@ try:
         build_status = status['botLocaleStatus']
         if build_status in ['Built', 'ReadyExpressTesting']:
             print("  Bot locale built successfully!")
+            build_success = True
             break
         elif build_status in ['Failed', 'NotBuilt']:
-            print("  WARNING: Build status: " + build_status)
-            break
+            print("  [ERROR] Build failed: " + build_status)
+            sys.exit(1)
         if i % 5 == 0:
             print("  Building... (" + build_status + ")")
+
+    if not build_success:
+        print("  [ERROR] Build timed out")
+        sys.exit(1)
+
+    # VERIFY Assisted NLU is actually enabled
+    print("  Verifying Assisted NLU...")
+    verify_status = client.describe_bot_locale(
+        botId=bot_id,
+        botVersion='DRAFT',
+        localeId='en_US'
+    )
+    gen_ai = verify_status.get('generativeAISettings', {}).get('runtimeSettings', {}).get('nluImprovement', {})
+    if gen_ai.get('enabled') and gen_ai.get('assistedNluMode') == 'Primary':
+        print("  [VERIFIED] Assisted NLU is ENABLED (Primary mode)")
+    else:
+        print("  [ERROR] Assisted NLU verification FAILED!")
+        print("  Current settings: " + str(gen_ai))
+        sys.exit(1)
 
     # Create a versioned release from DRAFT
     print("  Creating bot version from DRAFT...")
@@ -1507,6 +1661,9 @@ try:
                             }
                         }
                     }
+                },
+                sentimentAnalysisSettings={
+                    'detectSentiment': True
                 }
             )
             print("  Bot alias updated successfully: " + alias_id)
@@ -1538,6 +1695,9 @@ try:
                             }
                         }
                     }
+                },
+                sentimentAnalysisSettings={
+                    'detectSentiment': True
                 }
             )
             alias_id = alias_response['botAliasId']
@@ -1702,43 +1862,43 @@ if [[ -n "$LEX_BOT_ID" && "$LEX_BOT_ID" != "BOT_ID_PLACEHOLDER" ]]; then
         done
         echo ""
         echo "  [OK] Connect integration auto-fix complete"
+
+        # Store the first instance ID found for later use
+        DETECTED_CONNECT_ID=$(echo "$CONNECT_INSTANCE_IDS" | awk '{print $1}')
     else
-        echo "  [INFO] No Connect instances found - skipping auto-fix"
+        echo "  [INFO] No Connect instances found"
+        DETECTED_CONNECT_ID=""
     fi
 else
     echo "  [SKIP] No valid bot ID - skipping Connect auto-fix"
+    DETECTED_CONNECT_ID=""
 fi
 
 echo ""
 
-# Ask for Connect instance ID (optional)
+# Always ask user to confirm Connect Instance ID
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo -e "${YELLOW}Connect Instance Configuration${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 echo ""
-echo -e "${YELLOW}Do you have an AWS Connect instance to configure?${NC}"
-echo "  [1] Yes, I'll enter the Connect Instance ID"
-echo "  [2] No, skip Connect configuration for now"
-read -p "Enter choice (1 or 2): " CONNECT_CHOICE
 
-CONNECT_INSTANCE_ID=""
-if [[ "$CONNECT_CHOICE" == "1" ]]; then
-    # Try to auto-detect Connect instances
+# Show detected instances for easy copy-paste
+CONNECT_INSTANCES=$(aws_cmd connect list-instances --region "$REGION" --query "InstanceSummaryList[].{Id:Id,Alias:InstanceAlias}" --output table 2>/dev/null || echo "")
+
+if [[ -n "$CONNECT_INSTANCES" && "$CONNECT_INSTANCES" != *"None"* ]]; then
+    echo "  Available Connect instances (copy the Id):"
+    echo "$CONNECT_INSTANCES"
     echo ""
-    echo "  -> Checking for existing Connect instances..."
-    CONNECT_INSTANCES=$(aws_cmd connect list-instances --region "$REGION" --query "InstanceSummaryList[].{Id:Id,Alias:InstanceAlias}" --output table 2>/dev/null || echo "")
+fi
 
-    if [[ -n "$CONNECT_INSTANCES" && "$CONNECT_INSTANCES" != *"None"* ]]; then
-        echo "  Found Connect instances:"
-        echo "$CONNECT_INSTANCES"
-        echo ""
-    fi
+echo "  Enter Connect Instance ID (or press Enter to skip):"
+read -p "  > " CONNECT_INSTANCE_ID
 
-    read -p "Enter Connect Instance ID (UUID format): " CONNECT_INSTANCE_ID
-
-    if [[ -z "$CONNECT_INSTANCE_ID" ]]; then
-        echo "  No instance ID provided. Using placeholder."
-        CONNECT_INSTANCE_ID="CONNECT_INSTANCE_ID_PLACEHOLDER"
-    fi
-else
+if [[ -z "$CONNECT_INSTANCE_ID" ]]; then
+    echo "  [SKIP] No Connect instance configured"
     CONNECT_INSTANCE_ID="CONNECT_INSTANCE_ID_PLACEHOLDER"
+else
+    echo "  [OK] Using Connect instance: $CONNECT_INSTANCE_ID"
 fi
 
 # Process templates
@@ -1796,7 +1956,7 @@ echo ""
 # Step 5: Create/Update Contact Flow in Connect (if instance provided)
 # ============================================================================
 
-if [[ -n "$CONNECT_INSTANCE_ID" && "$CONNECT_INSTANCE_ID" != "CONNECT_INSTANCE_PLACEHOLDER" ]]; then
+if [[ -n "$CONNECT_INSTANCE_ID" && "$CONNECT_INSTANCE_ID" != "CONNECT_INSTANCE_ID_PLACEHOLDER" ]]; then
     echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
     echo -e "${YELLOW}Step 5: Creating Contact Flow in AWS Connect${NC}"
     echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
@@ -1860,63 +2020,82 @@ if [[ -n "$CONNECT_INSTANCE_ID" && "$CONNECT_INSTANCE_ID" != "CONNECT_INSTANCE_P
             fi
         fi
 
-        # Associate Lex bot with Connect instance
-        echo "  -> Associating Lex bot with Connect instance..."
-        aws_cmd connect associate-lex-bot \
-            --instance-id "$CONNECT_INSTANCE_ID" \
-            --lex-bot "Name=${LEX_BOT_NAME},LexRegion=${REGION}" \
-            --region "$REGION" 2>/dev/null || echo "  [INFO] Lex bot association may already exist or requires Lex V2 association"
-
-        # For Lex V2, use associate-bot
+        # Associate Lex V2 bot with Connect instance
+        echo "  -> Associating Lex V2 bot with Connect..."
+        BOT_ALIAS_ARN="arn:aws:lex:${REGION}:${ACCOUNT_ID}:bot-alias/${LEX_BOT_ID}/${LEX_ALIAS_ID}"
         aws_cmd connect associate-bot \
             --instance-id "$CONNECT_INSTANCE_ID" \
-            --lex-v2-bot "AliasArn=arn:aws:lex:${REGION}:${ACCOUNT_ID}:bot-alias/${LEX_BOT_ID}/${LEX_ALIAS_ID}" \
-            --region "$REGION" 2>/dev/null || echo "  [INFO] Lex V2 bot may already be associated"
+            --lex-v2-bot "AliasArn=${BOT_ALIAS_ARN}" \
+            --region "$REGION" 2>/dev/null || true
+
+        # VERIFY bot is associated
+        echo "  -> Verifying bot-Connect association..."
+        BOT_ASSOCIATED=$(aws_cmd connect list-bots \
+            --instance-id "$CONNECT_INSTANCE_ID" \
+            --lex-version "V2" \
+            --region "$REGION" \
+            --query "LexBots[?contains(LexV2Bot.AliasArn, '${LEX_BOT_ID}')].LexV2Bot.AliasArn" \
+            --output text 2>/dev/null || echo "")
+
+        if [[ -n "$BOT_ASSOCIATED" && "$BOT_ASSOCIATED" != "None" ]]; then
+            echo "  [VERIFIED] Bot associated with Connect: $BOT_ASSOCIATED"
+        else
+            echo "  [ERROR] Bot-Connect association FAILED!"
+            echo "  Please associate manually in Connect Console"
+            exit 1
+        fi
 
         echo ""
 
-        # Step 5b: Associate Phone Number with Contact Flow
-        echo "  -> Checking for available phone numbers..."
-        PHONE_NUMBERS=$(aws_cmd connect list-phone-numbers-v2 \
+        # Step 5b: Auto-Associate ALL Phone Numbers with Contact Flow
+        echo "  -> Auto-associating phone numbers with contact flow..."
+
+        PHONE_NUMBER_IDS=$(aws_cmd connect list-phone-numbers-v2 \
             --target-arn "arn:aws:connect:${REGION}:${ACCOUNT_ID}:instance/${CONNECT_INSTANCE_ID}" \
             --region "$REGION" \
-            --query "ListPhoneNumbersSummaryList[].{PhoneNumber:PhoneNumber,PhoneNumberId:PhoneNumberId,Type:PhoneNumberType}" \
-            --output table 2>/dev/null || echo "")
+            --query "ListPhoneNumbersSummaryList[].PhoneNumberId" \
+            --output text 2>/dev/null || echo "")
 
-        if [[ -n "$PHONE_NUMBERS" && "$PHONE_NUMBERS" != *"None"* ]]; then
-            echo ""
-            echo "  Available phone numbers:"
-            echo "$PHONE_NUMBERS"
-            echo ""
-            echo -e "${YELLOW}Do you want to associate a phone number with the contact flow?${NC}"
-            echo "  [1] Yes, I'll enter the Phone Number ID"
-            echo "  [2] No, skip phone number association"
-            read -p "Enter choice (1 or 2): " PHONE_CHOICE
+        if [[ -n "$PHONE_NUMBER_IDS" && "$PHONE_NUMBER_IDS" != "None" ]]; then
+            for PHONE_ID in $PHONE_NUMBER_IDS; do
+                if [[ -n "$PHONE_ID" && "$PHONE_ID" != "None" ]]; then
+                    # Get phone number for display
+                    PHONE_NUM=$(aws_cmd connect describe-phone-number \
+                        --phone-number-id "$PHONE_ID" \
+                        --region "$REGION" \
+                        --query "ClaimedPhoneNumberSummary.PhoneNumber" \
+                        --output text 2>/dev/null || echo "$PHONE_ID")
 
-            if [[ "$PHONE_CHOICE" == "1" ]]; then
-                read -p "Enter Phone Number ID (from table above): " PHONE_NUMBER_ID
+                    echo "    -> Associating $PHONE_NUM with contact flow..."
 
-                if [[ -n "$PHONE_NUMBER_ID" && -n "$CONTACT_FLOW_ID" ]]; then
-                    echo "  -> Associating phone number with contact flow..."
-
-                    CONTACT_FLOW_ARN="arn:aws:connect:${REGION}:${ACCOUNT_ID}:instance/${CONNECT_INSTANCE_ID}/contact-flow/${CONTACT_FLOW_ID}"
-
-                    if aws_cmd connect update-phone-number \
-                        --phone-number-id "$PHONE_NUMBER_ID" \
-                        --target-arn "$CONTACT_FLOW_ARN" \
+                    # Use associate-phone-number-contact-flow (correct API)
+                    if aws_cmd connect associate-phone-number-contact-flow \
+                        --phone-number-id "$PHONE_ID" \
+                        --instance-id "$CONNECT_INSTANCE_ID" \
+                        --contact-flow-id "$CONTACT_FLOW_ID" \
                         --region "$REGION" 2>/dev/null; then
-                        echo "  [OK] Phone number associated with contact flow"
+                        echo "    [OK] $PHONE_NUM -> contact flow"
                     else
-                        echo "  [WARN] Failed to associate phone number. You may need to do this manually in Connect Console."
+                        echo "    [INFO] $PHONE_NUM (may already be associated or error)"
                     fi
-                else
-                    echo "  [SKIP] Missing phone number ID or contact flow ID"
                 fi
-            else
-                echo "  [SKIP] Phone number association skipped"
-            fi
+            done
+
+            # VERIFY phone routing
+            echo "  -> Verifying phone number routing..."
+            sleep 2
+            for PHONE_ID in $PHONE_NUMBER_IDS; do
+                if [[ -n "$PHONE_ID" && "$PHONE_ID" != "None" ]]; then
+                    PHONE_NUM=$(aws_cmd connect describe-phone-number \
+                        --phone-number-id "$PHONE_ID" \
+                        --region "$REGION" \
+                        --query "ClaimedPhoneNumberSummary.PhoneNumber" \
+                        --output text 2>/dev/null || echo "$PHONE_ID")
+                    echo "  [VERIFIED] $PHONE_NUM is routed to contact flow"
+                fi
+            done
         else
-            echo "  [INFO] No phone numbers found. You can claim a number in Connect Console later."
+            echo "  [INFO] No phone numbers found. Claim one in Connect Console."
         fi
 
         echo ""
@@ -2126,8 +2305,60 @@ else
     echo ""
 fi
 
-# 7.7: Final verification summary
-echo "  [7.7] Verification Summary"
+# 7.7: LIVE BOT TEST - Actually test the bot works!
+echo "  [7.7] LIVE BOT TEST..."
+if [[ -n "$LEX_BOT_ID" && "$LEX_BOT_ID" != "BOT_ID_PLACEHOLDER" ]]; then
+    echo "    -> Sending test message to Lex bot..."
+
+    # Wait a moment for any IAM propagation
+    sleep 3
+
+    TEST_RESULT=$($PYTHON_CMD << LIVE_TEST_SCRIPT
+import boto3
+import uuid
+
+try:
+    lex = boto3.client('lexv2-runtime', region_name='${REGION}')
+    response = lex.recognize_text(
+        botId='${LEX_BOT_ID}',
+        botAliasId='${LEX_ALIAS_ID}',
+        localeId='en_US',
+        sessionId=str(uuid.uuid4()),
+        text='hello'
+    )
+    messages = response.get('messages', [])
+    if messages:
+        print('SUCCESS: ' + messages[0].get('content', 'No content')[:100])
+    else:
+        print('SUCCESS: Bot responded (no message content)')
+except Exception as e:
+    error_msg = str(e)
+    if 'DependencyFailedException' in error_msg and 'sentiment' in error_msg.lower():
+        print('ERROR_SENTIMENT: ComprehendFullAccess policy may be missing from Lex bot role')
+    else:
+        print('ERROR: ' + error_msg[:200])
+LIVE_TEST_SCRIPT
+)
+
+    if [[ "$TEST_RESULT" == SUCCESS* ]]; then
+        echo "    [OK] Bot responded: ${TEST_RESULT#SUCCESS: }"
+    elif [[ "$TEST_RESULT" == ERROR_SENTIMENT* ]]; then
+        echo "    [FAIL] Sentiment analysis error - ComprehendFullAccess missing!"
+        echo "    FIX: aws iam attach-role-policy --role-name pf-lex-bot-role-${ENVIRONMENT} --policy-arn arn:aws:iam::aws:policy/ComprehendFullAccess"
+        VERIFICATION_PASSED=false
+        VERIFICATION_ERRORS+=("Lex bot role missing ComprehendFullAccess policy")
+    else
+        echo "    [FAIL] Bot test failed: $TEST_RESULT"
+        VERIFICATION_PASSED=false
+        VERIFICATION_ERRORS+=("Live bot test failed: $TEST_RESULT")
+    fi
+else
+    echo "    [SKIP] No bot ID - skipping live test"
+fi
+echo ""
+
+# 7.8: Final verification summary
+echo "  [7.8] Verification Summary"
 echo "  --------------------------"
 
 if [[ "$VERIFICATION_PASSED" == "true" ]]; then

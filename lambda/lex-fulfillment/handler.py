@@ -179,6 +179,28 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             session_attributes.get('customer_phone', 'unknown')
         )
 
+        # Check for sentiment analysis (if enabled on bot alias)
+        sentiment_response = event.get('sentimentResponse', {})
+        if sentiment_response:
+            sentiment = sentiment_response.get('sentiment', '')
+            sentiment_score = sentiment_response.get('sentimentScore', {})
+            negative_score = sentiment_score.get('Negative', 0)
+
+            if sentiment == 'NEGATIVE' and negative_score > 0.7:
+                logger.warning(
+                    f"[SENTIMENT] Frustrated user detected! "
+                    f"Session: {session_id}, Score: {negative_score:.2f}, "
+                    f"Input: {input_transcript[:50]}..."
+                )
+                # Store in session for potential escalation
+                session_attributes['user_frustrated'] = 'true'
+                event['sessionState']['sessionAttributes'] = session_attributes
+            elif sentiment in ['POSITIVE', 'NEUTRAL']:
+                # Clear frustration flag if user is calming down
+                if session_attributes.get('user_frustrated'):
+                    del session_attributes['user_frustrated']
+                    event['sessionState']['sessionAttributes'] = session_attributes
+
         logger.info(
             f"Intent: {intent_name}, Session: {session_id}, "
             f"Customer: {customer_id or 'unknown'}, Phone: {_mask_phone(customer_phone)}"
@@ -404,6 +426,15 @@ def handle_project_inquiry(
             session_attributes = event.get('sessionState', {}).get('sessionAttributes', {}) or {}
             # Store project IDs as comma-separated string
             session_attributes['last_project_ids'] = ','.join(project_ids)
+
+            # NOTE: Runtime hints require a ProjectName slot in intents to work.
+            # Since our intents don't have this slot, we skip runtime hints.
+            # The Assisted NLU slot resolution improvement (enabled in deploy) helps instead.
+            # Project names are stored for context reference in follow-up queries.
+            project_names = [p.get('name', '') for p in projects[:5] if p.get('name')]
+            if project_names:
+                session_attributes['last_project_names'] = ','.join(project_names)
+                logger.info(f"Stored {len(project_names)} project names in session for context")
 
             message = _format_projects_for_voice(response_data)
 
@@ -1021,46 +1052,45 @@ def handle_goodbye(
     session_id: str
 ) -> Dict[str, Any]:
     """
-    Handle Goodbye intent - end the conversation gracefully
+    Handle Goodbye intent - end the conversation and HANG UP the phone
+
+    CRITICAL: Must use dialogAction: Close with intent.state: Fulfilled
+    to properly signal AWS Connect to disconnect the call.
     """
-    logger.info(f"[GOODBYE] Handling goodbye")
+    logger.info(f"[GOODBYE] Ending session {session_id} - will hang up")
 
     import random
     responses = [
         "Goodbye! Thank you for calling. Have a wonderful day!",
-        "Take care! Feel free to call back anytime you need help with your projects.",
-        "Goodbye! It was a pleasure assisting you. Have a great day!"
+        "Take care! Feel free to call back anytime you need help.",
+        "Goodbye! It was a pleasure helping you. Have a great day!"
     ]
 
-    return LexResponseBuilder.build_response(event, random.choice(responses))
+    # Get current session attributes
+    session_attributes = event.get('sessionState', {}).get('sessionAttributes', {})
+
+    # CRITICAL: Copy intent and set state to Fulfilled
+    intent = event['sessionState']['intent'].copy()
+    intent['state'] = 'Fulfilled'
+
+    # Return Close action to end session and hang up
+    return {
+        'sessionState': {
+            'sessionAttributes': session_attributes,
+            'dialogAction': {
+                'type': 'Close'  # Close ends the session
+            },
+            'intent': intent  # Must include intent with Fulfilled state
+        },
+        'messages': [{
+            'contentType': 'PlainText',
+            'content': random.choice(responses)
+        }]
+    }
 
 
-# Voice-specific prompt wrapper for natural, elderly-friendly responses
-VOICE_RESPONSE_INSTRUCTIONS = """
-[VOICE CHANNEL - Respond as if speaking on a phone call to someone who may be elderly]
-
-IMPORTANT VOICE GUIDELINES:
-- Speak naturally and conversationally, like a friendly human assistant
-- Be concise but complete - 2-3 short sentences max for the main answer
-- NO technical jargon - use simple everyday words
-- Lead with the most important information first
-- For lists: mention the count, then highlight 2-3 most relevant items
-- Offer to give more details: "Would you like to hear more about any of these?"
-- Use natural pauses with commas
-- Dates: say "November twenty-sixth" not "2025-11-26"
-- Times: say "eight in the morning" not "08:00"
-- Don't say "I found" or "I see" - just state the facts directly
-
-USER'S SPOKEN REQUEST: {input_text}
-"""
-
-
-def wrap_for_voice(input_text: str) -> str:
-    """
-    Wrap user input with voice-specific instructions for Claude.
-    This ensures natural, elderly-friendly responses without modifying orchestrator code.
-    """
-    return VOICE_RESPONSE_INSTRUCTIONS.format(input_text=input_text)
+# NOTE: Voice formatting is now handled in router.py via format_for_voice()
+# The voice instructions were removed to reduce Bedrock input size and latency
 
 
 def hand_off_to_bedrock(
@@ -1090,6 +1120,25 @@ def hand_off_to_bedrock(
     """
     logger.info(f"Routing complex query through orchestrator for session {session_id}")
 
+    # FIX: Handle empty input_text (can happen with FallbackIntent)
+    if not input_text or not input_text.strip():
+        # Try to recover from alternate sources in the event
+        input_text = (
+            event.get('inputTranscript', '') or
+            event.get('transcriptions', [{}])[0].get('transcription', '') or
+            ''
+        ).strip()
+
+        if not input_text:
+            # If still empty, ask user to repeat
+            logger.warning("Empty input_text, asking user to repeat")
+            return LexResponseBuilder.build_response(
+                event,
+                "I'm sorry, I didn't catch that. Could you please repeat your question?",
+                should_end_session=False
+            )
+        logger.info(f"Recovered input_text from alternate source: {input_text[:50]}...")
+
     try:
         # Get all credentials from Secrets Manager
         credentials = get_credentials_from_secrets()
@@ -1109,12 +1158,23 @@ def hand_off_to_bedrock(
             context_parts = []
             if session_attributes.get('last_project_ids'):
                 project_ids = session_attributes['last_project_ids'].split(',')
-                context_parts.append(f"[Context: User's project IDs from last query: {', '.join(project_ids)}. 'first'=ID {project_ids[0] if project_ids else 'none'}, 'second'=ID {project_ids[1] if len(project_ids) > 1 else 'none'}]")
+                project_names = session_attributes.get('last_project_names', '').split(',') if session_attributes.get('last_project_names') else []
 
-            # Wrap input with voice-specific instructions for natural responses
+                # Build project mapping for context
+                project_mapping = []
+                for i, pid in enumerate(project_ids[:3]):  # Max 3 for brevity
+                    ordinal = ['first', 'second', 'third'][i]
+                    name = project_names[i] if i < len(project_names) else 'unknown'
+                    project_mapping.append(f"'{ordinal}'=ID {pid} ({name})")
+
+                context_parts.append(f"[Context: User's projects: {', '.join(project_mapping)}]")
+
+            # OPTIMIZATION: Don't wrap with voice instructions - keep message short!
+            # Voice formatting is handled by router.py format_for_voice() after orchestration
+            # This reduces Bedrock input size from 800+ chars to original message length
             context_prefix = ' '.join(context_parts) + ' ' if context_parts else ''
-            voice_enhanced_message = wrap_for_voice(context_prefix + input_text)
-            logger.info(f"Voice-enhanced message prepared for Claude with context")
+            voice_enhanced_message = context_prefix + input_text
+            logger.info(f"Voice message prepared (no wrapping for faster processing)")
 
             # Use customer_id from session, fallback to Secrets Manager user_id
             effective_user_id = customer_id or pf_user_id

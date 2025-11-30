@@ -390,11 +390,11 @@ delete_dynamodb_table "$CUSTOMER_TABLE"
 echo ""
 
 # ============================================================================
-# Step 3.6: Delete Lex Bot
+# Step 3.6: Disassociate Bot from Connect and Delete Lex Bot
 # ============================================================================
 
 echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
-echo -e "${YELLOW}Step 3.6: Deleting Lex Bot${NC}"
+echo -e "${YELLOW}Step 3.6: Disassociating Bot from Connect & Deleting Lex Bot${NC}"
 echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 
 LEX_BOT_NAME="pf-scheduling-assistant-${ENVIRONMENT}"
@@ -404,9 +404,31 @@ LEX_BOT_ID=$(aws_cmd lexv2-models list-bots --region "$REGION" --query "botSumma
 
 if [[ -n "$LEX_BOT_ID" && "$LEX_BOT_ID" != "None" ]]; then
     echo "  -> Found bot ID: $LEX_BOT_ID"
-    echo "  -> Deleting bot aliases..."
 
-    # Delete all bot aliases first
+    # Step 3.6a: Disassociate bot from ALL Connect instances FIRST
+    echo "  -> Disassociating bot from Connect instances..."
+    CONNECT_INSTANCE_IDS=$(aws_cmd connect list-instances --region "$REGION" --query "InstanceSummaryList[].Id" --output text 2>/dev/null || echo "")
+
+    for INST_ID in $CONNECT_INSTANCE_IDS; do
+        if [[ -n "$INST_ID" && "$INST_ID" != "None" ]]; then
+            # Get all aliases and disassociate each
+            ALIAS_IDS=$(aws_cmd lexv2-models list-bot-aliases --bot-id "$LEX_BOT_ID" --region "$REGION" --query "botAliasSummaries[].botAliasId" --output text 2>/dev/null || echo "")
+            for ALIAS_ID in $ALIAS_IDS; do
+                if [[ -n "$ALIAS_ID" && "$ALIAS_ID" != "None" ]]; then
+                    BOT_ALIAS_ARN="arn:aws:lex:${REGION}:${SELECTED_ACCOUNT_ID}:bot-alias/${LEX_BOT_ID}/${ALIAS_ID}"
+                    echo "    Disassociating from instance $INST_ID..."
+                    aws_cmd connect disassociate-bot \
+                        --instance-id "$INST_ID" \
+                        --lex-bot "AliasArn=${BOT_ALIAS_ARN}" \
+                        --region "$REGION" 2>/dev/null || true
+                fi
+            done
+        fi
+    done
+    echo "  [OK] Bot disassociated from Connect instances"
+
+    # Step 3.6b: Delete bot aliases
+    echo "  -> Deleting bot aliases..."
     ALIAS_IDS=$(aws_cmd lexv2-models list-bot-aliases --bot-id "$LEX_BOT_ID" --region "$REGION" --query "botAliasSummaries[].botAliasId" --output text 2>/dev/null || echo "")
     for ALIAS_ID in $ALIAS_IDS; do
         if [[ -n "$ALIAS_ID" && "$ALIAS_ID" != "None" ]]; then
@@ -415,6 +437,7 @@ if [[ -n "$LEX_BOT_ID" && "$LEX_BOT_ID" != "None" ]]; then
         fi
     done
 
+    # Step 3.6c: Delete the bot
     echo "  -> Deleting bot..."
     if aws_cmd lexv2-models delete-bot --bot-id "$LEX_BOT_ID" --region "$REGION" --skip-resource-in-use-check &>/dev/null; then
         echo "  [OK] Deleted Lex bot: $LEX_BOT_NAME"
@@ -428,6 +451,49 @@ fi
 # Delete Lex bot IAM role
 LEX_BOT_ROLE_NAME="pf-lex-bot-role-${ENVIRONMENT}"
 delete_iam_role "$LEX_BOT_ROLE_NAME"
+
+echo ""
+
+# ============================================================================
+# Step 3.7: Contact Flows (KEEP PHONE NUMBERS SAFE)
+# ============================================================================
+
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo -e "${YELLOW}Step 3.7: Contact Flow Status${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+
+# IMPORTANT: We do NOT touch phone numbers or contact flows during cleanup
+# Phone numbers are hard to claim and should be preserved
+# Contact flows will be updated (not deleted) during next deployment
+
+echo "  [INFO] Phone numbers are PRESERVED (not touched during cleanup)"
+echo "  [INFO] Contact flows are PRESERVED (will be updated on next deploy)"
+echo ""
+
+# Just list what exists for reference
+CONNECT_INSTANCE_IDS=$(aws_cmd connect list-instances --region "$REGION" --query "InstanceSummaryList[].Id" --output text 2>/dev/null || echo "")
+
+for INST_ID in $CONNECT_INSTANCE_IDS; do
+    if [[ -n "$INST_ID" && "$INST_ID" != "None" ]]; then
+        echo "  -> Connect instance: $INST_ID"
+
+        # Show phone numbers (not touching them)
+        PHONE_INFO=$(aws_cmd connect list-phone-numbers-v2 \
+            --target-arn "arn:aws:connect:${REGION}:${SELECTED_ACCOUNT_ID}:instance/${INST_ID}" \
+            --region "$REGION" \
+            --query "ListPhoneNumbersSummaryList[].PhoneNumber" \
+            --output text 2>/dev/null || echo "None")
+        echo "    Phone numbers (preserved): $PHONE_INFO"
+
+        # Show contact flows (not touching them)
+        FLOW_NAMES=$(aws_cmd connect list-contact-flows \
+            --instance-id "$INST_ID" \
+            --region "$REGION" \
+            --query "ContactFlowSummaryList[?contains(Name, 'pf-')].Name" \
+            --output text 2>/dev/null || echo "None")
+        echo "    Contact flows (preserved): $FLOW_NAMES"
+    fi
+done
 
 echo ""
 
@@ -487,16 +553,17 @@ echo -e "${GREEN}[OK] Cleanup Complete!${NC}"
 echo -e "${BLUE}============================================================================${NC}"
 echo ""
 
-echo "What was deleted:"
+echo "What was deleted/cleaned:"
 echo "  [OK] Lambda Functions (3):"
 echo "     - $LEX_FULFILLMENT_FUNCTION"
 echo "     - $VOICE_BRIDGE_FUNCTION"
 echo "     - $CUSTOMER_LOOKUP_FUNCTION"
 echo ""
-echo "  [OK] IAM Roles (3):"
+echo "  [OK] IAM Roles (4):"
 echo "     - $LEX_FULFILLMENT_ROLE"
 echo "     - $VOICE_BRIDGE_ROLE"
 echo "     - $CUSTOMER_LOOKUP_ROLE"
+echo "     - $LEX_BOT_ROLE_NAME"
 echo ""
 echo "  [OK] DynamoDB Tables (1):"
 echo "     - $CUSTOMER_TABLE"
@@ -506,17 +573,20 @@ echo "     - $LEX_FULFILLMENT_LOG_GROUP"
 echo "     - $VOICE_BRIDGE_LOG_GROUP"
 echo "     - $CUSTOMER_LOOKUP_LOG_GROUP"
 echo ""
+echo "  [OK] Lex Bot:"
+echo "     - $LEX_BOT_NAME (disassociated from Connect, then deleted)"
+echo ""
 echo "  [OK] Local deployment files and logs"
 echo ""
 
-echo -e "${CYAN}What remains unchanged:${NC}"
-echo "  [OK] Lex bot configuration (if deployed)"
-echo "  [OK] AWS Connect instance (if deployed)"
-echo "  [OK] Phone number configuration (if claimed)"
-echo "  [OK] Secrets Manager secrets"
+echo -e "${CYAN}What remains unchanged (PRESERVED):${NC}"
+echo "  [SAFE] AWS Connect instance"
+echo "  [SAFE] Phone numbers (hard to claim - kept safe!)"
+echo "  [SAFE] Contact flows (will be updated on next deploy)"
+echo "  [SAFE] Secrets Manager secrets"
 echo ""
 
-echo -e "${GREEN}Voice Lambda cleanup completed successfully!${NC}"
+echo -e "${GREEN}Voice cleanup completed successfully!${NC}"
 echo ""
 echo "To redeploy, run: ./scripts/DEPLOY_VOICE_ADVANCED.sh"
 echo ""
