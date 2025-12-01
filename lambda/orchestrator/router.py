@@ -966,7 +966,8 @@ def route_request(
                 customer_id=customer_id,
                 client_id=client_id,
                 pf_bearer_token=pf_bearer_token,
-                conversation_history=conversation_history
+                conversation_history=conversation_history,
+                channel=channel  # Pass channel for voice-specific handling
             )
 
             # VOICE ADAPTATION: For voice channel, format the response

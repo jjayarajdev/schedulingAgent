@@ -783,7 +783,8 @@ def orchestrate_intelligent_workflow(
     customer_id: str,
     client_id: str,
     pf_bearer_token: str,
-    conversation_history: List[Dict]
+    conversation_history: List[Dict],
+    channel: str = 'chat'  # 'chat' or 'voice' - for channel-specific handling
 ) -> Dict[str, Any]:
     """
     Main intelligent orchestration function
@@ -1139,6 +1140,91 @@ def orchestrate_intelligent_workflow(
         lambda_action = decision['lambda_action']
         lambda_params = decision['lambda_params']
 
+        # VOICE-SPECIFIC: Resolve project_index to project_id from workflow state
+        # Chat handles this via context_resolver.py, but voice path needs it here
+        if channel == 'voice' and 'project_index' in lambda_params and 'project_id' not in lambda_params:
+            project_index = lambda_params.get('project_index')
+            logger.info(f"[VOICE] Resolving project_index={project_index} to project_id")
+
+            resolved = False
+
+            # First try: Get project_ids from workflow_state.context
+            if workflow_state:
+                context = workflow_state.get('context', {})
+                project_ids = context.get('project_ids', [])
+                if project_ids and isinstance(project_ids, list):
+                    logger.info(f"[VOICE] Found {len(project_ids)} project_ids in workflow_state")
+                    # project_index is 0-based (third project = index 2)
+                    if isinstance(project_index, int) and 0 <= project_index < len(project_ids):
+                        resolved_id = str(project_ids[project_index])
+                        lambda_params['project_id'] = resolved_id
+                        del lambda_params['project_index']
+                        logger.info(f"[VOICE] Resolved from workflow_state: project_index={project_index} -> project_id={resolved_id}")
+                        resolved = True
+                    else:
+                        logger.warning(f"[VOICE] project_index={project_index} out of range (have {len(project_ids)} projects)")
+
+            if not resolved:
+                # AUTO-FETCH: If no project_ids in workflow_state, fetch them first
+                logger.info(f"[VOICE] No project_ids in workflow_state - auto-fetching projects first")
+                try:
+                    # Call list_projects to get all projects
+                    list_response = call_lambda_directly('list_projects', {
+                        'customer_id': customer_id,
+                        'client_id': client_id,
+                        'pf_bearer_token': pf_bearer_token
+                    })
+
+                    # Extract projects from response
+                    list_data = list_response.get('response', {})
+                    list_func = list_data.get('functionResponse', {})
+                    list_body_wrapper = list_func.get('responseBody', {})
+                    list_text = list_body_wrapper.get('TEXT', {})
+                    list_body_str = list_text.get('body', '{}')
+
+                    if isinstance(list_body_str, str):
+                        list_body = json.loads(list_body_str)
+                    else:
+                        list_body = list_body_str
+
+                    # Extract project_ids
+                    if 'projects' in list_body and isinstance(list_body['projects'], list):
+                        fetched_projects = list_body['projects']
+                        fetched_ids = [str(p.get('id', '')) for p in fetched_projects if p.get('id')]
+
+                        if fetched_ids:
+                            logger.info(f"[VOICE] Auto-fetched {len(fetched_ids)} project_ids: {fetched_ids[:5]}...")
+
+                            # Save to workflow_state for future queries
+                            if not workflow_state:
+                                workflow_state = {'context': {}}
+                            if 'context' not in workflow_state:
+                                workflow_state['context'] = {}
+                            workflow_state['context']['project_ids'] = fetched_ids
+
+                            # Save to DynamoDB
+                            state_manager.save_state(session_id, {
+                                'workflow_type': 'project_listing',
+                                'current_stage': 'listing_projects',
+                                'context': {'project_ids': fetched_ids}
+                            })
+
+                            # Now resolve project_index
+                            if isinstance(project_index, int) and 0 <= project_index < len(fetched_ids):
+                                resolved_id = str(fetched_ids[project_index])
+                                lambda_params['project_id'] = resolved_id
+                                del lambda_params['project_index']
+                                logger.info(f"[VOICE] Auto-resolved: project_index={project_index} -> project_id={resolved_id}")
+                                resolved = True
+                            else:
+                                logger.warning(f"[VOICE] project_index={project_index} out of range (fetched {len(fetched_ids)} projects)")
+
+                except Exception as fetch_err:
+                    logger.error(f"[VOICE] Auto-fetch projects failed: {fetch_err}")
+
+                if not resolved:
+                    logger.warning(f"[VOICE] Could not resolve project_index={project_index}")
+
         # Add auth params
         lambda_params.update({
             'customer_id': customer_id,
@@ -1430,6 +1516,29 @@ def orchestrate_intelligent_workflow(
                         decision['update_workflow_state']['context'] = {}
                     decision['update_workflow_state']['context']['available_dates'] = response_body['available_dates']
 
+            # VOICE-SPECIFIC: Save project_ids to workflow state when listing projects
+            # Chat uses context_resolver.py to extract from conversation history (JSON responses)
+            # Voice stores natural language in history, so we need workflow_state
+            if channel == 'voice' and 'projects' in response_body and isinstance(response_body['projects'], list):
+                projects_list = response_body['projects']
+                project_ids = [str(p.get('id', '')) for p in projects_list if p.get('id')]
+
+                if project_ids:
+                    logger.info(f"[VOICE] Saving {len(project_ids)} project_ids to workflow state: {project_ids[:5]}...")
+
+                    if decision.get('update_workflow_state'):
+                        if 'context' not in decision['update_workflow_state']:
+                            decision['update_workflow_state']['context'] = {}
+                        decision['update_workflow_state']['context']['project_ids'] = project_ids
+                    else:
+                        # Create update_workflow_state if Sonnet didn't provide one
+                        decision['update_workflow_state'] = {
+                            'workflow_type': 'project_listing',
+                            'current_stage': 'listing_projects',
+                            'context': {'project_ids': project_ids}
+                        }
+                        logger.info(f"[VOICE] Created workflow state with project_ids")
+
             # BATCH SCHEDULING: Auto-advance to next project after confirm_appointment
             if lambda_action == 'confirm_appointment':
                 batch_context = workflow_state.get('context', {}) if workflow_state else {}
@@ -1619,9 +1728,16 @@ def orchestrate_intelligent_workflow(
         state_manager.save_state(session_id, new_state)
 
     # Step 5: Clear workflow if complete
+    # VOICE FIX: Don't clear workflow state after list_projects - we need project_ids for follow-up queries
+    # like "tell me about the third project"
+    lambda_action = decision.get('lambda_action', '')
     if decision.get('workflow_complete'):
-        state_manager.clear_state(session_id)
-        logger.info("[OK] Workflow complete, state cleared")
+        if channel == 'voice' and lambda_action == 'list_projects':
+            # Preserve project_ids for voice follow-up queries
+            logger.info("[VOICE] Keeping workflow state after list_projects (project_ids needed for follow-up)")
+        else:
+            state_manager.clear_state(session_id)
+            logger.info("[OK] Workflow complete, state cleared")
 
     timing['total'] = time.time() - start_time
 

@@ -10,31 +10,88 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger()
 
 
+def _add_voice_followup(text: str, intent: str) -> str:
+    """
+    Add follow-up question to voice response for engagement.
+    Only adds if response doesn't already end with a question.
+
+    VOICE ONLY - keeps conversation flowing until user says goodbye.
+    """
+    # Don't add follow-up for goodbye/thank you intents - let call end
+    if intent.lower() in ['goodbye', 'thankyou', 'thank_you', 'chitchat', 'welcome']:
+        return text
+
+    # Don't add if response already ends with a question
+    text_stripped = text.strip()
+    if text_stripped.endswith('?'):
+        return text
+
+    # Don't add if response is too short (might be error)
+    if len(text_stripped) < 20:
+        return text
+
+    text_lower = text_stripped.lower()
+
+    # SAFETY NET: Don't add follow-up if the response text contains goodbye-like phrases
+    # This catches cases where user said goodbye but it wasn't matched to Goodbye intent
+    goodbye_phrases = [
+        'goodbye', 'bye', 'take care', 'have a good day', 'have a great day',
+        'thank you for calling', 'thanks for calling', 'pleasure helping',
+        'it was a pleasure', 'feel free to call back', 'call back anytime'
+    ]
+    for phrase in goodbye_phrases:
+        if phrase in text_lower:
+            return text
+
+    # Don't add if response already contains engagement phrases
+    engagement_phrases = [
+        'anything else',
+        'would you like',
+        'do you want',
+        'can i help',
+        'what else',
+        'is there anything',
+        'let me know'
+    ]
+    for phrase in engagement_phrases:
+        if phrase in text_lower:
+            return text
+
+    # Add appropriate follow-up based on intent
+    followups = {
+        'scheduling': " Is there anything else I can help you with?",
+        'information': " Would you like to know anything else?",
+        'project_inquiry': " Would you like details on any of these projects?",
+        'weather': " Is there anything else I can help you with?",
+        'default': " Is there anything else I can help you with?"
+    }
+
+    followup = followups.get(intent.lower(), followups['default'])
+
+    # Ensure proper spacing
+    if not text_stripped.endswith('.'):
+        text_stripped += '.'
+
+    return text_stripped + followup
+
+
 def format_for_voice(response_text: str, intent: str = 'unknown') -> str:
     """
     Convert response to voice-friendly natural language
 
-    Handles:
-    - JSON project lists  natural enumeration
-    - Technical terminology  plain language
-    - Numbers and IDs  spelled out clearly
-    - Long lists  summarized with details option
-    - Markdown formatting  removed
+    OPTIMIZED for elderly-friendly, natural phone conversation:
+    - Shorter sentences (max 2-3 per response)
+    - No project IDs in voice (just use ordinals: first, second)
+    - Natural date/time formats
+    - No markdown, no technical jargon
+    - Concise and clear
 
     Args:
         response_text: Raw response from agent or Lambda
         intent: Intent type (scheduling, information, chitchat)
 
     Returns:
-        Voice-friendly response string
-
-    Examples:
-        >>> json_response = '{"projects":[{"id":"123","name":"Project A"}]}'
-        >>> format_for_voice(json_response, 'scheduling')
-        'You have 1 project. Project A, with ID 1 2 3.'
-
-        >>> format_for_voice("Weather is 75F sunny", 'information')
-        'Weather is 75 degrees Fahrenheit, sunny.'
+        Voice-friendly response string (max ~200 chars for natural speech)
     """
     try:
         # Step 1: Try to detect and parse JSON
@@ -54,33 +111,64 @@ def format_for_voice(response_text: str, intent: str = 'unknown') -> str:
                 # Generic JSON - convert to text
                 return _generic_json_to_voice(parsed)
 
-        # Step 2: Clean up text responses
+        # Step 2: Clean up text responses for voice
         voice_text = response_text
 
-        # Remove markdown formatting
+        # Remove markdown formatting first
         voice_text = _remove_markdown(voice_text)
 
-        # Format numbers
+        # VOICE OPTIMIZATION: Remove project IDs - they're hard to hear
+        # "project #7751742" -> "your project"
+        # "Project (#7751742)" -> "your project"
+        voice_text = re.sub(r'[Pp]roject\s*\(?\s*#?\d{6,}\s*\)?', 'your project', voice_text)
+        voice_text = re.sub(r'#\d{6,}', '', voice_text)  # Remove standalone IDs
+
+        # VOICE OPTIMIZATION: Simplify parenthetical content
+        # Remove technical parenthetical details
+        voice_text = re.sub(r'\([^)]*ID[^)]*\)', '', voice_text)
+        voice_text = re.sub(r'\([^)]*#\d+[^)]*\)', '', voice_text)
+
+        # VOICE OPTIMIZATION: Shorten long responses
+        # Keep only first 2-3 sentences for voice
+        sentences = re.split(r'(?<=[.!?])\s+', voice_text)
+        if len(sentences) > 3:
+            voice_text = ' '.join(sentences[:3])
+            # Add a gentle ending if we truncated
+            if not voice_text.endswith(('.', '!', '?')):
+                voice_text += '.'
+
+        # Format numbers naturally
         voice_text = _format_numbers_for_voice(voice_text)
 
         # Format temperatures
         voice_text = _format_temperatures(voice_text)
 
-        # Format dates
+        # Format dates naturally
         voice_text = _format_dates(voice_text)
 
         # Add natural pauses
         voice_text = _add_natural_pauses(voice_text)
 
-        # Clean up whitespace
+        # Clean up extra whitespace and double spaces
         voice_text = re.sub(r'\s+', ' ', voice_text).strip()
+        voice_text = re.sub(r'\s+([.,!?])', r'\1', voice_text)  # Fix space before punctuation
+
+        # VOICE OPTIMIZATION: Cap length for natural speech (~250 chars max)
+        if len(voice_text) > 300:
+            # Find a good break point
+            break_point = voice_text.rfind('.', 0, 280)
+            if break_point > 100:
+                voice_text = voice_text[:break_point + 1]
+
+        # VOICE ENGAGEMENT: Add follow-up question if response doesn't already have one
+        voice_text = _add_voice_followup(voice_text, intent)
 
         return voice_text
 
     except Exception as e:
         logger.error(f"Error formatting for voice: {e}")
         # Fallback: return cleaned text
-        return response_text.replace('**', '').replace('```', '').strip()
+        return response_text.replace('**', '').replace('```', '').strip()[:250]
 
 
 def _is_json(text: str) -> bool:
@@ -96,32 +184,47 @@ def _is_json(text: str) -> bool:
 
 
 def _format_projects_for_voice(data: Dict) -> str:
-    """Format project list for voice"""
+    """Format project list for voice - natural and concise"""
     projects = data.get('projects', [])
     count = len(projects)
 
     if count == 0:
         return "You don't have any projects right now."
 
-    # Start with count
-    result = f"You have {count} project{'s' if count != 1 else ''}. "
+    if count == 1:
+        p = projects[0]
+        category = p.get('category', 'project')
+        status = p.get('status', '')
+        return f"You have one {category} project, and it's {status.lower()}. Would you like more details?"
 
-    # List first 5 projects with details
-    for i, project in enumerate(projects[:5], 1):
-        project_id = project.get('id', 'unknown')
-        project_name = project.get('name', 'Unnamed project')
-        status = project.get('status', 'unknown status')
+    # Multiple projects - be concise, no IDs
+    result = f"You have {count} projects. "
 
-        # Spell out project ID digits
-        id_spoken = _spell_digits(str(project_id))
+    # Group by category for natural speech
+    categories = {}
+    for p in projects:
+        cat = p.get('category', 'Other')
+        if cat not in categories:
+            categories[cat] = 0
+        categories[cat] += 1
 
-        result += f"Project {i}: {project_name}, ID {id_spoken}, status is {status}. "
+    # Describe by category (more natural than listing each)
+    cat_parts = []
+    for cat, num in list(categories.items())[:3]:  # Max 3 categories
+        if num == 1:
+            cat_parts.append(f"one {cat}")
+        else:
+            cat_parts.append(f"{num} {cat}")
 
-    # If more than 5, mention remaining count
-    if count > 5:
-        result += f"And {count - 5} more. "
+    if cat_parts:
+        result += "That includes " + ", ".join(cat_parts) + ". "
 
-    result += "Would you like details on any specific project?"
+    # Mention if any are scheduled
+    scheduled = [p for p in projects if p.get('status', '').lower() in ['scheduled', 'customer scheduled']]
+    if scheduled:
+        result += f"{len(scheduled)} {'is' if len(scheduled) == 1 else 'are'} already scheduled. "
+
+    result += "Which one would you like to know about?"
 
     return result
 

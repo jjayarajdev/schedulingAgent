@@ -217,6 +217,29 @@ CUSTOMER_LOOKUP_ROLE="pf-customer-lookup-role-${ENVIRONMENT}"
 CUSTOMER_TABLE="pf-customers-${ENVIRONMENT}"
 
 # ============================================================================
+# Lex Bot Voice Configuration (Tunable Settings)
+# ============================================================================
+# Bot versioning - DRAFT is required for modifications, use numbered versions for production aliases
+LEX_BOT_VERSION="DRAFT"
+
+# Voice settings
+LEX_VOICE_ID="Joanna"           # Options: Joanna, Matthew, Ivy, Kendra, Kimberly, Salli, Joey, Justin
+LEX_VOICE_ENGINE="neural"       # Options: standard, neural, long-form, generative
+
+# NLU settings
+LEX_NLU_CONFIDENCE_THRESHOLD="0.3"      # Lower = more lenient matching (0.0-1.0, default was 0.4)
+LEX_SPEECH_DETECTION="MaximumNoiseTolerance"  # Options: Default, HighNoiseTolerance, MaximumNoiseTolerance
+
+# Generative AI (Assisted NLU)
+LEX_ASSISTED_NLU_ENABLED="true"         # Use LLM for better intent classification
+LEX_ASSISTED_NLU_MODE="Primary"         # Options: Primary (LLM default), Fallback (LLM only when NLU fails)
+
+# SSML wait message settings
+LEX_WAIT_DELAY_SECONDS="1"              # Seconds before first wait message plays
+LEX_UPDATE_FREQUENCY_SECONDS="8"        # Seconds between update messages
+LEX_FULFILLMENT_TIMEOUT="90"            # Max seconds to wait for Lambda response
+
+# ============================================================================
 # Platform Detection & Python Command
 # ============================================================================
 if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
@@ -1061,7 +1084,7 @@ echo -e "${YELLOW}Step 4: Generating Contact Flow Configuration${NC}"
 echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 echo ""
 
-INFRA_VOICE_DIR="infrastructure/voice"
+INFRA_VOICE_DIR="${PROJECT_DIR}/infrastructure/voice"
 
 # Check if Lex bot exists and get its ID
 echo "  -> Checking for existing Lex bot..."
@@ -1101,6 +1124,22 @@ else
             --role-name "$LEX_BOT_ROLE_NAME" \
             --policy-arn "arn:aws:iam::aws:policy/AmazonLexFullAccess" &>/dev/null
 
+        # CRITICAL: ComprehendFullAccess is REQUIRED for Sentiment Analysis
+        aws_cmd iam attach-role-policy \
+            --role-name "$LEX_BOT_ROLE_NAME" \
+            --policy-arn "arn:aws:iam::aws:policy/ComprehendFullAccess" &>/dev/null
+
+        echo "  [OK] Attached policies: AmazonLexFullAccess, ComprehendFullAccess"
+
+        # VERIFY policies are attached
+        ATTACHED_POLICIES=$(aws_cmd iam list-attached-role-policies --role-name "$LEX_BOT_ROLE_NAME" --query "AttachedPolicies[].PolicyName" --output text 2>/dev/null || echo "")
+        if [[ "$ATTACHED_POLICIES" == *"AmazonLexFullAccess"* ]] && [[ "$ATTACHED_POLICIES" == *"ComprehendFullAccess"* ]]; then
+            echo "  [VERIFIED] Both policies attached: $ATTACHED_POLICIES"
+        else
+            echo "  [ERROR] Policy attachment failed! Attached: $ATTACHED_POLICIES"
+            exit 1
+        fi
+
         # Dynamic polling for Lex IAM role propagation (max 5 minutes)
         echo "  -> Waiting for Lex IAM role to propagate (max 5 minutes)..."
         LEX_ROLE_MAX_WAIT=300
@@ -1132,6 +1171,20 @@ else
             echo "  -> Adding ${EXTRA}s safety buffer..."
             sleep $EXTRA
         fi
+    else
+        # Role already exists - ensure ComprehendFullAccess is attached
+        echo "  -> Lex IAM role already exists, ensuring policies..."
+        aws_cmd iam attach-role-policy \
+            --role-name "$LEX_BOT_ROLE_NAME" \
+            --policy-arn "arn:aws:iam::aws:policy/ComprehendFullAccess" &>/dev/null || true
+
+        # VERIFY policies
+        ATTACHED_POLICIES=$(aws_cmd iam list-attached-role-policies --role-name "$LEX_BOT_ROLE_NAME" --query "AttachedPolicies[].PolicyName" --output text 2>/dev/null || echo "")
+        if [[ "$ATTACHED_POLICIES" == *"ComprehendFullAccess"* ]]; then
+            echo "  [OK] ComprehendFullAccess verified on existing role"
+        else
+            echo "  [WARN] ComprehendFullAccess may not be attached. Sentiment analysis may fail."
+        fi
     fi
 
     LEX_BOT_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${LEX_BOT_ROLE_NAME}"
@@ -1157,6 +1210,18 @@ BOT_NAME = '${LEX_BOT_NAME}'
 ROLE_ARN = '${LEX_BOT_ROLE_ARN}'
 LAMBDA_ARN = 'arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:${LEX_FULFILLMENT_FUNCTION}'
 ENVIRONMENT = '${ENVIRONMENT}'
+
+# Voice configuration from bash variables
+BOT_VERSION = '${LEX_BOT_VERSION}'
+VOICE_ID = '${LEX_VOICE_ID}'
+VOICE_ENGINE = '${LEX_VOICE_ENGINE}'
+NLU_CONFIDENCE_THRESHOLD = float('${LEX_NLU_CONFIDENCE_THRESHOLD}')
+SPEECH_DETECTION = '${LEX_SPEECH_DETECTION}'
+ASSISTED_NLU_ENABLED = '${LEX_ASSISTED_NLU_ENABLED}'.lower() == 'true'
+ASSISTED_NLU_MODE = '${LEX_ASSISTED_NLU_MODE}'
+WAIT_DELAY_SECONDS = int('${LEX_WAIT_DELAY_SECONDS}')
+UPDATE_FREQUENCY_SECONDS = int('${LEX_UPDATE_FREQUENCY_SECONDS}')
+FULFILLMENT_TIMEOUT = int('${LEX_FULFILLMENT_TIMEOUT}')
 
 try:
     print("  Creating bot...")
@@ -1188,12 +1253,12 @@ try:
         if elapsed % 15 == 0:
             print("  -> Waiting for bot... " + str(elapsed) + "s / " + str(max_wait) + "s")
 
-    print("  Creating locale (en_US)...")
+    print(f"  Creating locale (en_US) with NLU threshold={NLU_CONFIDENCE_THRESHOLD}...")
     client.create_bot_locale(
         botId=bot_id,
-        botVersion='DRAFT',
+        botVersion=BOT_VERSION,
         localeId='en_US',
-        nluIntentConfidenceThreshold=0.4
+        nluIntentConfidenceThreshold=NLU_CONFIDENCE_THRESHOLD
     )
 
     # Poll for locale to be ready
@@ -1201,7 +1266,7 @@ try:
     elapsed = 0
     while elapsed < 60:
         try:
-            locale_status = client.describe_bot_locale(botId=bot_id, botVersion='DRAFT', localeId='en_US')
+            locale_status = client.describe_bot_locale(botId=bot_id, botVersion=BOT_VERSION, localeId='en_US')
             if locale_status.get('botLocaleStatus') in ['Built', 'ReadyExpressTesting', 'NotBuilt']:
                 print("  [OK] Locale ready after " + str(elapsed) + "s")
                 break
@@ -1210,163 +1275,855 @@ try:
         time.sleep(3)
         elapsed += 3
 
+    # Update locale with full voice and speech detection settings
+    print(f"  Configuring locale: voice={VOICE_ID}/{VOICE_ENGINE}, speech={SPEECH_DETECTION}, assistedNLU={ASSISTED_NLU_MODE}")
+    client.update_bot_locale(
+        botId=bot_id,
+        botVersion=BOT_VERSION,
+        localeId='en_US',
+        nluIntentConfidenceThreshold=NLU_CONFIDENCE_THRESHOLD,
+        voiceSettings={'voiceId': VOICE_ID, 'engine': VOICE_ENGINE},
+        generativeAISettings={
+            'runtimeSettings': {
+                'nluImprovement': {
+                    'enabled': ASSISTED_NLU_ENABLED,
+                    'assistedNluMode': ASSISTED_NLU_MODE
+                }
+            },
+            'buildtimeSettings': {
+                'descriptiveBotBuilder': {'enabled': False},
+                'sampleUtteranceGeneration': {'enabled': False}
+            }
+        }
+    )
+
     intents = [
         {
-            'name': 'Welcome',
-            'description': 'Greet the user',
-            'utterances': [
-                'hello', 'hi', 'hey', 'good morning', 'good afternoon',
-                'greetings', 'hi there', 'hello there', 'hey there'
-            ]
-        },
-        {
-            'name': 'Goodbye',
-            'description': 'End conversation',
-            'utterances': [
-                'goodbye', 'bye', 'see you', 'later', 'thanks bye',
-                'thank you goodbye', 'that is all', 'I am done', 'nothing else'
-            ]
-        },
-        {
-            'name': 'ProjectInquiry',
-            'description': 'List user projects',
-            'utterances': [
-                'list my projects', 'show my projects', 'what are my projects',
-                'tell me about my projects', 'get my projects', 'my projects',
-                'show projects', 'what projects do I have', 'projects please',
-                'can you list my projects', 'I want to see my projects'
-            ]
-        },
-        {
-            'name': 'ProjectStatusInquiry',
-            'description': 'Get details about a specific project',
-            'utterances': [
-                'what is the status of my project', 'what is the status',
-                'show me status', 'tell me about my project', 'get status',
-                'project status', 'how is my project doing', 'check project status',
-                'status update please', 'give me a status update',
-                'details of the first project', 'tell me about the second project',
-                'show me the third project', 'what is project number one',
-                'details for project two', 'info on the last project',
-                'show me project 1', 'details of project 2', 'tell me about project 3',
-                'details of second project', 'details of first project',
-                'details of third project', 'can i get details of second project',
-                'give me details of second project', 'give me details of first project',
-                'give me details of third project', 'second project details',
-                'first project details', 'more about second project',
-                'more about the second one', 'tell me more about second project',
-                'what about the second project', 'second one please',
-                'details on second', 'the second one', 'number two',
-                'tell me about the first one', 'more info on project one'
-            ]
-        },
-        {
             'name': 'AppointmentInquiry',
-            'description': 'Check appointments',
+            'description': 'Check scheduled appointments and installations',
             'utterances': [
-                'do I have any appointments', 'show my appointments',
-                'what appointments do I have', 'check my appointments',
-                'list appointments', 'any upcoming appointments',
-                'when is my next appointment', 'appointment schedule',
-                'my appointments please', 'show me my schedule'
-            ]
-        },
-        {
-            'name': 'ScheduleAppointment',
-            'description': 'Schedule a new appointment',
-            'utterances': [
-                'schedule an appointment', 'book an appointment',
-                'I need to schedule', 'can you schedule', 'set up an appointment',
-                'I want to book', 'make an appointment', 'schedule something',
-                'book a time', 'I need to book an appointment'
-            ]
-        },
-        {
-            'name': 'WeatherInquiry',
-            'description': 'Check weather',
-            'utterances': [
-                'what is the weather', 'how is the weather', 'weather forecast',
-                'check weather', 'weather in', 'is it going to rain',
-                'what is the forecast', 'weather update', 'tell me the weather',
-                'weather for tomorrow', 'will it rain'
-            ]
-        },
-        {
-            'name': 'UrgentRequest',
-            'description': 'Handle urgent requests',
-            'utterances': [
-                'this is urgent', 'emergency', 'I need help urgently',
-                'urgent matter', 'this is an emergency', 'urgent request',
-                'I have an urgent issue', 'need immediate help'
-            ]
-        },
-        {
-            'name': 'CheckAvailability',
-            'description': 'Check available dates for scheduling',
-            'utterances': [
-                'what dates are available', 'show available dates',
-                'when can I schedule', 'available times', 'what times work',
-                'check availability', 'when are you available',
-                'show me available slots', 'open dates', 'free dates',
-                'what days are open', 'available appointments'
-            ]
-        },
-        {
-            'name': 'RescheduleAppointment',
-            'description': 'Reschedule an existing appointment',
-            'utterances': [
-                'reschedule my appointment', 'change my appointment',
-                'move my appointment', 'I need to reschedule',
-                'can I change the time', 'change appointment time',
-                'reschedule please', 'move to a different day',
-                'pick a different time', 'change the date'
-            ]
-        },
-        {
-            'name': 'CancelAppointment',
-            'description': 'Cancel an existing appointment',
-            'utterances': [
-                'cancel my appointment', 'I need to cancel',
-                'cancel the appointment', 'remove my appointment',
-                'I want to cancel', 'cancel please', 'delete appointment',
-                'I cannot make it', 'cancel my booking'
+                'do I have any appointments',
+                'show my appointments',
+                'what appointments do I have',
+                'check my appointments',
+                'list appointments',
+                'any upcoming appointments',
+                'when is my next appointment',
+                'appointment schedule',
+                'my appointments please',
+                'show me my schedule',
+                'my appointments',
+                'I would like to check my appointments',
+                'may I see my appointments',
+                'could you tell me about my appointments',
+                'please show my appointments',
+                'I need to check my schedule',
+                'what is my appointment schedule',
+                'when am I scheduled',
+                'whats on my calendar',
+                'any appointments coming up',
+                'got any appointments',
+                'am I scheduled for anything',
+                'whens my appointment',
+                'when is my installation',
+                'when is my project scheduled',
+                'when is my decking appointment',
+                'when is my roofing scheduled',
+                'when is my flooring installation',
+                'show my installation date',
+                'when are they coming',
+                'when is the installer coming',
+                'when is the technician coming',
+                'when is the crew coming',
+                'appointments',
+                'the appointments',
+                'show appointment',
+                'check appointment',
+                'appointment status',
+                'is anything scheduled',
+                'do I have anything scheduled',
+                'what dates am I booked for',
+                'show my booked dates',
+                'when is my next install',
+                'upcoming installations',
             ]
         },
         {
             'name': 'BusinessHours',
-            'description': 'Ask about business hours',
+            'description': 'Ask about business and installation hours',
             'utterances': [
-                'what are your hours', 'when are you open',
-                'business hours', 'operating hours', 'what time do you open',
-                'what time do you close', 'are you open on weekends',
-                'hours of operation', 'when can I call', 'office hours'
+                'what are your hours',
+                'when are you open',
+                'business hours',
+                'operating hours',
+                'what time do you open',
+                'what time do you close',
+                'are you open on weekends',
+                'hours of operation',
+                'when can I call',
+                'office hours',
+                'what are your working hours',
+                'store hours',
+                'are you open today',
+                'are you open tomorrow',
+                'are you open on saturday',
+                'are you open on sunday',
+                'what days are you open',
+                'when do you start work',
+                'when do installers work',
+                'what time does installation start',
+                'earliest appointment time',
+                'latest appointment time',
+                'do you work on holidays',
+                'are you open on christmas',
+                'are you closed on thanksgiving',
+                'when can I schedule an appointment',
+                'what hours do you install',
+                'do you do evening appointments',
+                'do you work mornings',
+                'can you come early morning',
+                'can you come late afternoon',
             ]
         },
         {
-            'name': 'ThankYou',
-            'description': 'Express gratitude',
+            'name': 'CancelAppointment',
+            'description': 'Cancel an existing installation appointment',
             'utterances': [
-                'thank you', 'thanks', 'thanks a lot', 'thank you so much',
-                'appreciate it', 'that is helpful', 'thanks for your help',
-                'thank you very much', 'you have been helpful', 'great thanks'
+                'cancel my appointment',
+                'I need to cancel',
+                'cancel the appointment',
+                'remove my appointment',
+                'I want to cancel',
+                'cancel please',
+                'delete appointment',
+                'I cannot make it',
+                'cancel my booking',
+                'I would like to cancel my appointment',
+                'may I cancel please',
+                'I need to cancel my scheduled appointment',
+                'please cancel my appointment',
+                'cancel it',
+                'just cancel',
+                'nevermind cancel it',
+                'do not come',
+                'do not need it anymore',
+                'changed my mind',
+                'not doing it anymore',
+                'forget it',
+                'cancel my installation',
+                'cancel my project',
+                'cancel the install',
+                'cancel my decking installation',
+                'cancel my roofing appointment',
+                'cancel my flooring project',
+                'do not install it',
+                'cancel the scheduled work',
+                'cancel the crew',
+                'I changed my mind about the project',
+                'I do not want to proceed',
+                'I decided not to do it',
+                'we are not doing the project',
+                'can I cancel',
+                'how do I cancel',
+                'is it too late to cancel',
+                'can I still cancel',
+                'what if I cancel',
+                'stop the project',
+                'cancel everything',
+                'cancel my deck project',
+                'cancel my roof work',
+            ]
+        },
+        {
+            'name': 'CheckAvailability',
+            'description': 'Check available dates for scheduling installations',
+            'utterances': [
+                'what dates are available',
+                'show available dates',
+                'when can I schedule',
+                'available times',
+                'what times work',
+                'check availability',
+                'when are you available',
+                'show me available slots',
+                'open dates',
+                'free dates',
+                'what days are open',
+                'available appointments',
+                'I would like to know what dates are available',
+                'may I see available times',
+                'could you show me the available dates',
+                'please check availability',
+                'what would be a good time',
+                'when would be convenient',
+                'when can you come',
+                'when can you guys come out',
+                'whats open',
+                'got any openings',
+                'any slots available',
+                'when can we do this',
+                'earliest available',
+                'soonest available',
+                'next available date',
+                'when can you install',
+                'when can you do the work',
+                'when can you start the project',
+                'when can you start my deck',
+                'when can you do my roof',
+                'when can you install my flooring',
+                'available dates for installation',
+                'installation availability',
+                'what about next week',
+                'anything this week',
+                'any openings this month',
+                'do you have anything on monday',
+                'availability for tuesday',
+                'can you come this weekend',
+                'saturday availability',
+                'how soon can you come',
+                'how quickly can you schedule',
+                'what is your earliest availability',
+                'when is the next opening',
+            ]
+        },
+        {
+            'name': 'Goodbye',
+            'description': 'End conversation and disconnect call',
+            'utterances': [
+                'goodbye',
+                'bye',
+                'bye bye',
+                'see you',
+                'see you later',
+                'thanks bye',
+                'thank you goodbye',
+                'ok bye',
+                'alright bye',
+                'that is all',
+                'thats all',
+                'that will be all',
+                'I am done',
+                'im done',
+                'all done',
+                'nothing else',
+                'no more questions',
+                'I am finished',
+                'we are done',
+                'thanks thats all',
+                'thank you thats all',
+                'hang up',
+                'end call',
+                'disconnect',
+                'end the call',
+                'take care',
+                'have a good day',
+                'talk to you later',
+                'thanks for your help goodbye',
+                'that helps thanks bye',
+                'no',
+                'nope',
+                'no thanks',
+                'no thank you',
+                'I am good',
+                'im good',
+                'thats it',
+                'that is it',
+                'no I am done',
+                'no im done',
+                'I do not need any help',
+                'I dont need any help',
+                'I do not need anything else',
+                'I dont need anything else',
+                'no I am good',
+                'no im good',
+                'I am all set',
+                'im all set',
+                'no I am all set',
+                'not right now',
+                'no not right now',
+                'maybe later',
+                'not at this time',
+                'I am okay',
+                'im okay',
+            ]
+        },
+        {
+            'name': 'Help',
+            'description': 'Request for assistance or options',
+            'utterances': [
+                'help',
+                'help me',
+                'I need help',
+                'can you help',
+                'what can you do',
+                'what are my options',
+                'how does this work',
+                'I need assistance',
+                'can you assist me',
+                'I am confused',
+                'I do not understand',
+                'what should I do',
+                'guide me',
+                'walk me through this',
+                'I am not sure what to do',
+                'help please',
+                'I need some help',
+                'can someone help me',
+                'what do I do',
+                'how do I use this',
+                'what can I ask you',
+                'what are you able to do',
+                'show me what you can do',
+                'what services do you offer',
+                'how can you help me',
+                'I am lost',
+                'start over',
+                'I need to talk to someone',
+                'can I speak to a person',
             ]
         },
         {
             'name': 'HowAreYou',
             'description': 'Casual chitchat greeting',
             'utterances': [
-                'how are you', 'how are you doing', 'how is it going',
-                'what is up', 'how do you do', 'are you doing well',
-                'hows everything', 'how have you been', 'you doing okay'
+                'how are you',
+                'how are you doing',
+                'how is it going',
+                'what is up',
+                'how do you do',
+                'are you doing well',
+                'hows everything',
+                'how have you been',
+                'you doing okay',
+                'how are things',
+                'hows your day',
+                'hows it going today',
+                'you good',
+                'all good',
+                'everything alright',
+                'are you okay',
+                'are you well',
+                'how is your day going',
+                'having a good day',
+                'busy today',
+                'how is work',
+                'nice to talk to you',
+                'good to hear from you',
             ]
-        }
+        },
+        {
+            'name': 'ProjectInquiry',
+            'description': 'List customer projects - home improvement work',
+            'utterances': [
+                'list my projects',
+                'show my projects',
+                'what are my projects',
+                'tell me about my projects',
+                'get my projects',
+                'my projects',
+                'show projects',
+                'what projects do I have',
+                'projects please',
+                'can you list my projects',
+                'I want to see my projects',
+                'I would like to see my projects',
+                'may I see my projects please',
+                'could you show me my projects',
+                'please show my projects',
+                'whats up with my projects',
+                'show me what I got',
+                'what do I have going on',
+                'any projects',
+                'got any projects',
+                'my stuff',
+                'show my stuff',
+                'what am I working on',
+                'whats going on with my work',
+                'show my decking project',
+                'list my roofing projects',
+                'my siding project',
+                'show my flooring project',
+                'list my fencing project',
+                'my painting project',
+                'show my window project',
+                'my kitchen project',
+                'my bathroom project',
+                'show my gutter project',
+                'list my deck project',
+                'my roof project',
+                'list my products',
+                'show my products',
+                'what products do I have',
+                'my products please',
+                'tell me about my products',
+                'show me my products',
+                'what are my products',
+                'products',
+                'the products',
+                'what work do I have',
+                'show my home improvement projects',
+                'list my installation projects',
+                'what installations do I have',
+                'show my jobs',
+                'my jobs please',
+                'what jobs are pending',
+                'do I have any projects',
+                'how many projects do I have',
+                'what projects are there',
+                'any pending projects',
+                'my lowes projects',
+                'show my lowes work',
+                'list my store projects',
+            ]
+        },
+        {
+            'name': 'ProjectStatusInquiry',
+            'description': 'Get details about a specific project',
+            'utterances': [
+                'details of second project',
+                'first project details',
+                'info on third project',
+                'more info on project one',
+                'tell me about my project',
+                'last project details',
+                'can you give me details of third project',
+                'tell me about the product',
+                'how is my project doing',
+                'give me a status update',
+                'what is the status',
+                'details of first project',
+                'can i get details',
+                'second project details',
+                'show me details',
+                'product details',
+                'more about the second one',
+                'get status',
+                'give me details of the third project',
+                'what is project number one',
+                'details of the last one',
+                'give me details of second project',
+                'details on second',
+                'i need details',
+                'show me the third project',
+                'show me status',
+                'info on the last project',
+                'second one please',
+                'details of the third project',
+                'details for project two',
+                'product information',
+                'details of project 2',
+                'project status',
+                'give me the details',
+                'what about the third project',
+                'what is the status of my project',
+                'details of the first project',
+                'status update please',
+                'tell me about the third project',
+                'show me third project',
+                'details of the previous one',
+                'tell me about project 3',
+                'third project details',
+                'details please',
+                'tell me more about second project',
+                'number two',
+                'give me details of third project',
+                'more about second project',
+                'what about the second project',
+                'tell me about the first one',
+                'the product please',
+                'fourth project details',
+                'can i get details of second project',
+                'details of the product',
+                'fifth project details',
+                'details of third project',
+                'what about the product',
+                'tell me about the second project',
+                'give me details of first project',
+                'check project status',
+                'i want details',
+                'the second one',
+                'show me project 1',
+            ]
+        },
+        {
+            'name': 'RescheduleAppointment',
+            'description': 'Reschedule an existing installation appointment',
+            'utterances': [
+                'reschedule my appointment',
+                'change my appointment',
+                'move my appointment',
+                'I need to reschedule',
+                'can I change the time',
+                'change appointment time',
+                'reschedule please',
+                'move to a different day',
+                'pick a different time',
+                'change the date',
+                'I would like to reschedule my appointment',
+                'may I change my appointment',
+                'could we reschedule please',
+                'I need to move my appointment to another day',
+                'would it be possible to reschedule',
+                'can we move it',
+                'push it back',
+                'can you come a different day',
+                'need to change it',
+                'gotta reschedule',
+                'something came up need to move it',
+                'that day does not work',
+                'need a new date',
+                'reschedule my installation',
+                'change my install date',
+                'move my project date',
+                'reschedule my decking installation',
+                'change my roofing appointment',
+                'move my flooring install',
+                'need to change when you come',
+                'can the crew come a different day',
+                'something came up',
+                'I have a conflict',
+                'I will not be home',
+                'that time does not work for me',
+                'can I reschedule',
+                'is it possible to reschedule',
+                'how do I reschedule',
+                'can we pick a new date',
+                'change when they come',
+                'move my deck installation',
+                'reschedule my roof appointment',
+            ]
+        },
+        {
+            'name': 'ScheduleAppointment',
+            'description': 'Schedule a new appointment - single or multiple projects',
+            'utterances': [
+                'schedule all my projects',
+                'schedule for tomorrow',
+                'schedule not reschedule',
+                'lets schedule it',
+                'schedule project',
+                'sure schedule it',
+                'lets schedule',
+                'can you schedule',
+                'schedule my project',
+                'book new appointment',
+                'book for tuesday',
+                'schedule the first project',
+                'schedule something',
+                'schedule my roofing project',
+                'schedule for monday',
+                'set up a new appointment',
+                'schedule that',
+                'schedule the last project',
+                'book both',
+                'schedule both projects',
+                'yes book it',
+                'book it',
+                'okay book it',
+                'create new booking',
+                'schedule the first two projects',
+                'schedule my flooring project',
+                'book for next week',
+                'i want to schedule',
+                'i need a new appointment',
+                'schedule this project',
+                'book appointment for project',
+                'book an appointment',
+                'schedule this project please',
+                'make an appointment',
+                'schedule the second project',
+                'schedule them all',
+                'schedule appointment for project',
+                'set up an appointment',
+                'schedule my decking project',
+                'book that',
+                'set it up',
+                'schedule first two projects',
+                'new appointment',
+                'lets book it',
+                'book a new one',
+                'set up appointment for this project',
+                'book all projects',
+                'schedule the appointment',
+                'schedule a new one',
+                'please book it',
+                'book this project',
+                'make a new appointment',
+                'okay schedule it',
+                'create an appointment',
+                'I want to schedule my project',
+                'schedule for this week',
+                'book a time',
+                'go ahead and schedule',
+                'i want to book',
+                'schedule an appointment',
+                'please schedule',
+                'I want to book',
+                'schedule them',
+                'schedule first three projects',
+                'schedule my siding project',
+                'I need to schedule',
+                'new booking please',
+                'yes schedule',
+                'I need to book an appointment',
+                'yeah schedule it',
+                'schedule it',
+                'can you schedule my project',
+                'schedule the project',
+                'go ahead and book',
+                'schedule all projects',
+                'schedule multiple projects',
+            ]
+        },
+        {
+            'name': 'ThankYou',
+            'description': 'Express gratitude',
+            'utterances': [
+                'thank you',
+                'thanks',
+                'thanks a lot',
+                'thank you so much',
+                'appreciate it',
+                'that is helpful',
+                'thanks for your help',
+                'thank you very much',
+                'you have been helpful',
+                'great thanks',
+                'thank you kindly',
+                'many thanks',
+                'thanks so much',
+                'I appreciate your help',
+                'that was very helpful',
+                'you are very helpful',
+                'thanks for the information',
+                'thank you for your time',
+                'I really appreciate it',
+                'that helps a lot',
+                'perfect thank you',
+                'wonderful thanks',
+                'excellent thank you',
+                'great help',
+                'very helpful',
+                'you are awesome',
+                'thanks a bunch',
+                'cheers',
+                'much appreciated',
+                'grateful for your help',
+            ]
+        },
+        {
+            'name': 'UrgentRequest',
+            'description': 'Handle urgent requests and emergencies',
+            'utterances': [
+                'this is urgent',
+                'emergency',
+                'I need help urgently',
+                'urgent matter',
+                'this is an emergency',
+                'urgent request',
+                'I have an urgent issue',
+                'need immediate help',
+                'this is very urgent',
+                'please help me urgently',
+                'I have an emergency',
+                'urgent problem',
+                'critical issue',
+                'my roof is leaking',
+                'water is coming in',
+                'something broke',
+                'there is a problem with the installation',
+                'the installer did not show up',
+                'nobody came today',
+                'I need someone right now',
+                'can someone come today',
+                'this cannot wait',
+                'I need help immediately',
+                'please hurry',
+                'asap',
+                'as soon as possible',
+                'right away please',
+                'I have a leak',
+                'something is wrong',
+                'there is damage',
+                'the work is not done',
+                'they left in the middle',
+            ]
+        },
+        {
+            'name': 'WeatherInquiry',
+            'description': 'Check weather',
+            'utterances': [
+                'hows the weather outside',
+                'tomorrow forecast',
+                'weather please',
+                'whats the weather like',
+                'tell me weather',
+                'will it snow',
+                'will it be cloudy',
+                'is it hot outside',
+                'weather today',
+                'what is the weather today',
+                'weather report',
+                'what is the forecast',
+                'current weather',
+                'is it chilly',
+                'weather tomorrow',
+                'forecast for tomorrow',
+                'will it be cold tomorrow',
+                'weather in',
+                'weather update',
+                'tomorrow weather',
+                'tell me the weather',
+                'weekend weather',
+                'check the weather',
+                'how is the weather today',
+                'is it warm',
+                'what will the weather be tomorrow',
+                'will it rain',
+                'will it be hot tomorrow',
+                'weather on sunday',
+                'todays weather',
+                'weather at the job site',
+                'weather forecast',
+                'will it be chilly',
+                'will it be sunny',
+                'is it cold outside',
+                'weather for tomorrow please',
+                'temperature tomorrow',
+                'weather at the project location',
+                'how hot will it be',
+                'how cold will it be',
+                'will it be cold',
+                'will it be warm',
+                'get weather',
+                'will it rain tomorrow',
+                'check weather',
+                'what is the weather tomorrow',
+                'weather for tomorrow',
+                'how is the weather',
+                'weather conditions',
+                'weather at the address',
+                'weather this weekend',
+                'will it be hot',
+                'is it going to rain',
+                'is it freezing',
+                'weather on saturday',
+                'whats the temperature',
+                'is it going to rain tomorrow',
+                'what is the weather',
+            ]
+        },
+        {
+            'name': 'Welcome',
+            'description': 'Greeting and conversation start',
+            'utterances': [
+                'hello',
+                'hi',
+                'hey',
+                'good morning',
+                'good afternoon',
+                'greetings',
+                'hi there',
+                'hello there',
+                'hey there',
+                'good evening',
+                'howdy',
+                'hiya',
+                'yo',
+                'whats up',
+                'sup',
+                'good day',
+                'top of the morning',
+                'hi its me',
+                'hello its me calling',
+                'this is calling about my project',
+                'hi I am calling about my installation',
+                'hello I need help',
+                'hi I have a question',
+                'hello can you help me',
+                'hey I need some information',
+                'hi this is about my appointment',
+                'good morning I am calling about my project',
+                'hello I would like some help please',
+                'hi may I speak to someone',
+            ]
+        },
     ]
 
     created_intents = {}
 
+    # Fulfillment updates config - FAST "please wait" (1 second delay)
+    fulfillment_updates_spec = {
+        'active': True,
+        'startResponse': {
+            'delayInSeconds': 1,  # Play wait message after just 1 second
+            'messageGroups': [
+                {
+                    'message': {
+                        'plainTextMessage': {
+                            'value': 'Let me look that up for you.'
+                        }
+                    }
+                },
+                {
+                    'message': {
+                        'plainTextMessage': {
+                            'value': 'One moment please.'
+                        }
+                    }
+                },
+                {
+                    'message': {
+                        'plainTextMessage': {
+                            'value': 'Just a second while I check.'
+                        }
+                    }
+                }
+            ],
+            'allowInterrupt': False
+        },
+        'updateResponse': {
+            'frequencyInSeconds': 10,  # Play update every 10 sec if still waiting
+            'messageGroups': [
+                {
+                    'message': {
+                        'plainTextMessage': {
+                            'value': 'Still working on that, almost there.'
+                        }
+                    }
+                },
+                {
+                    'message': {
+                        'plainTextMessage': {
+                            'value': 'Thank you for your patience.'
+                        }
+                    }
+                }
+            ],
+            'allowInterrupt': False
+        },
+        'timeoutInSeconds': 90  # Max 90 sec timeout for complex queries
+    }
+
+    # Post-fulfillment specification - CONTINUE conversation (ElicitIntent)
+    post_fulfillment_continue = {
+        'successNextStep': {'dialogAction': {'type': 'ElicitIntent'}},
+        'failureNextStep': {'dialogAction': {'type': 'ElicitIntent'}},
+        'timeoutNextStep': {'dialogAction': {'type': 'ElicitIntent'}}
+    }
+
+    # Post-fulfillment specification - END conversation (for Goodbye)
+    post_fulfillment_end = {
+        'successNextStep': {'dialogAction': {'type': 'EndConversation'}},
+        'failureNextStep': {'dialogAction': {'type': 'EndConversation'}},
+        'timeoutNextStep': {'dialogAction': {'type': 'EndConversation'}}
+    }
+
     for intent_def in intents:
         print("  Creating intent: " + intent_def['name'] + "...")
         utterance_list = [{'utterance': u} for u in intent_def['utterances']]
+        # Choose post-fulfillment spec: Goodbye ends conversation, others continue
+        post_spec = post_fulfillment_end if intent_def['name'] == 'Goodbye' else post_fulfillment_continue
         intent_response = client.create_intent(
             botId=bot_id,
             botVersion='DRAFT',
@@ -1374,7 +2131,11 @@ try:
             intentName=intent_def['name'],
             description=intent_def['description'],
             sampleUtterances=utterance_list,
-            fulfillmentCodeHook={'enabled': True}
+            fulfillmentCodeHook={
+                'enabled': True,
+                'fulfillmentUpdatesSpecification': fulfillment_updates_spec,
+                'postFulfillmentStatusSpecification': post_spec
+            }
         )
         created_intents[intent_def['name']] = intent_response['intentId']
 
@@ -1400,7 +2161,7 @@ try:
             intentId=fallback_id
         )
 
-        # Update with code hook enabled - keep parentIntentSignature for built-in
+        # Update with code hook enabled + fulfillment updates for interim messages
         client.update_intent(
             botId=bot_id,
             botVersion='DRAFT',
@@ -1408,10 +2169,43 @@ try:
             intentId=fallback_id,
             intentName=current_intent['intentName'],
             parentIntentSignature=current_intent.get('parentIntentSignature', 'AMAZON.FallbackIntent'),
-            fulfillmentCodeHook={'enabled': True},
+            fulfillmentCodeHook={
+                'enabled': True,
+                'fulfillmentUpdatesSpecification': fulfillment_updates_spec,
+                'postFulfillmentStatusSpecification': post_fulfillment_continue  # Continue conversation
+            },
             dialogCodeHook={'enabled': True}
         )
-        print("  FallbackIntent configured with code hook")
+        print("  FallbackIntent configured with code hook, interim messages, and ElicitIntent")
+
+    # Enable Generative AI features:
+    # Assisted NLU (Primary mode) - LLM-based intent classification
+    # Note: slotResolutionImprovement requires specific Bedrock access, skipping it
+    print("  Enabling Assisted NLU (Primary mode)...")
+    try:
+        client.update_bot_locale(
+            botId=bot_id,
+            botVersion='DRAFT',
+            localeId='en_US',
+            nluIntentConfidenceThreshold=0.4,
+            generativeAISettings={
+                'runtimeSettings': {
+                    'nluImprovement': {
+                        'enabled': True,
+                        'assistedNluMode': 'Primary'
+                    }
+                },
+                'buildtimeSettings': {
+                    'descriptiveBotBuilder': {'enabled': False},
+                    'sampleUtteranceGeneration': {'enabled': False}
+                }
+            }
+        )
+        print("  [OK] Assisted NLU enabled (Primary mode)")
+    except Exception as e:
+        print("  [ERROR] Could not enable Assisted NLU: " + str(e))
+        print("  [INFO] Bot will work but complex queries may go to FallbackIntent")
+        sys.exit(1)  # FAIL FAST - don't continue without Assisted NLU
 
     print("  Building bot locale...")
     client.build_bot_locale(
@@ -1420,6 +2214,8 @@ try:
         localeId='en_US'
     )
 
+    # Wait for build with verification
+    build_success = False
     for i in range(60):
         time.sleep(3)
         status = client.describe_bot_locale(
@@ -1430,12 +2226,32 @@ try:
         build_status = status['botLocaleStatus']
         if build_status in ['Built', 'ReadyExpressTesting']:
             print("  Bot locale built successfully!")
+            build_success = True
             break
         elif build_status in ['Failed', 'NotBuilt']:
-            print("  WARNING: Build status: " + build_status)
-            break
+            print("  [ERROR] Build failed: " + build_status)
+            sys.exit(1)
         if i % 5 == 0:
             print("  Building... (" + build_status + ")")
+
+    if not build_success:
+        print("  [ERROR] Build timed out")
+        sys.exit(1)
+
+    # VERIFY Assisted NLU is actually enabled
+    print("  Verifying Assisted NLU...")
+    verify_status = client.describe_bot_locale(
+        botId=bot_id,
+        botVersion='DRAFT',
+        localeId='en_US'
+    )
+    gen_ai = verify_status.get('generativeAISettings', {}).get('runtimeSettings', {}).get('nluImprovement', {})
+    if gen_ai.get('enabled') and gen_ai.get('assistedNluMode') == 'Primary':
+        print("  [VERIFIED] Assisted NLU is ENABLED (Primary mode)")
+    else:
+        print("  [ERROR] Assisted NLU verification FAILED!")
+        print("  Current settings: " + str(gen_ai))
+        sys.exit(1)
 
     # Create a versioned release from DRAFT
     print("  Creating bot version from DRAFT...")
@@ -1507,6 +2323,9 @@ try:
                             }
                         }
                     }
+                },
+                sentimentAnalysisSettings={
+                    'detectSentiment': True
                 }
             )
             print("  Bot alias updated successfully: " + alias_id)
@@ -1538,6 +2357,9 @@ try:
                             }
                         }
                     }
+                },
+                sentimentAnalysisSettings={
+                    'detectSentiment': True
                 }
             )
             alias_id = alias_response['botAliasId']
@@ -1618,6 +2440,1346 @@ PYTHON_SCRIPT
 fi
 
 # ============================================================================
+# Step 4.1: SYNC BOT INTENTS (CRITICAL - Runs for BOTH new and existing bots)
+# ============================================================================
+# This step ensures ALL required intents exist with correct utterances.
+# Without this, existing bots would be missing intents!
+# ============================================================================
+
+echo ""
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo -e "${YELLOW}Step 4.1: Syncing Bot Intents (CRITICAL)${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo ""
+
+if [[ -n "$LEX_BOT_ID" && "$LEX_BOT_ID" != "BOT_ID_PLACEHOLDER" ]]; then
+    echo "  -> Syncing intents for bot: $LEX_BOT_ID"
+    echo "  -> This ensures ALL required intents exist with correct utterances"
+    echo ""
+
+    # Export variables for Python script
+    export LEX_BOT_ID
+    export REGION
+    export ACCOUNT_ID="${SELECTED_ACCOUNT_ID}"
+    export ENVIRONMENT
+    export LEX_FULFILLMENT_FUNCTION="pf-lex-fulfillment-${ENVIRONMENT}"
+
+    $PYTHON_CMD << 'INTENT_SYNC_SCRIPT'
+import boto3
+import time
+import os
+import sys
+
+# Configuration from environment
+BOT_ID = os.environ.get('LEX_BOT_ID', '')
+REGION = os.environ.get('REGION', 'us-east-1')
+ACCOUNT_ID = os.environ.get('ACCOUNT_ID', '')
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
+LEX_FULFILLMENT_FUNCTION = os.environ.get('LEX_FULFILLMENT_FUNCTION', 'pf-lex-fulfillment-dev')
+
+if not BOT_ID:
+    print("  [ERROR] No BOT_ID provided")
+    sys.exit(1)
+
+session = boto3.Session(
+    profile_name=os.environ.get('AWS_PROFILE'),
+    region_name=REGION
+)
+client = session.client('lexv2-models')
+
+LAMBDA_ARN = f"arn:aws:lambda:{REGION}:{ACCOUNT_ID}:function:{LEX_FULFILLMENT_FUNCTION}"
+
+# All required intents with their utterances
+REQUIRED_INTENTS = {
+    'AppointmentInquiry': {
+        'description': 'Check scheduled appointments and installations',
+        'utterances': [
+            'do I have any appointments',
+            'show my appointments',
+            'what appointments do I have',
+            'check my appointments',
+            'list appointments',
+            'any upcoming appointments',
+            'when is my next appointment',
+            'appointment schedule',
+            'my appointments please',
+            'show me my schedule',
+            'my appointments',
+            'I would like to check my appointments',
+            'may I see my appointments',
+            'could you tell me about my appointments',
+            'please show my appointments',
+            'I need to check my schedule',
+            'what is my appointment schedule',
+            'when am I scheduled',
+            'whats on my calendar',
+            'any appointments coming up',
+            'got any appointments',
+            'am I scheduled for anything',
+            'whens my appointment',
+            'when is my installation',
+            'when is my project scheduled',
+            'when is my decking appointment',
+            'when is my roofing scheduled',
+            'when is my flooring installation',
+            'show my installation date',
+            'when are they coming',
+            'when is the installer coming',
+            'when is the technician coming',
+            'when is the crew coming',
+            'appointments',
+            'the appointments',
+            'show appointment',
+            'check appointment',
+            'appointment status',
+            'is anything scheduled',
+            'do I have anything scheduled',
+            'what dates am I booked for',
+            'show my booked dates',
+            'when is my next install',
+            'upcoming installations',
+        ]
+    },
+    'BusinessHours': {
+        'description': 'Ask about business and installation hours',
+        'utterances': [
+            'what are your hours',
+            'when are you open',
+            'business hours',
+            'operating hours',
+            'what time do you open',
+            'what time do you close',
+            'are you open on weekends',
+            'hours of operation',
+            'when can I call',
+            'office hours',
+            'what are your working hours',
+            'store hours',
+            'are you open today',
+            'are you open tomorrow',
+            'are you open on saturday',
+            'are you open on sunday',
+            'what days are you open',
+            'when do you start work',
+            'when do installers work',
+            'what time does installation start',
+            'earliest appointment time',
+            'latest appointment time',
+            'do you work on holidays',
+            'are you open on christmas',
+            'are you closed on thanksgiving',
+            'when can I schedule an appointment',
+            'what hours do you install',
+            'do you do evening appointments',
+            'do you work mornings',
+            'can you come early morning',
+            'can you come late afternoon',
+        ]
+    },
+    'CancelAppointment': {
+        'description': 'Cancel an existing installation appointment',
+        'utterances': [
+            'cancel my appointment',
+            'I need to cancel',
+            'cancel the appointment',
+            'remove my appointment',
+            'I want to cancel',
+            'cancel please',
+            'delete appointment',
+            'I cannot make it',
+            'cancel my booking',
+            'I would like to cancel my appointment',
+            'may I cancel please',
+            'I need to cancel my scheduled appointment',
+            'please cancel my appointment',
+            'cancel it',
+            'just cancel',
+            'nevermind cancel it',
+            'do not come',
+            'do not need it anymore',
+            'changed my mind',
+            'not doing it anymore',
+            'forget it',
+            'cancel my installation',
+            'cancel my project',
+            'cancel the install',
+            'cancel my decking installation',
+            'cancel my roofing appointment',
+            'cancel my flooring project',
+            'do not install it',
+            'cancel the scheduled work',
+            'cancel the crew',
+            'I changed my mind about the project',
+            'I do not want to proceed',
+            'I decided not to do it',
+            'we are not doing the project',
+            'can I cancel',
+            'how do I cancel',
+            'is it too late to cancel',
+            'can I still cancel',
+            'what if I cancel',
+            'stop the project',
+            'cancel everything',
+            'cancel my deck project',
+            'cancel my roof work',
+        ]
+    },
+    'CheckAvailability': {
+        'description': 'Check available dates for scheduling installations',
+        'utterances': [
+            'what dates are available',
+            'show available dates',
+            'when can I schedule',
+            'available times',
+            'what times work',
+            'check availability',
+            'when are you available',
+            'show me available slots',
+            'open dates',
+            'free dates',
+            'what days are open',
+            'available appointments',
+            'I would like to know what dates are available',
+            'may I see available times',
+            'could you show me the available dates',
+            'please check availability',
+            'what would be a good time',
+            'when would be convenient',
+            'when can you come',
+            'when can you guys come out',
+            'whats open',
+            'got any openings',
+            'any slots available',
+            'when can we do this',
+            'earliest available',
+            'soonest available',
+            'next available date',
+            'when can you install',
+            'when can you do the work',
+            'when can you start the project',
+            'when can you start my deck',
+            'when can you do my roof',
+            'when can you install my flooring',
+            'available dates for installation',
+            'installation availability',
+            'what about next week',
+            'anything this week',
+            'any openings this month',
+            'do you have anything on monday',
+            'availability for tuesday',
+            'can you come this weekend',
+            'saturday availability',
+            'how soon can you come',
+            'how quickly can you schedule',
+            'what is your earliest availability',
+            'when is the next opening',
+        ]
+    },
+    'Goodbye': {
+        'description': 'End conversation and disconnect call',
+        'utterances': [
+            'goodbye',
+            'bye',
+            'bye bye',
+            'see you',
+            'see you later',
+            'thanks bye',
+            'thank you goodbye',
+            'ok bye',
+            'alright bye',
+            'that is all',
+            'thats all',
+            'that will be all',
+            'I am done',
+            'im done',
+            'all done',
+            'nothing else',
+            'no more questions',
+            'I am finished',
+            'we are done',
+            'thanks thats all',
+            'thank you thats all',
+            'hang up',
+            'end call',
+            'disconnect',
+            'end the call',
+            'take care',
+            'have a good day',
+            'talk to you later',
+            'thanks for your help goodbye',
+            'that helps thanks bye',
+            'no',
+            'nope',
+            'no thanks',
+            'no thank you',
+            'I am good',
+            'im good',
+            'thats it',
+            'that is it',
+            'no I am done',
+            'no im done',
+            'I do not need any help',
+            'I dont need any help',
+            'I do not need anything else',
+            'I dont need anything else',
+            'no I am good',
+            'no im good',
+            'I am all set',
+            'im all set',
+            'no I am all set',
+            'not right now',
+            'no not right now',
+            'maybe later',
+            'not at this time',
+            'I am okay',
+            'im okay',
+        ]
+    },
+    'Help': {
+        'description': 'Request for assistance or options',
+        'utterances': [
+            'help',
+            'help me',
+            'I need help',
+            'can you help',
+            'what can you do',
+            'what are my options',
+            'how does this work',
+            'I need assistance',
+            'can you assist me',
+            'I am confused',
+            'I do not understand',
+            'what should I do',
+            'guide me',
+            'walk me through this',
+            'I am not sure what to do',
+            'help please',
+            'I need some help',
+            'can someone help me',
+            'what do I do',
+            'how do I use this',
+            'what can I ask you',
+            'what are you able to do',
+            'show me what you can do',
+            'what services do you offer',
+            'how can you help me',
+            'I am lost',
+            'start over',
+            'I need to talk to someone',
+            'can I speak to a person',
+        ]
+    },
+    'HowAreYou': {
+        'description': 'Casual chitchat greeting',
+        'utterances': [
+            'how are you',
+            'how are you doing',
+            'how is it going',
+            'what is up',
+            'how do you do',
+            'are you doing well',
+            'hows everything',
+            'how have you been',
+            'you doing okay',
+            'how are things',
+            'hows your day',
+            'hows it going today',
+            'you good',
+            'all good',
+            'everything alright',
+            'are you okay',
+            'are you well',
+            'how is your day going',
+            'having a good day',
+            'busy today',
+            'how is work',
+            'nice to talk to you',
+            'good to hear from you',
+        ]
+    },
+    'ProjectInquiry': {
+        'description': 'List customer projects - home improvement work',
+        'utterances': [
+            'list my projects',
+            'show my projects',
+            'what are my projects',
+            'tell me about my projects',
+            'get my projects',
+            'my projects',
+            'show projects',
+            'what projects do I have',
+            'projects please',
+            'can you list my projects',
+            'I want to see my projects',
+            'I would like to see my projects',
+            'may I see my projects please',
+            'could you show me my projects',
+            'please show my projects',
+            'whats up with my projects',
+            'show me what I got',
+            'what do I have going on',
+            'any projects',
+            'got any projects',
+            'my stuff',
+            'show my stuff',
+            'what am I working on',
+            'whats going on with my work',
+            'show my decking project',
+            'list my roofing projects',
+            'my siding project',
+            'show my flooring project',
+            'list my fencing project',
+            'my painting project',
+            'show my window project',
+            'my kitchen project',
+            'my bathroom project',
+            'show my gutter project',
+            'list my deck project',
+            'my roof project',
+            'list my products',
+            'show my products',
+            'what products do I have',
+            'my products please',
+            'tell me about my products',
+            'show me my products',
+            'what are my products',
+            'products',
+            'the products',
+            'what work do I have',
+            'show my home improvement projects',
+            'list my installation projects',
+            'what installations do I have',
+            'show my jobs',
+            'my jobs please',
+            'what jobs are pending',
+            'do I have any projects',
+            'how many projects do I have',
+            'what projects are there',
+            'any pending projects',
+            'my lowes projects',
+            'show my lowes work',
+            'list my store projects',
+        ]
+    },
+    'ProjectStatusInquiry': {
+        'description': 'Get details about a specific project',
+        'utterances': [
+            'details of second project',
+            'first project details',
+            'info on third project',
+            'more info on project one',
+            'tell me about my project',
+            'last project details',
+            'can you give me details of third project',
+            'tell me about the product',
+            'how is my project doing',
+            'give me a status update',
+            'what is the status',
+            'details of first project',
+            'can i get details',
+            'second project details',
+            'show me details',
+            'product details',
+            'more about the second one',
+            'get status',
+            'give me details of the third project',
+            'what is project number one',
+            'details of the last one',
+            'give me details of second project',
+            'details on second',
+            'i need details',
+            'show me the third project',
+            'show me status',
+            'info on the last project',
+            'second one please',
+            'details of the third project',
+            'details for project two',
+            'product information',
+            'details of project 2',
+            'project status',
+            'give me the details',
+            'what about the third project',
+            'what is the status of my project',
+            'details of the first project',
+            'status update please',
+            'tell me about the third project',
+            'show me third project',
+            'details of the previous one',
+            'tell me about project 3',
+            'third project details',
+            'details please',
+            'tell me more about second project',
+            'number two',
+            'give me details of third project',
+            'more about second project',
+            'what about the second project',
+            'tell me about the first one',
+            'the product please',
+            'fourth project details',
+            'can i get details of second project',
+            'details of the product',
+            'fifth project details',
+            'details of third project',
+            'what about the product',
+            'tell me about the second project',
+            'give me details of first project',
+            'check project status',
+            'i want details',
+            'the second one',
+            'show me project 1',
+        ]
+    },
+    'RescheduleAppointment': {
+        'description': 'Reschedule an existing installation appointment',
+        'utterances': [
+            'reschedule my appointment',
+            'change my appointment',
+            'move my appointment',
+            'I need to reschedule',
+            'can I change the time',
+            'change appointment time',
+            'reschedule please',
+            'move to a different day',
+            'pick a different time',
+            'change the date',
+            'I would like to reschedule my appointment',
+            'may I change my appointment',
+            'could we reschedule please',
+            'I need to move my appointment to another day',
+            'would it be possible to reschedule',
+            'can we move it',
+            'push it back',
+            'can you come a different day',
+            'need to change it',
+            'gotta reschedule',
+            'something came up need to move it',
+            'that day does not work',
+            'need a new date',
+            'reschedule my installation',
+            'change my install date',
+            'move my project date',
+            'reschedule my decking installation',
+            'change my roofing appointment',
+            'move my flooring install',
+            'need to change when you come',
+            'can the crew come a different day',
+            'something came up',
+            'I have a conflict',
+            'I will not be home',
+            'that time does not work for me',
+            'can I reschedule',
+            'is it possible to reschedule',
+            'how do I reschedule',
+            'can we pick a new date',
+            'change when they come',
+            'move my deck installation',
+            'reschedule my roof appointment',
+        ]
+    },
+    'ScheduleAppointment': {
+        'description': 'Schedule a new appointment - single or multiple projects',
+        'utterances': [
+            'schedule all my projects',
+            'schedule for tomorrow',
+            'schedule not reschedule',
+            'lets schedule it',
+            'schedule project',
+            'sure schedule it',
+            'lets schedule',
+            'can you schedule',
+            'schedule my project',
+            'book new appointment',
+            'book for tuesday',
+            'schedule the first project',
+            'schedule something',
+            'schedule my roofing project',
+            'schedule for monday',
+            'set up a new appointment',
+            'schedule that',
+            'schedule the last project',
+            'book both',
+            'schedule both projects',
+            'yes book it',
+            'book it',
+            'okay book it',
+            'create new booking',
+            'schedule the first two projects',
+            'schedule my flooring project',
+            'book for next week',
+            'i want to schedule',
+            'i need a new appointment',
+            'schedule this project',
+            'book appointment for project',
+            'book an appointment',
+            'schedule this project please',
+            'make an appointment',
+            'schedule the second project',
+            'schedule them all',
+            'schedule appointment for project',
+            'set up an appointment',
+            'schedule my decking project',
+            'book that',
+            'set it up',
+            'schedule first two projects',
+            'new appointment',
+            'lets book it',
+            'book a new one',
+            'set up appointment for this project',
+            'book all projects',
+            'schedule the appointment',
+            'schedule a new one',
+            'please book it',
+            'book this project',
+            'make a new appointment',
+            'okay schedule it',
+            'create an appointment',
+            'I want to schedule my project',
+            'schedule for this week',
+            'book a time',
+            'go ahead and schedule',
+            'i want to book',
+            'schedule an appointment',
+            'please schedule',
+            'I want to book',
+            'schedule them',
+            'schedule first three projects',
+            'schedule my siding project',
+            'I need to schedule',
+            'new booking please',
+            'yes schedule',
+            'I need to book an appointment',
+            'yeah schedule it',
+            'schedule it',
+            'can you schedule my project',
+            'schedule the project',
+            'go ahead and book',
+            'schedule all projects',
+            'schedule multiple projects',
+        ]
+    },
+    'ThankYou': {
+        'description': 'Express gratitude',
+        'utterances': [
+            'thank you',
+            'thanks',
+            'thanks a lot',
+            'thank you so much',
+            'appreciate it',
+            'that is helpful',
+            'thanks for your help',
+            'thank you very much',
+            'you have been helpful',
+            'great thanks',
+            'thank you kindly',
+            'many thanks',
+            'thanks so much',
+            'I appreciate your help',
+            'that was very helpful',
+            'you are very helpful',
+            'thanks for the information',
+            'thank you for your time',
+            'I really appreciate it',
+            'that helps a lot',
+            'perfect thank you',
+            'wonderful thanks',
+            'excellent thank you',
+            'great help',
+            'very helpful',
+            'you are awesome',
+            'thanks a bunch',
+            'cheers',
+            'much appreciated',
+            'grateful for your help',
+        ]
+    },
+    'UrgentRequest': {
+        'description': 'Handle urgent requests and emergencies',
+        'utterances': [
+            'this is urgent',
+            'emergency',
+            'I need help urgently',
+            'urgent matter',
+            'this is an emergency',
+            'urgent request',
+            'I have an urgent issue',
+            'need immediate help',
+            'this is very urgent',
+            'please help me urgently',
+            'I have an emergency',
+            'urgent problem',
+            'critical issue',
+            'my roof is leaking',
+            'water is coming in',
+            'something broke',
+            'there is a problem with the installation',
+            'the installer did not show up',
+            'nobody came today',
+            'I need someone right now',
+            'can someone come today',
+            'this cannot wait',
+            'I need help immediately',
+            'please hurry',
+            'asap',
+            'as soon as possible',
+            'right away please',
+            'I have a leak',
+            'something is wrong',
+            'there is damage',
+            'the work is not done',
+            'they left in the middle',
+        ]
+    },
+    'WeatherInquiry': {
+        'description': 'Check weather',
+        'utterances': [
+            'hows the weather outside',
+            'tomorrow forecast',
+            'weather please',
+            'whats the weather like',
+            'tell me weather',
+            'will it snow',
+            'will it be cloudy',
+            'is it hot outside',
+            'weather today',
+            'what is the weather today',
+            'weather report',
+            'what is the forecast',
+            'current weather',
+            'is it chilly',
+            'weather tomorrow',
+            'forecast for tomorrow',
+            'will it be cold tomorrow',
+            'weather in',
+            'weather update',
+            'tomorrow weather',
+            'tell me the weather',
+            'weekend weather',
+            'check the weather',
+            'how is the weather today',
+            'is it warm',
+            'what will the weather be tomorrow',
+            'will it rain',
+            'will it be hot tomorrow',
+            'weather on sunday',
+            'todays weather',
+            'weather at the job site',
+            'weather forecast',
+            'will it be chilly',
+            'will it be sunny',
+            'is it cold outside',
+            'weather for tomorrow please',
+            'temperature tomorrow',
+            'weather at the project location',
+            'how hot will it be',
+            'how cold will it be',
+            'will it be cold',
+            'will it be warm',
+            'get weather',
+            'will it rain tomorrow',
+            'check weather',
+            'what is the weather tomorrow',
+            'weather for tomorrow',
+            'how is the weather',
+            'weather conditions',
+            'weather at the address',
+            'weather this weekend',
+            'will it be hot',
+            'is it going to rain',
+            'is it freezing',
+            'weather on saturday',
+            'whats the temperature',
+            'is it going to rain tomorrow',
+            'what is the weather',
+        ]
+    },
+    'Welcome': {
+        'description': 'Greeting and conversation start',
+        'utterances': [
+            'hello',
+            'hi',
+            'hey',
+            'good morning',
+            'good afternoon',
+            'greetings',
+            'hi there',
+            'hello there',
+            'hey there',
+            'good evening',
+            'howdy',
+            'hiya',
+            'yo',
+            'whats up',
+            'sup',
+            'good day',
+            'top of the morning',
+            'hi its me',
+            'hello its me calling',
+            'this is calling about my project',
+            'hi I am calling about my installation',
+            'hello I need help',
+            'hi I have a question',
+            'hello can you help me',
+            'hey I need some information',
+            'hi this is about my appointment',
+            'good morning I am calling about my project',
+            'hello I would like some help please',
+            'hi may I speak to someone',
+        ]
+    },
+}
+
+# Fulfillment config with SSML-enhanced messages - natural sounding wait prompts
+fulfillment_updates_spec = {
+    'active': True,
+    'startResponse': {
+        'delayInSeconds': 1,  # Play wait message after just 1 second
+        'messageGroups': [
+            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="medium" pitch="medium">Let me look that up for you.</prosody><break time="300ms"/></speak>'}}},
+            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="medium">One moment please.</prosody><break time="200ms"/></speak>'}}},
+            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="medium" pitch="medium">Just a second while I check.</prosody></speak>'}}},
+            {'message': {'ssmlMessage': {'value': '<speak><amazon:emotion name="excited" intensity="low">Sure, let me find that for you!</amazon:emotion></speak>'}}}
+        ],
+        'allowInterrupt': False  # Don't let user interrupt wait message
+    },
+    'updateResponse': {
+        'frequencyInSeconds': 8,  # Play update every 8 seconds if still waiting
+        'messageGroups': [
+            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="medium">Still working on that<break time="200ms"/>almost there.</prosody></speak>'}}},
+            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="medium" pitch="low">Thank you for your patience.</prosody></speak>'}}},
+            {'message': {'ssmlMessage': {'value': '<speak>Just a few more seconds<break time="300ms"/>I appreciate you waiting.</speak>'}}}
+        ],
+        'allowInterrupt': False
+    },
+    'timeoutInSeconds': 90
+}
+
+# Post-fulfillment specification - CONTINUE conversation (ElicitIntent)
+# This ensures the bot asks follow-up questions after each response
+post_fulfillment_continue = {
+    'successNextStep': {
+        'dialogAction': {
+            'type': 'ElicitIntent'  # Continue conversation after success
+        }
+    },
+    'failureNextStep': {
+        'dialogAction': {
+            'type': 'ElicitIntent'  # Continue even on failure
+        }
+    },
+    'timeoutNextStep': {
+        'dialogAction': {
+            'type': 'ElicitIntent'  # Continue even on timeout
+        }
+    }
+}
+
+# Post-fulfillment specification - END conversation (for Goodbye intent only)
+# This hangs up the phone call when user says goodbye
+post_fulfillment_end = {
+    'successNextStep': {
+        'dialogAction': {
+            'type': 'EndConversation'  # Hang up after goodbye
+        }
+    },
+    'failureNextStep': {
+        'dialogAction': {
+            'type': 'EndConversation'
+        }
+    },
+    'timeoutNextStep': {
+        'dialogAction': {
+            'type': 'EndConversation'
+        }
+    }
+}
+
+try:
+    # Get existing intents
+    print("  Checking existing intents...")
+    existing_intents = {}
+    response = client.list_intents(botId=BOT_ID, botVersion='DRAFT', localeId='en_US')
+    for intent in response.get('intentSummaries', []):
+        existing_intents[intent['intentName']] = intent['intentId']
+
+    print(f"  Found {len(existing_intents)} existing intents: {list(existing_intents.keys())}")
+
+    # Find missing intents
+    missing = [name for name in REQUIRED_INTENTS.keys() if name not in existing_intents]
+    if missing:
+        print(f"  [WARN] Missing intents: {missing}")
+    else:
+        print("  [OK] All required intents exist")
+
+    # Create missing intents
+    created_count = 0
+    updated_count = 0
+
+    for intent_name, config in REQUIRED_INTENTS.items():
+        utterance_list = [{'utterance': u} for u in config['utterances']]
+
+        # Choose post-fulfillment spec: Goodbye ends conversation, others continue
+        post_fulfillment_spec = post_fulfillment_end if intent_name == 'Goodbye' else post_fulfillment_continue
+
+        if intent_name not in existing_intents:
+            # CREATE new intent
+            print(f"  Creating intent: {intent_name}...")
+            try:
+                response = client.create_intent(
+                    botId=BOT_ID,
+                    botVersion='DRAFT',
+                    localeId='en_US',
+                    intentName=intent_name,
+                    description=config['description'],
+                    sampleUtterances=utterance_list,
+                    fulfillmentCodeHook={
+                        'enabled': True,
+                        'fulfillmentUpdatesSpecification': fulfillment_updates_spec,
+                        'postFulfillmentStatusSpecification': post_fulfillment_spec
+                    }
+                )
+                existing_intents[intent_name] = response['intentId']
+                created_count += 1
+                print(f"    [OK] Created {intent_name}")
+            except Exception as e:
+                print(f"    [ERROR] Failed to create {intent_name}: {e}")
+        else:
+            # UPDATE existing intent with latest utterances
+            intent_id = existing_intents[intent_name]
+            try:
+                # Get current intent config
+                current = client.describe_intent(
+                    botId=BOT_ID,
+                    botVersion='DRAFT',
+                    localeId='en_US',
+                    intentId=intent_id
+                )
+
+                # Update with new utterances and post-fulfillment spec
+                client.update_intent(
+                    botId=BOT_ID,
+                    botVersion='DRAFT',
+                    localeId='en_US',
+                    intentId=intent_id,
+                    intentName=intent_name,
+                    description=config['description'],
+                    sampleUtterances=utterance_list,
+                    fulfillmentCodeHook={
+                        'enabled': True,
+                        'fulfillmentUpdatesSpecification': fulfillment_updates_spec,
+                        'postFulfillmentStatusSpecification': post_fulfillment_spec
+                    }
+                )
+                updated_count += 1
+            except Exception as e:
+                # Some intents (like FallbackIntent) can't be fully updated
+                if 'FallbackIntent' not in intent_name:
+                    print(f"    [WARN] Could not update {intent_name}: {e}")
+
+    # Configure FallbackIntent with code hook
+    print("  Configuring FallbackIntent...")
+    if 'FallbackIntent' in existing_intents:
+        fallback_id = existing_intents['FallbackIntent']
+        current = client.describe_intent(
+            botId=BOT_ID,
+            botVersion='DRAFT',
+            localeId='en_US',
+            intentId=fallback_id
+        )
+        client.update_intent(
+            botId=BOT_ID,
+            botVersion='DRAFT',
+            localeId='en_US',
+            intentId=fallback_id,
+            intentName='FallbackIntent',
+            parentIntentSignature=current.get('parentIntentSignature', 'AMAZON.FallbackIntent'),
+            fulfillmentCodeHook={
+                'enabled': True,
+                'fulfillmentUpdatesSpecification': fulfillment_updates_spec,
+                'postFulfillmentStatusSpecification': post_fulfillment_continue  # Continue conversation on fallback
+            },
+            dialogCodeHook={'enabled': True}
+        )
+        print("    [OK] FallbackIntent configured with ElicitIntent")
+
+    # Enable Assisted NLU (Primary mode) AND Voice Settings
+    print("  Configuring voice settings and Assisted NLU...")
+    client.update_bot_locale(
+        botId=BOT_ID,
+        botVersion='DRAFT',
+        localeId='en_US',
+        nluIntentConfidenceThreshold=0.4,
+        voiceSettings={
+            'voiceId': 'Joanna',  # Clear American English voice - CRITICAL for speech recognition
+            'engine': 'neural'    # Neural engine for better quality
+        },
+        generativeAISettings={
+            'runtimeSettings': {
+                'nluImprovement': {
+                    'enabled': True,
+                    'assistedNluMode': 'Primary'
+                }
+            },
+            'buildtimeSettings': {
+                'descriptiveBotBuilder': {'enabled': False},
+                'sampleUtteranceGeneration': {'enabled': False}
+            }
+        }
+    )
+    print("    [OK] Voice settings: Joanna (neural)")
+    print("    [OK] Assisted NLU enabled (Primary mode)")
+
+    # Build the bot
+    print("  Building bot locale...")
+    client.build_bot_locale(botId=BOT_ID, botVersion='DRAFT', localeId='en_US')
+
+    # Wait for build
+    for i in range(60):
+        time.sleep(3)
+        status = client.describe_bot_locale(botId=BOT_ID, botVersion='DRAFT', localeId='en_US')
+        build_status = status['botLocaleStatus']
+        if build_status in ['Built', 'ReadyExpressTesting']:
+            print(f"    [OK] Bot built successfully!")
+            break
+        elif build_status in ['Failed', 'NotBuilt']:
+            print(f"    [ERROR] Build failed: {build_status}")
+            sys.exit(1)
+        if i % 5 == 0:
+            print(f"    Building... ({build_status})")
+
+    # Verify Assisted NLU
+    verify = client.describe_bot_locale(botId=BOT_ID, botVersion='DRAFT', localeId='en_US')
+    gen_ai = verify.get('generativeAISettings', {}).get('runtimeSettings', {}).get('nluImprovement', {})
+    if gen_ai.get('enabled') and gen_ai.get('assistedNluMode') == 'Primary':
+        print("    [VERIFIED] Assisted NLU is ENABLED (Primary mode)")
+    else:
+        print(f"    [WARN] Assisted NLU may not be properly enabled: {gen_ai}")
+
+    # Create new version
+    print("  Creating bot version...")
+    version_response = client.create_bot_version(
+        botId=BOT_ID,
+        botVersionLocaleSpecification={'en_US': {'sourceBotVersion': 'DRAFT'}}
+    )
+    bot_version = version_response['botVersion']
+    print(f"    [OK] Version created: {bot_version}")
+
+    # Wait for version
+    for i in range(30):
+        time.sleep(2)
+        ver_status = client.describe_bot_version(botId=BOT_ID, botVersion=bot_version)
+        if ver_status['botStatus'] == 'Available':
+            break
+
+    # Update alias to point to new version
+    print("  Updating bot alias...")
+    aliases = client.list_bot_aliases(botId=BOT_ID)
+    for alias in aliases.get('botAliasSummaries', []):
+        if alias['botAliasName'] == 'TestBotAlias':
+            client.update_bot_alias(
+                botId=BOT_ID,
+                botAliasId=alias['botAliasId'],
+                botAliasName='TestBotAlias',
+                botVersion=bot_version,
+                botAliasLocaleSettings={
+                    'en_US': {
+                        'enabled': True,
+                        'codeHookSpecification': {
+                            'lambdaCodeHook': {
+                                'lambdaARN': LAMBDA_ARN,
+                                'codeHookInterfaceVersion': '1.0'
+                            }
+                        }
+                    }
+                },
+                sentimentAnalysisSettings={'detectSentiment': True}
+            )
+            print(f"    [OK] Alias updated to version {bot_version}")
+            break
+
+    # Final summary
+    print("")
+    print("  ========== INTENT SYNC SUMMARY ==========")
+    print(f"  Created: {created_count} new intents")
+    print(f"  Updated: {updated_count} existing intents")
+    print(f"  Total intents: {len(REQUIRED_INTENTS)}")
+
+    # Verify final state
+    final_intents = client.list_intents(botId=BOT_ID, botVersion='DRAFT', localeId='en_US')
+    final_names = [i['intentName'] for i in final_intents.get('intentSummaries', [])]
+    print(f"  Final intents in bot: {final_names}")
+
+    missing_final = [name for name in REQUIRED_INTENTS.keys() if name not in final_names]
+    if missing_final:
+        print(f"  [ERROR] Still missing: {missing_final}")
+        sys.exit(1)
+    else:
+        print("  [OK] All intents verified!")
+    print("  ==========================================")
+
+except Exception as e:
+    print(f"  [ERROR] Intent sync failed: {e}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+INTENT_SYNC_SCRIPT
+
+    if [[ $? -ne 0 ]]; then
+        echo -e "${RED}  [ERROR] Intent sync failed!${NC}"
+        exit 1
+    fi
+    echo ""
+    echo -e "${GREEN}  [OK] Intent sync complete!${NC}"
+else
+    echo "  [SKIP] No valid bot ID, skipping intent sync"
+fi
+
+# ============================================================================
+# Step 4.4: Create Amazon Transcribe Custom Vocabulary (Better Speech Recognition)
+# ============================================================================
+echo ""
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo -e "${YELLOW}Step 4.4: Creating Amazon Transcribe Custom Vocabulary${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo ""
+
+VOCAB_NAME="pf-home-improvement-vocab"
+echo "  -> Creating custom vocabulary: $VOCAB_NAME"
+
+# Check if vocabulary exists and is ready
+VOCAB_STATUS=$(aws_cmd transcribe get-vocabulary --vocabulary-name "$VOCAB_NAME" --region "$REGION" --query "VocabularyState" --output text 2>/dev/null || echo "NOT_FOUND")
+
+if [[ "$VOCAB_STATUS" == "READY" ]]; then
+    echo "  [OK] Custom vocabulary already exists and is ready"
+else
+    echo "  -> Creating/updating vocabulary..."
+
+    # Delete existing if in failed state
+    if [[ "$VOCAB_STATUS" != "NOT_FOUND" && "$VOCAB_STATUS" != "PENDING" ]]; then
+        aws_cmd transcribe delete-vocabulary --vocabulary-name "$VOCAB_NAME" --region "$REGION" 2>/dev/null || true
+        sleep 3
+    fi
+
+    # Create vocabulary with home improvement terms
+    $PYTHON_CMD << 'TRANSCRIBE_VOCAB_EOF'
+import boto3
+import time
+
+transcribe = boto3.client('transcribe', region_name='us-east-1')
+vocabulary_name = 'pf-home-improvement-vocab'
+
+# Domain-specific vocabulary for home improvement scheduling
+vocabulary_terms = [
+    # PROJECT CATEGORIES
+    'decking', 'roofing', 'siding', 'flooring', 'fencing', 'plumbing',
+    'gutters', 'painting', 'windows', 'doors', 'kitchen', 'bath', 'bathroom',
+    'generator', 'HVAC', 'electrical', 'carpentry', 'drywall', 'insulation',
+    'landscaping', 'patio', 'pergola', 'garage', 'basement', 'attic',
+    'countertops', 'cabinets', 'tile', 'hardwood', 'vinyl', 'laminate',
+
+    # COMPOUND TERMS
+    'kitchen-and-bath', 'doors-and-windows', 'windows-and-doors',
+    'generator-installation', 'roof-repair', 'roof-replacement',
+    'deck-installation', 'floor-installation', 'gutter-installation',
+    'siding-installation', 'fence-installation', 'window-replacement',
+    'door-replacement', 'bathroom-remodel', 'kitchen-remodel',
+    'home-improvement', 'exterior-work', 'interior-work',
+
+    # SCHEDULING TERMS
+    'appointment', 'schedule', 'reschedule', 'cancel', 'available',
+    'availability', 'time-slot', 'timeslot', 'morning', 'afternoon',
+    'evening', 'tomorrow', 'today', 'next-week', 'this-week',
+
+    # WEATHER TERMS (critical for voice recognition)
+    'weather', 'forecast', 'rain', 'rainy', 'sunny', 'cloudy',
+    'temperature', 'snow', 'snowy', 'storm', 'stormy', 'windy',
+
+    # ACTION TERMS
+    'list', 'show', 'details', 'information', 'status', 'check',
+    'book', 'confirm', 'update', 'change',
+
+    # PEOPLE/ROLES
+    'technician', 'installer', 'contractor', 'customer', 'homeowner',
+
+    # BUSINESS TERMS
+    'project', 'projects', 'estimate', 'quote', 'installation',
+    'service', 'work-order', 'ProjectsForce',
+
+    # STORE NAMES
+    'Lowes', 'Home-Depot', 'Menards',
+
+    # COMMON PHRASES
+    'how-is-the-weather', 'whats-the-weather', 'schedule-my-project',
+    'list-my-projects', 'my-appointments', 'reschedule-appointment',
+    'cancel-appointment', 'project-details', 'when-is-my-appointment',
+    'who-is-my-technician', 'what-projects-do-I-have',
+]
+
+try:
+    # Delete if exists
+    try:
+        transcribe.delete_vocabulary(VocabularyName=vocabulary_name)
+        print("  Deleted existing vocabulary...")
+        time.sleep(3)
+    except:
+        pass
+
+    # Create vocabulary
+    response = transcribe.create_vocabulary(
+        VocabularyName=vocabulary_name,
+        LanguageCode='en-US',
+        Phrases=vocabulary_terms
+    )
+    print(f"  [OK] Vocabulary creation started: {response['VocabularyState']}")
+    print(f"  Total phrases: {len(vocabulary_terms)}")
+except Exception as e:
+    print(f"  [WARN] Vocabulary creation error: {e}")
+TRANSCRIBE_VOCAB_EOF
+fi
+
+# ============================================================================
+# Step 4.45: Create Amazon Lex V2 Custom Vocabulary (Real-Time ASR)
+# ============================================================================
+# IMPORTANT: This is DIFFERENT from Transcribe vocabulary above!
+# - Transcribe vocabulary = Post-call analytics (Contact Lens)
+# - Lex V2 vocabulary = Real-time speech recognition during calls
+# ============================================================================
+
+echo ""
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo -e "${YELLOW}Step 4.45: Creating Lex V2 Custom Vocabulary (Real-Time ASR)${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo ""
+
+if [[ -n "$LEX_BOT_ID" && "$LEX_BOT_ID" != "BOT_ID_PLACEHOLDER" ]]; then
+    echo "  -> Creating Lex V2 custom vocabulary for bot: $LEX_BOT_ID"
+
+    # Create vocabulary TSV file
+    LEX_VOCAB_DIR=$(mktemp -d)
+    cat > "$LEX_VOCAB_DIR/CustomVocabulary.tsv" << 'LEX_VOCAB_TSV'
+phrase	weight	displayAs
+weather	3
+hows the weather	3
+weather tomorrow	3
+weather forecast	3
+whats the weather	3
+project	2
+projects	2
+first project	2
+second project	2
+third project	2
+fourth project	2
+project details	2
+schedule	2
+appointment	2
+reschedule	2
+decking	3
+deck installation	3
+fencing	3
+flooring	3
+plumbing	3
+roofing	3
+kitchen and bath	2
+generator installation	2
+windows and doors	2
+technician	2
+installer	2
+LEX_VOCAB_TSV
+
+    # Create zip file
+    (cd "$LEX_VOCAB_DIR" && zip -q vocab.zip CustomVocabulary.tsv)
+
+    # Step 1: Get upload URL
+    echo "  -> Getting upload URL..."
+    UPLOAD_RESPONSE=$(aws_cmd lexv2-models create-upload-url --region "$REGION" 2>/dev/null)
+    LEX_IMPORT_ID=$(echo "$UPLOAD_RESPONSE" | jq -r '.importId // empty')
+    UPLOAD_URL=$(echo "$UPLOAD_RESPONSE" | jq -r '.uploadUrl // empty')
+
+    if [[ -n "$LEX_IMPORT_ID" && -n "$UPLOAD_URL" ]]; then
+        echo "  -> Import ID: $LEX_IMPORT_ID"
+
+        # Step 2: Upload vocabulary zip
+        echo "  -> Uploading vocabulary file..."
+        UPLOAD_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X PUT -H "Content-Type: application/zip" --data-binary @"$LEX_VOCAB_DIR/vocab.zip" "$UPLOAD_URL")
+
+        if [[ "$UPLOAD_STATUS" == "200" ]]; then
+            echo "  [OK] Vocabulary file uploaded"
+
+            # Step 3: Start import
+            echo "  -> Starting vocabulary import..."
+            aws_cmd lexv2-models start-import \
+                --import-id "$LEX_IMPORT_ID" \
+                --resource-specification "{\"customVocabularyImportSpecification\": {\"botId\": \"$LEX_BOT_ID\", \"botVersion\": \"DRAFT\", \"localeId\": \"en_US\"}}" \
+                --merge-strategy Overwrite \
+                --region "$REGION" >/dev/null 2>&1
+
+            # Step 4: Wait for import to complete
+            echo "  -> Waiting for vocabulary import to complete..."
+            for i in {1..15}; do
+                sleep 2
+                IMPORT_STATUS=$(aws_cmd lexv2-models describe-import --import-id "$LEX_IMPORT_ID" --region "$REGION" --query 'importStatus' --output text 2>/dev/null)
+                echo "     Status: $IMPORT_STATUS"
+
+                if [[ "$IMPORT_STATUS" == "Completed" ]]; then
+                    echo "  [OK] Vocabulary import completed!"
+
+                    # Step 5: Rebuild bot to apply vocabulary
+                    echo "  -> Rebuilding bot to apply vocabulary..."
+                    aws_cmd lexv2-models build-bot-locale \
+                        --bot-id "$LEX_BOT_ID" \
+                        --bot-version DRAFT \
+                        --locale-id en_US \
+                        --region "$REGION" >/dev/null 2>&1
+
+                    # Step 6: Wait for bot build
+                    echo "  -> Waiting for bot build..."
+                    for j in {1..20}; do
+                        sleep 3
+                        BUILD_STATUS=$(aws_cmd lexv2-models describe-bot-locale \
+                            --bot-id "$LEX_BOT_ID" \
+                            --bot-version DRAFT \
+                            --locale-id en_US \
+                            --region "$REGION" \
+                            --query 'botLocaleStatus' --output text 2>/dev/null)
+                        echo "     Build status: $BUILD_STATUS"
+
+                        if [[ "$BUILD_STATUS" == "Built" ]]; then
+                            echo "  [OK] Bot rebuilt with custom vocabulary!"
+                            break
+                        elif [[ "$BUILD_STATUS" == "Failed" ]]; then
+                            echo "  [ERROR] Bot build failed"
+                            break
+                        fi
+                    done
+                    break
+                elif [[ "$IMPORT_STATUS" == "Failed" ]]; then
+                    echo "  [ERROR] Vocabulary import failed"
+                    break
+                fi
+            done
+
+            # Step 7: Verify vocabulary
+            echo "  -> Verifying vocabulary items..."
+            VOCAB_COUNT=$(aws_cmd lexv2-models list-custom-vocabulary-items \
+                --bot-id "$LEX_BOT_ID" \
+                --bot-version DRAFT \
+                --locale-id en_US \
+                --region "$REGION" \
+                --query 'length(customVocabularyItems)' --output text 2>/dev/null || echo "0")
+            echo "  [OK] Custom vocabulary has $VOCAB_COUNT phrases"
+        else
+            echo "  [ERROR] Failed to upload vocabulary file (HTTP $UPLOAD_STATUS)"
+        fi
+    else
+        echo "  [ERROR] Failed to get upload URL"
+    fi
+
+    # Cleanup
+    rm -rf "$LEX_VOCAB_DIR"
+else
+    echo "  [SKIP] No valid LEX_BOT_ID - skipping vocabulary creation"
+fi
+
+# ============================================================================
 # Step 4.5: Auto-fix Connect Integration (CRITICAL)
 # ============================================================================
 # This step ensures:
@@ -1648,6 +3810,22 @@ if [[ -n "$LEX_BOT_ID" && "$LEX_BOT_ID" != "BOT_ID_PLACEHOLDER" ]]; then
                 --instance-id "$INST_ID" \
                 --lex-v2-bot "AliasArn=${BOT_ALIAS_ARN}" \
                 --region "$REGION" 2>/dev/null && echo "     [OK] Bot associated" || echo "     [INFO] Bot already associated or error"
+
+            # 1b. Enable Contact Lens (better speech recognition via Amazon Transcribe)
+            echo "     -> Enabling Contact Lens (Amazon Transcribe)..."
+            aws_cmd connect update-instance-attribute \
+                --instance-id "$INST_ID" \
+                --attribute-type CONTACT_LENS \
+                --value "true" \
+                --region "$REGION" 2>/dev/null && echo "     [OK] Contact Lens enabled" || echo "     [INFO] Contact Lens already enabled or error"
+
+            # 1c. Enable Bot Analytics and Transcripts
+            echo "     -> Enabling Bot Analytics and Transcripts..."
+            aws_cmd connect update-instance-attribute \
+                --instance-id "$INST_ID" \
+                --attribute-type ENABLE_BOT_ANALYTICS_AND_TRANSCRIPTS \
+                --value "true" \
+                --region "$REGION" 2>/dev/null && echo "     [OK] Bot Transcripts enabled" || echo "     [INFO] Bot Transcripts already enabled or error"
 
             # 2. Find and update ALL contact flows that use Lex bots
             echo "     -> Checking contact flows for old bot references..."
@@ -1702,43 +3880,43 @@ if [[ -n "$LEX_BOT_ID" && "$LEX_BOT_ID" != "BOT_ID_PLACEHOLDER" ]]; then
         done
         echo ""
         echo "  [OK] Connect integration auto-fix complete"
+
+        # Store the first instance ID found for later use
+        DETECTED_CONNECT_ID=$(echo "$CONNECT_INSTANCE_IDS" | awk '{print $1}')
     else
-        echo "  [INFO] No Connect instances found - skipping auto-fix"
+        echo "  [INFO] No Connect instances found"
+        DETECTED_CONNECT_ID=""
     fi
 else
     echo "  [SKIP] No valid bot ID - skipping Connect auto-fix"
+    DETECTED_CONNECT_ID=""
 fi
 
 echo ""
 
-# Ask for Connect instance ID (optional)
+# Always ask user to confirm Connect Instance ID
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo -e "${YELLOW}Connect Instance Configuration${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 echo ""
-echo -e "${YELLOW}Do you have an AWS Connect instance to configure?${NC}"
-echo "  [1] Yes, I'll enter the Connect Instance ID"
-echo "  [2] No, skip Connect configuration for now"
-read -p "Enter choice (1 or 2): " CONNECT_CHOICE
 
-CONNECT_INSTANCE_ID=""
-if [[ "$CONNECT_CHOICE" == "1" ]]; then
-    # Try to auto-detect Connect instances
+# Show detected instances for easy copy-paste
+CONNECT_INSTANCES=$(aws_cmd connect list-instances --region "$REGION" --query "InstanceSummaryList[].{Id:Id,Alias:InstanceAlias}" --output table 2>/dev/null || echo "")
+
+if [[ -n "$CONNECT_INSTANCES" && "$CONNECT_INSTANCES" != *"None"* ]]; then
+    echo "  Available Connect instances (copy the Id):"
+    echo "$CONNECT_INSTANCES"
     echo ""
-    echo "  -> Checking for existing Connect instances..."
-    CONNECT_INSTANCES=$(aws_cmd connect list-instances --region "$REGION" --query "InstanceSummaryList[].{Id:Id,Alias:InstanceAlias}" --output table 2>/dev/null || echo "")
+fi
 
-    if [[ -n "$CONNECT_INSTANCES" && "$CONNECT_INSTANCES" != *"None"* ]]; then
-        echo "  Found Connect instances:"
-        echo "$CONNECT_INSTANCES"
-        echo ""
-    fi
+echo "  Enter Connect Instance ID (or press Enter to skip):"
+read -p "  > " CONNECT_INSTANCE_ID
 
-    read -p "Enter Connect Instance ID (UUID format): " CONNECT_INSTANCE_ID
-
-    if [[ -z "$CONNECT_INSTANCE_ID" ]]; then
-        echo "  No instance ID provided. Using placeholder."
-        CONNECT_INSTANCE_ID="CONNECT_INSTANCE_ID_PLACEHOLDER"
-    fi
-else
+if [[ -z "$CONNECT_INSTANCE_ID" ]]; then
+    echo "  [SKIP] No Connect instance configured"
     CONNECT_INSTANCE_ID="CONNECT_INSTANCE_ID_PLACEHOLDER"
+else
+    echo "  [OK] Using Connect instance: $CONNECT_INSTANCE_ID"
 fi
 
 # Process templates
@@ -1796,7 +3974,7 @@ echo ""
 # Step 5: Create/Update Contact Flow in Connect (if instance provided)
 # ============================================================================
 
-if [[ -n "$CONNECT_INSTANCE_ID" && "$CONNECT_INSTANCE_ID" != "CONNECT_INSTANCE_PLACEHOLDER" ]]; then
+if [[ -n "$CONNECT_INSTANCE_ID" && "$CONNECT_INSTANCE_ID" != "CONNECT_INSTANCE_ID_PLACEHOLDER" ]]; then
     echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
     echo -e "${YELLOW}Step 5: Creating Contact Flow in AWS Connect${NC}"
     echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
@@ -1860,63 +4038,82 @@ if [[ -n "$CONNECT_INSTANCE_ID" && "$CONNECT_INSTANCE_ID" != "CONNECT_INSTANCE_P
             fi
         fi
 
-        # Associate Lex bot with Connect instance
-        echo "  -> Associating Lex bot with Connect instance..."
-        aws_cmd connect associate-lex-bot \
-            --instance-id "$CONNECT_INSTANCE_ID" \
-            --lex-bot "Name=${LEX_BOT_NAME},LexRegion=${REGION}" \
-            --region "$REGION" 2>/dev/null || echo "  [INFO] Lex bot association may already exist or requires Lex V2 association"
-
-        # For Lex V2, use associate-bot
+        # Associate Lex V2 bot with Connect instance
+        echo "  -> Associating Lex V2 bot with Connect..."
+        BOT_ALIAS_ARN="arn:aws:lex:${REGION}:${ACCOUNT_ID}:bot-alias/${LEX_BOT_ID}/${LEX_ALIAS_ID}"
         aws_cmd connect associate-bot \
             --instance-id "$CONNECT_INSTANCE_ID" \
-            --lex-v2-bot "AliasArn=arn:aws:lex:${REGION}:${ACCOUNT_ID}:bot-alias/${LEX_BOT_ID}/${LEX_ALIAS_ID}" \
-            --region "$REGION" 2>/dev/null || echo "  [INFO] Lex V2 bot may already be associated"
+            --lex-v2-bot "AliasArn=${BOT_ALIAS_ARN}" \
+            --region "$REGION" 2>/dev/null || true
+
+        # VERIFY bot is associated
+        echo "  -> Verifying bot-Connect association..."
+        BOT_ASSOCIATED=$(aws_cmd connect list-bots \
+            --instance-id "$CONNECT_INSTANCE_ID" \
+            --lex-version "V2" \
+            --region "$REGION" \
+            --query "LexBots[?contains(LexV2Bot.AliasArn, '${LEX_BOT_ID}')].LexV2Bot.AliasArn" \
+            --output text 2>/dev/null || echo "")
+
+        if [[ -n "$BOT_ASSOCIATED" && "$BOT_ASSOCIATED" != "None" ]]; then
+            echo "  [VERIFIED] Bot associated with Connect: $BOT_ASSOCIATED"
+        else
+            echo "  [ERROR] Bot-Connect association FAILED!"
+            echo "  Please associate manually in Connect Console"
+            exit 1
+        fi
 
         echo ""
 
-        # Step 5b: Associate Phone Number with Contact Flow
-        echo "  -> Checking for available phone numbers..."
-        PHONE_NUMBERS=$(aws_cmd connect list-phone-numbers-v2 \
+        # Step 5b: Auto-Associate ALL Phone Numbers with Contact Flow
+        echo "  -> Auto-associating phone numbers with contact flow..."
+
+        PHONE_NUMBER_IDS=$(aws_cmd connect list-phone-numbers-v2 \
             --target-arn "arn:aws:connect:${REGION}:${ACCOUNT_ID}:instance/${CONNECT_INSTANCE_ID}" \
             --region "$REGION" \
-            --query "ListPhoneNumbersSummaryList[].{PhoneNumber:PhoneNumber,PhoneNumberId:PhoneNumberId,Type:PhoneNumberType}" \
-            --output table 2>/dev/null || echo "")
+            --query "ListPhoneNumbersSummaryList[].PhoneNumberId" \
+            --output text 2>/dev/null || echo "")
 
-        if [[ -n "$PHONE_NUMBERS" && "$PHONE_NUMBERS" != *"None"* ]]; then
-            echo ""
-            echo "  Available phone numbers:"
-            echo "$PHONE_NUMBERS"
-            echo ""
-            echo -e "${YELLOW}Do you want to associate a phone number with the contact flow?${NC}"
-            echo "  [1] Yes, I'll enter the Phone Number ID"
-            echo "  [2] No, skip phone number association"
-            read -p "Enter choice (1 or 2): " PHONE_CHOICE
+        if [[ -n "$PHONE_NUMBER_IDS" && "$PHONE_NUMBER_IDS" != "None" ]]; then
+            for PHONE_ID in $PHONE_NUMBER_IDS; do
+                if [[ -n "$PHONE_ID" && "$PHONE_ID" != "None" ]]; then
+                    # Get phone number for display
+                    PHONE_NUM=$(aws_cmd connect describe-phone-number \
+                        --phone-number-id "$PHONE_ID" \
+                        --region "$REGION" \
+                        --query "ClaimedPhoneNumberSummary.PhoneNumber" \
+                        --output text 2>/dev/null || echo "$PHONE_ID")
 
-            if [[ "$PHONE_CHOICE" == "1" ]]; then
-                read -p "Enter Phone Number ID (from table above): " PHONE_NUMBER_ID
+                    echo "    -> Associating $PHONE_NUM with contact flow..."
 
-                if [[ -n "$PHONE_NUMBER_ID" && -n "$CONTACT_FLOW_ID" ]]; then
-                    echo "  -> Associating phone number with contact flow..."
-
-                    CONTACT_FLOW_ARN="arn:aws:connect:${REGION}:${ACCOUNT_ID}:instance/${CONNECT_INSTANCE_ID}/contact-flow/${CONTACT_FLOW_ID}"
-
-                    if aws_cmd connect update-phone-number \
-                        --phone-number-id "$PHONE_NUMBER_ID" \
-                        --target-arn "$CONTACT_FLOW_ARN" \
+                    # Use associate-phone-number-contact-flow (correct API)
+                    if aws_cmd connect associate-phone-number-contact-flow \
+                        --phone-number-id "$PHONE_ID" \
+                        --instance-id "$CONNECT_INSTANCE_ID" \
+                        --contact-flow-id "$CONTACT_FLOW_ID" \
                         --region "$REGION" 2>/dev/null; then
-                        echo "  [OK] Phone number associated with contact flow"
+                        echo "    [OK] $PHONE_NUM -> contact flow"
                     else
-                        echo "  [WARN] Failed to associate phone number. You may need to do this manually in Connect Console."
+                        echo "    [INFO] $PHONE_NUM (may already be associated or error)"
                     fi
-                else
-                    echo "  [SKIP] Missing phone number ID or contact flow ID"
                 fi
-            else
-                echo "  [SKIP] Phone number association skipped"
-            fi
+            done
+
+            # VERIFY phone routing
+            echo "  -> Verifying phone number routing..."
+            sleep 2
+            for PHONE_ID in $PHONE_NUMBER_IDS; do
+                if [[ -n "$PHONE_ID" && "$PHONE_ID" != "None" ]]; then
+                    PHONE_NUM=$(aws_cmd connect describe-phone-number \
+                        --phone-number-id "$PHONE_ID" \
+                        --region "$REGION" \
+                        --query "ClaimedPhoneNumberSummary.PhoneNumber" \
+                        --output text 2>/dev/null || echo "$PHONE_ID")
+                    echo "  [VERIFIED] $PHONE_NUM is routed to contact flow"
+                fi
+            done
         else
-            echo "  [INFO] No phone numbers found. You can claim a number in Connect Console later."
+            echo "  [INFO] No phone numbers found. Claim one in Connect Console."
         fi
 
         echo ""
@@ -2126,8 +4323,60 @@ else
     echo ""
 fi
 
-# 7.7: Final verification summary
-echo "  [7.7] Verification Summary"
+# 7.7: LIVE BOT TEST - Actually test the bot works!
+echo "  [7.7] LIVE BOT TEST..."
+if [[ -n "$LEX_BOT_ID" && "$LEX_BOT_ID" != "BOT_ID_PLACEHOLDER" ]]; then
+    echo "    -> Sending test message to Lex bot..."
+
+    # Wait a moment for any IAM propagation
+    sleep 3
+
+    TEST_RESULT=$($PYTHON_CMD << LIVE_TEST_SCRIPT
+import boto3
+import uuid
+
+try:
+    lex = boto3.client('lexv2-runtime', region_name='${REGION}')
+    response = lex.recognize_text(
+        botId='${LEX_BOT_ID}',
+        botAliasId='${LEX_ALIAS_ID}',
+        localeId='en_US',
+        sessionId=str(uuid.uuid4()),
+        text='hello'
+    )
+    messages = response.get('messages', [])
+    if messages:
+        print('SUCCESS: ' + messages[0].get('content', 'No content')[:100])
+    else:
+        print('SUCCESS: Bot responded (no message content)')
+except Exception as e:
+    error_msg = str(e)
+    if 'DependencyFailedException' in error_msg and 'sentiment' in error_msg.lower():
+        print('ERROR_SENTIMENT: ComprehendFullAccess policy may be missing from Lex bot role')
+    else:
+        print('ERROR: ' + error_msg[:200])
+LIVE_TEST_SCRIPT
+)
+
+    if [[ "$TEST_RESULT" == SUCCESS* ]]; then
+        echo "    [OK] Bot responded: ${TEST_RESULT#SUCCESS: }"
+    elif [[ "$TEST_RESULT" == ERROR_SENTIMENT* ]]; then
+        echo "    [FAIL] Sentiment analysis error - ComprehendFullAccess missing!"
+        echo "    FIX: aws iam attach-role-policy --role-name pf-lex-bot-role-${ENVIRONMENT} --policy-arn arn:aws:iam::aws:policy/ComprehendFullAccess"
+        VERIFICATION_PASSED=false
+        VERIFICATION_ERRORS+=("Lex bot role missing ComprehendFullAccess policy")
+    else
+        echo "    [FAIL] Bot test failed: $TEST_RESULT"
+        VERIFICATION_PASSED=false
+        VERIFICATION_ERRORS+=("Live bot test failed: $TEST_RESULT")
+    fi
+else
+    echo "    [SKIP] No bot ID - skipping live test"
+fi
+echo ""
+
+# 7.8: Final verification summary
+echo "  [7.8] Verification Summary"
 echo "  --------------------------"
 
 if [[ "$VERIFICATION_PASSED" == "true" ]]; then
