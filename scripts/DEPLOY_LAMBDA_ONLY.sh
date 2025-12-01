@@ -544,6 +544,43 @@ fi
 rm -f /tmp/orchestrator-env.json
 
 ##############################################################################
+# Step 6: Add API Gateway Permission to Orchestrator Lambda
+##############################################################################
+
+echo ""
+echo "=========================================="
+echo "Step 6: API Gateway Permission"
+echo "=========================================="
+
+# Get API Gateway ID for pf-orchestrator-api-dev
+API_ID=$(aws_cmd apigateway get-rest-apis --region "$REGION" --query "items[?name=='pf-orchestrator-api-dev'].id" --output text 2>/dev/null || echo "")
+
+if [[ -n "$API_ID" && "$API_ID" != "None" ]]; then
+    echo "  → Found API Gateway: $API_ID"
+    echo "  → Adding Lambda permission for API Gateway..."
+
+    # Remove existing permission if it exists (ignore errors)
+    aws_cmd lambda remove-permission \
+        --function-name pf-orchestrator \
+        --statement-id apigateway-invoke \
+        --region "$REGION" 2>/dev/null || true
+
+    # Add permission for API Gateway to invoke Lambda
+    aws_cmd lambda add-permission \
+        --function-name pf-orchestrator \
+        --statement-id apigateway-invoke \
+        --action lambda:InvokeFunction \
+        --principal apigateway.amazonaws.com \
+        --source-arn "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*/POST/invoke-agent" \
+        --region "$REGION" &>/dev/null
+
+    echo "  ✅ API Gateway permission added"
+else
+    echo "  ⚠️  API Gateway 'pf-orchestrator-api-dev' not found"
+    echo "  ⚠️  You may need to add the permission manually after creating the API Gateway"
+fi
+
+##############################################################################
 # Summary
 ##############################################################################
 

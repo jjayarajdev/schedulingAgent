@@ -82,12 +82,33 @@ echo ""
 echo "Starting cleanup..."
 
 ##############################################################################
-# Step 1: Delete Lambda Functions
+# Step 1: Remove API Gateway Permission from Lambda
 ##############################################################################
 
 echo ""
 echo "=========================================="
-echo "Step 1: Lambda Functions"
+echo "Step 1: API Gateway Permission"
+echo "=========================================="
+
+echo ""
+echo "Removing API Gateway permission from pf-orchestrator..."
+
+if aws_cmd lambda get-function --function-name "pf-orchestrator" --region "$REGION" &>/dev/null; then
+    aws_cmd lambda remove-permission \
+        --function-name pf-orchestrator \
+        --statement-id apigateway-invoke \
+        --region "$REGION" 2>/dev/null && echo "  ✅ Removed API Gateway permission" || echo "  ⚠️  No API Gateway permission found"
+else
+    echo "  ⚠️  Lambda pf-orchestrator not found"
+fi
+
+##############################################################################
+# Step 2: Delete Lambda Functions
+##############################################################################
+
+echo ""
+echo "=========================================="
+echo "Step 2: Lambda Functions"
 echo "=========================================="
 
 LAMBDA_FUNCTIONS=(
@@ -112,12 +133,12 @@ for FUNCTION_NAME in "${LAMBDA_FUNCTIONS[@]}"; do
 done
 
 ##############################################################################
-# Step 2: Delete IAM Roles
+# Step 3: Delete IAM Roles
 ##############################################################################
 
 echo ""
 echo "=========================================="
-echo "Step 2: IAM Roles"
+echo "Step 3: IAM Roles"
 echo "=========================================="
 
 IAM_ROLES=(
@@ -159,13 +180,13 @@ for ROLE_NAME in "${IAM_ROLES[@]}"; do
 done
 
 ##############################################################################
-# Step 3: Delete DynamoDB Tables (optional)
+# Step 4: Delete DynamoDB Tables (optional)
 ##############################################################################
 
 if [[ "$KEEP_DATA" != "true" ]]; then
     echo ""
     echo "=========================================="
-    echo "Step 3: DynamoDB Tables"
+    echo "Step 4: DynamoDB Tables"
     echo "=========================================="
 
     TABLES=(
@@ -188,13 +209,13 @@ if [[ "$KEEP_DATA" != "true" ]]; then
 fi
 
 ##############################################################################
-# Step 4: Delete Secrets Manager Secret (optional)
+# Step 5: Delete Secrets Manager Secret (optional)
 ##############################################################################
 
 if [[ "$KEEP_DATA" != "true" ]]; then
     echo ""
     echo "=========================================="
-    echo "Step 4: Secrets Manager"
+    echo "Step 5: Secrets Manager"
     echo "=========================================="
 
     SECRET_NAME="projectforce/api/credentials"
