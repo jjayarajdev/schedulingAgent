@@ -1520,6 +1520,31 @@ try:
                 'talk to you later',
                 'thanks for your help goodbye',
                 'that helps thanks bye',
+                'no',
+                'nope',
+                'no thanks',
+                'no thank you',
+                'I am good',
+                'im good',
+                'thats it',
+                'that is it',
+                'no I am done',
+                'no im done',
+                'I do not need any help',
+                'I dont need any help',
+                'I do not need anything else',
+                'I dont need anything else',
+                'no I am good',
+                'no im good',
+                'I am all set',
+                'im all set',
+                'no I am all set',
+                'not right now',
+                'no not right now',
+                'maybe later',
+                'not at this time',
+                'I am okay',
+                'im okay',
             ]
         },
         {
@@ -2683,6 +2708,31 @@ REQUIRED_INTENTS = {
             'talk to you later',
             'thanks for your help goodbye',
             'that helps thanks bye',
+            'no',
+            'nope',
+            'no thanks',
+            'no thank you',
+            'I am good',
+            'im good',
+            'thats it',
+            'that is it',
+            'no I am done',
+            'no im done',
+            'I do not need any help',
+            'I dont need any help',
+            'I do not need anything else',
+            'I dont need anything else',
+            'no I am good',
+            'no im good',
+            'I am all set',
+            'im all set',
+            'no I am all set',
+            'not right now',
+            'no not right now',
+            'maybe later',
+            'not at this time',
+            'I am okay',
+            'im okay',
         ]
     },
     'Help': {
@@ -3584,6 +3634,149 @@ try:
 except Exception as e:
     print(f"  [WARN] Vocabulary creation error: {e}")
 TRANSCRIBE_VOCAB_EOF
+fi
+
+# ============================================================================
+# Step 4.45: Create Amazon Lex V2 Custom Vocabulary (Real-Time ASR)
+# ============================================================================
+# IMPORTANT: This is DIFFERENT from Transcribe vocabulary above!
+# - Transcribe vocabulary = Post-call analytics (Contact Lens)
+# - Lex V2 vocabulary = Real-time speech recognition during calls
+# ============================================================================
+
+echo ""
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo -e "${YELLOW}Step 4.45: Creating Lex V2 Custom Vocabulary (Real-Time ASR)${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo ""
+
+if [[ -n "$LEX_BOT_ID" && "$LEX_BOT_ID" != "BOT_ID_PLACEHOLDER" ]]; then
+    echo "  -> Creating Lex V2 custom vocabulary for bot: $LEX_BOT_ID"
+
+    # Create vocabulary TSV file
+    LEX_VOCAB_DIR=$(mktemp -d)
+    cat > "$LEX_VOCAB_DIR/CustomVocabulary.tsv" << 'LEX_VOCAB_TSV'
+phrase	weight	displayAs
+weather	3
+hows the weather	3
+weather tomorrow	3
+weather forecast	3
+whats the weather	3
+project	2
+projects	2
+first project	2
+second project	2
+third project	2
+fourth project	2
+project details	2
+schedule	2
+appointment	2
+reschedule	2
+decking	3
+deck installation	3
+fencing	3
+flooring	3
+plumbing	3
+roofing	3
+kitchen and bath	2
+generator installation	2
+windows and doors	2
+technician	2
+installer	2
+LEX_VOCAB_TSV
+
+    # Create zip file
+    (cd "$LEX_VOCAB_DIR" && zip -q vocab.zip CustomVocabulary.tsv)
+
+    # Step 1: Get upload URL
+    echo "  -> Getting upload URL..."
+    UPLOAD_RESPONSE=$(aws_cmd lexv2-models create-upload-url --region "$REGION" 2>/dev/null)
+    LEX_IMPORT_ID=$(echo "$UPLOAD_RESPONSE" | jq -r '.importId // empty')
+    UPLOAD_URL=$(echo "$UPLOAD_RESPONSE" | jq -r '.uploadUrl // empty')
+
+    if [[ -n "$LEX_IMPORT_ID" && -n "$UPLOAD_URL" ]]; then
+        echo "  -> Import ID: $LEX_IMPORT_ID"
+
+        # Step 2: Upload vocabulary zip
+        echo "  -> Uploading vocabulary file..."
+        UPLOAD_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X PUT -H "Content-Type: application/zip" --data-binary @"$LEX_VOCAB_DIR/vocab.zip" "$UPLOAD_URL")
+
+        if [[ "$UPLOAD_STATUS" == "200" ]]; then
+            echo "  [OK] Vocabulary file uploaded"
+
+            # Step 3: Start import
+            echo "  -> Starting vocabulary import..."
+            aws_cmd lexv2-models start-import \
+                --import-id "$LEX_IMPORT_ID" \
+                --resource-specification "{\"customVocabularyImportSpecification\": {\"botId\": \"$LEX_BOT_ID\", \"botVersion\": \"DRAFT\", \"localeId\": \"en_US\"}}" \
+                --merge-strategy Overwrite \
+                --region "$REGION" >/dev/null 2>&1
+
+            # Step 4: Wait for import to complete
+            echo "  -> Waiting for vocabulary import to complete..."
+            for i in {1..15}; do
+                sleep 2
+                IMPORT_STATUS=$(aws_cmd lexv2-models describe-import --import-id "$LEX_IMPORT_ID" --region "$REGION" --query 'importStatus' --output text 2>/dev/null)
+                echo "     Status: $IMPORT_STATUS"
+
+                if [[ "$IMPORT_STATUS" == "Completed" ]]; then
+                    echo "  [OK] Vocabulary import completed!"
+
+                    # Step 5: Rebuild bot to apply vocabulary
+                    echo "  -> Rebuilding bot to apply vocabulary..."
+                    aws_cmd lexv2-models build-bot-locale \
+                        --bot-id "$LEX_BOT_ID" \
+                        --bot-version DRAFT \
+                        --locale-id en_US \
+                        --region "$REGION" >/dev/null 2>&1
+
+                    # Step 6: Wait for bot build
+                    echo "  -> Waiting for bot build..."
+                    for j in {1..20}; do
+                        sleep 3
+                        BUILD_STATUS=$(aws_cmd lexv2-models describe-bot-locale \
+                            --bot-id "$LEX_BOT_ID" \
+                            --bot-version DRAFT \
+                            --locale-id en_US \
+                            --region "$REGION" \
+                            --query 'botLocaleStatus' --output text 2>/dev/null)
+                        echo "     Build status: $BUILD_STATUS"
+
+                        if [[ "$BUILD_STATUS" == "Built" ]]; then
+                            echo "  [OK] Bot rebuilt with custom vocabulary!"
+                            break
+                        elif [[ "$BUILD_STATUS" == "Failed" ]]; then
+                            echo "  [ERROR] Bot build failed"
+                            break
+                        fi
+                    done
+                    break
+                elif [[ "$IMPORT_STATUS" == "Failed" ]]; then
+                    echo "  [ERROR] Vocabulary import failed"
+                    break
+                fi
+            done
+
+            # Step 7: Verify vocabulary
+            echo "  -> Verifying vocabulary items..."
+            VOCAB_COUNT=$(aws_cmd lexv2-models list-custom-vocabulary-items \
+                --bot-id "$LEX_BOT_ID" \
+                --bot-version DRAFT \
+                --locale-id en_US \
+                --region "$REGION" \
+                --query 'length(customVocabularyItems)' --output text 2>/dev/null || echo "0")
+            echo "  [OK] Custom vocabulary has $VOCAB_COUNT phrases"
+        else
+            echo "  [ERROR] Failed to upload vocabulary file (HTTP $UPLOAD_STATUS)"
+        fi
+    else
+        echo "  [ERROR] Failed to get upload URL"
+    fi
+
+    # Cleanup
+    rm -rf "$LEX_VOCAB_DIR"
+else
+    echo "  [SKIP] No valid LEX_BOT_ID - skipping vocabulary creation"
 fi
 
 # ============================================================================

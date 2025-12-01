@@ -10,6 +10,71 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger()
 
 
+def _add_voice_followup(text: str, intent: str) -> str:
+    """
+    Add follow-up question to voice response for engagement.
+    Only adds if response doesn't already end with a question.
+
+    VOICE ONLY - keeps conversation flowing until user says goodbye.
+    """
+    # Don't add follow-up for goodbye/thank you intents - let call end
+    if intent.lower() in ['goodbye', 'thankyou', 'thank_you', 'chitchat', 'welcome']:
+        return text
+
+    # Don't add if response already ends with a question
+    text_stripped = text.strip()
+    if text_stripped.endswith('?'):
+        return text
+
+    # Don't add if response is too short (might be error)
+    if len(text_stripped) < 20:
+        return text
+
+    text_lower = text_stripped.lower()
+
+    # SAFETY NET: Don't add follow-up if the response text contains goodbye-like phrases
+    # This catches cases where user said goodbye but it wasn't matched to Goodbye intent
+    goodbye_phrases = [
+        'goodbye', 'bye', 'take care', 'have a good day', 'have a great day',
+        'thank you for calling', 'thanks for calling', 'pleasure helping',
+        'it was a pleasure', 'feel free to call back', 'call back anytime'
+    ]
+    for phrase in goodbye_phrases:
+        if phrase in text_lower:
+            return text
+
+    # Don't add if response already contains engagement phrases
+    engagement_phrases = [
+        'anything else',
+        'would you like',
+        'do you want',
+        'can i help',
+        'what else',
+        'is there anything',
+        'let me know'
+    ]
+    for phrase in engagement_phrases:
+        if phrase in text_lower:
+            return text
+
+    # Add appropriate follow-up based on intent
+    followups = {
+        'scheduling': " Is there anything else I can help you with?",
+        'information': " Would you like to know anything else?",
+        'project_inquiry': " Would you like details on any of these projects?",
+        'weather': " Is there anything else I can help you with?",
+        'default': " Is there anything else I can help you with?"
+    }
+
+    followup = followups.get(intent.lower(), followups['default'])
+
+    # Ensure proper spacing
+    if not text_stripped.endswith('.'):
+        text_stripped += '.'
+
+    return text_stripped + followup
+
+
 def format_for_voice(response_text: str, intent: str = 'unknown') -> str:
     """
     Convert response to voice-friendly natural language
@@ -94,6 +159,9 @@ def format_for_voice(response_text: str, intent: str = 'unknown') -> str:
             break_point = voice_text.rfind('.', 0, 280)
             if break_point > 100:
                 voice_text = voice_text[:break_point + 1]
+
+        # VOICE ENGAGEMENT: Add follow-up question if response doesn't already have one
+        voice_text = _add_voice_followup(voice_text, intent)
 
         return voice_text
 
