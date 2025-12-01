@@ -16,8 +16,9 @@
     },
     {
       "key": "pf_token",
-      "value": "TaDWx6r5O0WE2tb5/Lb77XuI29UR7j2NlMHbUdXd+YrYPR7ZdTrczgYigcaRHxvF4PUl7KCfKcSa/5LTVI9GZGD2xjCQuIIGifYzjbeIG4F9hljoQfRSa4yHgXV4iKYuqyrGhSMR2SSZtZYnMIprKV5SzhAgQetwjLRiUnz7XUDMdscBIC3UTGzVuBI7pHmq6vvOQWpke1JMh9zxLIDNtkTY2wPUEe4wNr2psqI6R2w4WIfyCg3ALCnQMqMfKvSmhBo46UBe4F7tTVWd5YL0mI3FPIZ7cS7GPTf5cewQ5x1IWefak1peZr6+n4jTZKI/Z9jOW0JIxoddU0ixp319EZMjxbaihcekzJxiAx/Cibo1dAA+VbsRD1yBXOggKWCAb4zwaMPG/MuinFEa7zEbZa/E8fqQA+P3iI8kyKwt6ONLnzNf5gjkXr3abZcifhctIS+vWLVePJ8e1NCko7UTu8vFInTfCDbYn87O5ulan2YIvhPwjUFiBJQ8/1beQvu10gQ3ptWo7o214vWzKpTHhRO5tBHbGeThQXiFurY8wYaSf7SNgZwKWMpAmVyU3dxU+En2BZv9p7oNjEGTaClqsjfEdi6LekwJWtqNYf1vDh18e2xui2xQTDQHzM+4zRLY2FliGSQF72Pt3gX9zvqiXua+SjEhfpCjEwvtr9sYiMgM2PRJs+ueWJLtIRTsoVxenTc8yr/Edf8dm2Tx7oGbPw2BqhKOzl5fkhdbc5uoY2g=",
-      "type": "string"
+      "value": "",
+      "type": "string",
+      "description": "Auto-populated by Login request"
     },
     {
       "key": "pf_client_id",
@@ -37,26 +38,57 @@
   ],
   "item": [
     {
-      "name": "1. Greeting & Chitchat",
+      "name": "0. Authentication",
       "item": [
         {
-          "name": "1.1 Simple Greeting",
+          "name": "0.1 Login (Run First!)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
+                  "// Save access token, user_id, and client_id for all subsequent requests",
+                  "// API returns: { accesstoken: '...', user: { client_id: '...', customer_id: '...' } }",
+                  "if (pm.response.code === 200) {",
+                  "    const jsonData = pm.response.json();",
+                  "    ",
+                  "    // Token field can be 'accesstoken', 'access_token', or 'token'",
+                  "    const token = jsonData.accesstoken || jsonData.access_token || jsonData.token;",
+                  "    ",
+                  "    if (token && token.length > 50) {",
+                  "        // Save token",
+                  "        pm.collectionVariables.set('pf_token', token);",
+                  "        console.log('Token saved: ' + token.substring(0, 30) + '...');",
+                  "        ",
+                  "        // User data is nested in 'user' object",
+                  "        const userData = jsonData.user || {};",
+                  "        ",
+                  "        // Save user_id (can be customer_id or user_id)",
+                  "        const userId = userData.customer_id || userData.user_id || jsonData.user_id;",
+                  "        if (userId) {",
+                  "            pm.collectionVariables.set('pf_user_id', userId);",
+                  "            console.log('User ID saved: ' + userId);",
+                  "        }",
+                  "        ",
+                  "        // Save client_id",
+                  "        const clientId = userData.client_id || jsonData.client_id || '09PF05VD';",
+                  "        pm.collectionVariables.set('pf_client_id', clientId);",
+                  "        console.log('Client ID saved: ' + clientId);",
+                  "        ",
+                  "        pm.test('Credentials saved successfully', function() {",
+                  "            pm.expect(token).to.be.a('string');",
+                  "            pm.expect(token.length).to.be.above(50);",
+                  "        });",
+                  "    } else {",
+                  "        console.log('Response: ' + JSON.stringify(jsonData));",
+                  "        pm.test('Token received', function() {",
+                  "            pm.expect.fail('No valid token in response');",
+                  "        });",
+                  "    }",
+                  "}",
+                  "",
+                  "pm.test('Login successful', function() {",
                   "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has output\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property('output');",
-                  "});",
-                  "",
-                  "pm.test(\"Response time is acceptable\", function () {",
-                  "    pm.expect(pm.response.responseTime).to.be.below(15000);",
                   "});"
                 ],
                 "type": "text/javascript"
@@ -73,575 +105,37 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"hello\",\n  \"session_id\": \"{{session_id}}-greeting-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+              "raw": "{\n    \"email\": \"jay@mailinator.com\",\n    \"password\": \"U2FsdGVkX18iUfOdYO7hdkGymfw0V173WdyTl9ElJ5g=\"\n}"
             },
             "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "raw": "https://api-cx-portal.dev.projectsforce.com/authentication/login?identifier=projectsforce-validation",
+              "protocol": "https",
+              "host": [
+                "api-cx-portal",
+                "dev",
+                "projectsforce",
+                "com"
+              ],
+              "path": [
+                "authentication",
+                "login"
+              ],
+              "query": [
+                {
+                  "key": "identifier",
+                  "value": "projectsforce-validation"
+                }
+              ]
             },
-            "description": "Expected: Supervisor → Chitchat Agent (~11s)"
-          },
-          "response": []
-        },
-        {
-          "name": "1.2 Casual Chitchat",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"how are you doing?\",\n  \"session_id\": \"{{session_id}}-chitchat-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Supervisor → Chitchat Agent"
-          },
-          "response": []
-        },
-        {
-          "name": "1.3 What Can You Help With",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"what can you help me with?\",\n  \"session_id\": \"{{session_id}}-intro-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Supervisor → Chitchat Agent"
+            "description": "Login to get fresh token. RUN THIS FIRST before other tests!"
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Run the Login request first to get a fresh token that will be used by all other tests."
     },
     {
-      "name": "2. List Projects",
-      "item": [
-        {
-          "name": "2.1 Show My Projects",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has projects\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property('output');",
-                  "    pm.expect(jsonData.output).to.include('project');",
-                  "});",
-                  "",
-                  "pm.test(\"Response time is fast (direct Lambda)\", function () {",
-                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
-                  "});"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"show my projects\",\n  \"session_id\": \"{{session_id}}-list-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda → pf-information-actions (~3s)"
-          },
-          "response": []
-        },
-        {
-          "name": "2.2 List All My Projects",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"list all my projects\",\n  \"session_id\": \"{{session_id}}-list-2\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda → pf-information-actions (~3s)"
-          },
-          "response": []
-        },
-        {
-          "name": "2.3 Get My Projects",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"get my projects\",\n  \"session_id\": \"{{session_id}}-list-3\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda → pf-information-actions (~3s)"
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "3. Filter Projects",
-      "item": [
-        {
-          "name": "3.1 Scheduled Projects",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"show scheduled projects\",\n  \"session_id\": \"{{session_id}}-filter-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda (~3s)"
-          },
-          "response": []
-        },
-        {
-          "name": "3.2 Unscheduled Projects",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"show unscheduled projects\",\n  \"session_id\": \"{{session_id}}-filter-2\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda (~3s)"
-          },
-          "response": []
-        },
-        {
-          "name": "3.3 Residential Projects",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"show residential projects\",\n  \"session_id\": \"{{session_id}}-filter-3\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda (~3s)"
-          },
-          "response": []
-        },
-        {
-          "name": "3.4 Commercial Projects",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"show commercial projects\",\n  \"session_id\": \"{{session_id}}-filter-4\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda (~3s)"
-          },
-          "response": []
-        },
-        {
-          "name": "3.5 Multiple Filters",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"show unscheduled residential projects\",\n  \"session_id\": \"{{session_id}}-filter-5\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda (~3s)"
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "4. Get Project Details",
-      "item": [
-        {
-          "name": "4.1 Details by Project ID",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"show details for project 7751744\",\n  \"session_id\": \"{{session_id}}-details-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda (~3s)"
-          },
-          "response": []
-        },
-        {
-          "name": "4.2 Details by Position (2nd)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"show details for the 2nd project\",\n  \"session_id\": \"{{session_id}}-details-2\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda (~3s)"
-          },
-          "response": []
-        },
-        {
-          "name": "4.3 Get Details Alternative",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"get details of project 7751741\",\n  \"session_id\": \"{{session_id}}-details-3\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda (~3s)"
-          },
-          "response": []
-        },
-        {
-          "name": "4.4 Tell Me More About",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"tell me more about project 7751744\",\n  \"session_id\": \"{{session_id}}-details-4\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda (~3s)"
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "5. Schedule Project (Multi-turn)",
-      "item": [
-        {
-          "name": "5.1 Schedule - Step 1 (Initiate)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"schedule project 7751744\",\n  \"session_id\": \"schedule-flow-001\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Supervisor → SchedulingAgent (~11s)"
-          },
-          "response": []
-        },
-        {
-          "name": "5.2 Schedule - Step 2 (Date)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"November 15, 2025\",\n  \"session_id\": \"schedule-flow-001\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Same session_id to continue conversation"
-          },
-          "response": []
-        },
-        {
-          "name": "5.3 Schedule - Step 3 (Time)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"10:00 AM\",\n  \"session_id\": \"schedule-flow-001\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Same session_id to continue conversation"
-          },
-          "response": []
-        },
-        {
-          "name": "5.4 Schedule - Step 4 (Confirm)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"yes, confirm\",\n  \"session_id\": \"schedule-flow-001\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Same session_id to confirm scheduling"
-          },
-          "response": []
-        },
-        {
-          "name": "5.5 Schedule by Position",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"schedule the 2nd project\",\n  \"session_id\": \"{{session_id}}-schedule-2\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Supervisor → SchedulingAgent"
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "6. Technician Information",
-      "item": [
-        {
-          "name": "6.1 Get Technician by Project ID",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"get technician information for project 7751744\",\n  \"session_id\": \"{{session_id}}-tech-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda (~3s)"
-          },
-          "response": []
-        },
-        {
-          "name": "6.2 Who is Assigned",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"who is assigned to project 7751744\",\n  \"session_id\": \"{{session_id}}-tech-2\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda (~3s)"
-          },
-          "response": []
-        },
-        {
-          "name": "6.3 Show Technician by Position",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"show technician details for the 2nd project\",\n  \"session_id\": \"{{session_id}}-tech-3\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
-            },
-            "description": "Expected: Direct Lambda (~3s)"
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "7. End-to-End Workflow",
+      "name": "1. E2E - List and Schedule Project",
       "item": [
         {
           "name": "E2E - 1. Greeting",
@@ -659,8 +153,12 @@
             },
             "url": {
               "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
             }
           },
           "response": []
@@ -681,8 +179,12 @@
             },
             "url": {
               "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
             }
           },
           "response": []
@@ -703,8 +205,12 @@
             },
             "url": {
               "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
             }
           },
           "response": []
@@ -725,8 +231,12 @@
             },
             "url": {
               "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
             }
           },
           "response": []
@@ -747,8 +257,12 @@
             },
             "url": {
               "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
             }
           },
           "response": []
@@ -769,8 +283,12 @@
             },
             "url": {
               "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
             }
           },
           "response": []
@@ -791,8 +309,12 @@
             },
             "url": {
               "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
             }
           },
           "response": []
@@ -813,8 +335,12 @@
             },
             "url": {
               "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
             }
           },
           "response": []
@@ -835,8 +361,12 @@
             },
             "url": {
               "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
             }
           },
           "response": []
@@ -844,10 +374,32 @@
       ]
     },
     {
-      "name": "8. Error Handling",
+      "name": "2. E2E - Filter and Schedule Unscheduled",
       "item": [
         {
-          "name": "8.1 Invalid Project ID",
+          "name": "14.1 Greeting",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -858,19 +410,45 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"show details for project 99999999\",\n  \"session_id\": \"{{session_id}}-error-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+              "raw": "{\n  \"message\": \"hello\",\n  \"session_id\": \"e2e-filter-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
             },
             "url": {
               "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
             },
-            "description": "Should return error message about invalid project"
+            "description": "E2E Workflow 14: Filter unscheduled projects and schedule one"
           },
           "response": []
         },
         {
-          "name": "8.2 Missing Required Fields",
+          "name": "14.2 Show Unscheduled Projects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -881,19 +459,45 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"hello\"\n}"
+              "raw": "{\n  \"message\": \"show me unscheduled projects\",\n  \"session_id\": \"e2e-filter-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
             },
             "url": {
               "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
             },
-            "description": "Should return validation error"
+            "description": "Filter by unscheduled status"
           },
           "response": []
         },
         {
-          "name": "8.3 Empty Message",
+          "name": "14.3 Details for Second One",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -904,24 +508,247 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"\",\n  \"session_id\": \"{{session_id}}-error-3\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+              "raw": "{\n  \"message\": \"tell me more about the second one\",\n  \"session_id\": \"e2e-filter-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
             },
             "url": {
               "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
             },
-            "description": "Should return error about empty message"
+            "description": "Ordinal reference to get project details"
+          },
+          "response": []
+        },
+        {
+          "name": "14.4 Check Availability",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"what times are available tomorrow?\",\n  \"session_id\": \"e2e-filter-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Check availability for scheduling"
+          },
+          "response": []
+        },
+        {
+          "name": "14.5 Schedule for 2pm",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"schedule it for 2pm\",\n  \"session_id\": \"e2e-filter-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Schedule with context from previous messages"
+          },
+          "response": []
+        },
+        {
+          "name": "14.6 Confirm",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"yes, confirm\",\n  \"session_id\": \"e2e-filter-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Confirm the appointment"
+          },
+          "response": []
+        },
+        {
+          "name": "14.7 Thanks",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"thanks!\",\n  \"session_id\": \"e2e-filter-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Chitchat close"
           },
           "response": []
         }
-      ]
+      ],
+      "description": "E2E Workflow 14: User filters for unscheduled projects and schedules one"
     },
     {
-      "name": "9. Edge Cases",
+      "name": "3. E2E - Weather-Aware Scheduling",
       "item": [
         {
-          "name": "9.1 Very Long Message",
+          "name": "15.1 Greeting",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -932,19 +759,45 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"I need to see all of my projects that are currently unscheduled and also would like to know which ones are residential versus commercial projects and specifically I am interested in the new installation type projects that need to be scheduled soon\",\n  \"session_id\": \"{{session_id}}-edge-1\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+              "raw": "{\n  \"message\": \"hi there\",\n  \"session_id\": \"e2e-weather-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
             },
             "url": {
               "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
             },
-            "description": "Test handling of complex, long queries"
+            "description": "E2E Workflow 15: Check weather before scheduling outdoor project"
           },
           "response": []
         },
         {
-          "name": "9.2 Special Characters",
+          "name": "15.2 List Projects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -955,18 +808,2454 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"show project #7751744 details & schedule it!\",\n  \"session_id\": \"{{session_id}}-edge-2\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+              "raw": "{\n  \"message\": \"list my projects\",\n  \"session_id\": \"e2e-weather-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
             },
             "url": {
               "raw": "{{base_url}}/invoke-agent",
-              "host": ["{{base_url}}"],
-              "path": ["invoke-agent"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
             },
-            "description": "Test handling of special characters"
+            "description": "Get project list"
+          },
+          "response": []
+        },
+        {
+          "name": "15.3 Details for First Decking Project",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"details for the first decking project\",\n  \"session_id\": \"e2e-weather-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Category + ordinal reference"
+          },
+          "response": []
+        },
+        {
+          "name": "15.4 Check Weather",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"what's the weather in Minneapolis?\",\n  \"session_id\": \"e2e-weather-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Weather check for project location"
+          },
+          "response": []
+        },
+        {
+          "name": "15.5 Schedule for Friday",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"schedule this project for Friday\",\n  \"session_id\": \"e2e-weather-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Schedule with day reference"
+          },
+          "response": []
+        },
+        {
+          "name": "15.6 Provide Time",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"10:00 AM\",\n  \"session_id\": \"e2e-weather-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Provide time"
+          },
+          "response": []
+        },
+        {
+          "name": "15.7 Confirm",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"confirm\",\n  \"session_id\": \"e2e-weather-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Confirm appointment"
+          },
+          "response": []
+        },
+        {
+          "name": "15.8 Follow-up Weather",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"how about Saturday's weather?\",\n  \"session_id\": \"e2e-weather-schedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Follow-up weather query"
           },
           "response": []
         }
-      ]
+      ],
+      "description": "E2E Workflow 15: User checks weather before scheduling an outdoor project"
+    },
+    {
+      "name": "4. E2E - Notes and Details Workflow",
+      "item": [
+        {
+          "name": "16.1 List Projects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show my projects\",\n  \"session_id\": \"e2e-notes-workflow\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "E2E Workflow 16: Add notes to a project and review them"
+          },
+          "response": []
+        },
+        {
+          "name": "16.2 Details by Project ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show details for project 7751744\",\n  \"session_id\": \"e2e-notes-workflow\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Get details with explicit project ID"
+          },
+          "response": []
+        },
+        {
+          "name": "16.3 Add First Note",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"add a note saying customer prefers morning appointments\",\n  \"session_id\": \"e2e-notes-workflow\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Add note with content"
+          },
+          "response": []
+        },
+        {
+          "name": "16.4 Add Second Note",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"add another note: needs to verify color selection\",\n  \"session_id\": \"e2e-notes-workflow\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Add second note"
+          },
+          "response": []
+        },
+        {
+          "name": "16.5 List Notes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show all notes for this project\",\n  \"session_id\": \"e2e-notes-workflow\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "List notes with context"
+          },
+          "response": []
+        },
+        {
+          "name": "16.6 Schedule Morning",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"schedule it for next Monday at 9am\",\n  \"session_id\": \"e2e-notes-workflow\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Schedule morning appointment per note"
+          },
+          "response": []
+        },
+        {
+          "name": "16.7 Confirm",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"yes\",\n  \"session_id\": \"e2e-notes-workflow\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Confirm appointment"
+          },
+          "response": []
+        }
+      ],
+      "description": "E2E Workflow 16: User adds notes to a project and reviews them"
+    },
+    {
+      "name": "5. E2E - Reschedule Flow",
+      "item": [
+        {
+          "name": "17.1 Show Scheduled Projects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show scheduled projects\",\n  \"session_id\": \"e2e-reschedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "E2E Workflow 17: Reschedule a project"
+          },
+          "response": []
+        },
+        {
+          "name": "17.2 Details for First One",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"details for the first one\",\n  \"session_id\": \"e2e-reschedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Get details via ordinal"
+          },
+          "response": []
+        },
+        {
+          "name": "17.3 Ask About Schedule",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"when is it scheduled?\",\n  \"session_id\": \"e2e-reschedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Ask about current schedule"
+          },
+          "response": []
+        },
+        {
+          "name": "17.4 Initiate Reschedule",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"I need to reschedule it\",\n  \"session_id\": \"e2e-reschedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Initiate reschedule"
+          },
+          "response": []
+        },
+        {
+          "name": "17.5 Provide New Date",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"move it to next Tuesday\",\n  \"session_id\": \"e2e-reschedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Provide new date"
+          },
+          "response": []
+        },
+        {
+          "name": "17.6 Provide New Time",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"make it 3pm instead\",\n  \"session_id\": \"e2e-reschedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Provide new time"
+          },
+          "response": []
+        },
+        {
+          "name": "17.7 Confirm Reschedule",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"yes, confirm the change\",\n  \"session_id\": \"e2e-reschedule\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Confirm reschedule"
+          },
+          "response": []
+        }
+      ],
+      "description": "E2E Workflow 17: User views scheduled project and reschedules it"
+    },
+    {
+      "name": "6. E2E - Mixed Intent Journey",
+      "item": [
+        {
+          "name": "18.1 Chitchat Greeting",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"hey, how are you?\",\n  \"session_id\": \"e2e-mixed-intent\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "E2E Workflow 18: Switch between different intents naturally"
+          },
+          "response": []
+        },
+        {
+          "name": "18.2 Capability Question",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"can you help me with my projects?\",\n  \"session_id\": \"e2e-mixed-intent\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Capability question"
+          },
+          "response": []
+        },
+        {
+          "name": "18.3 Show All Projects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show all my projects\",\n  \"session_id\": \"e2e-mixed-intent\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Switch to business"
+          },
+          "response": []
+        },
+        {
+          "name": "18.4 Ask Count",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"how many are there?\",\n  \"session_id\": \"e2e-mixed-intent\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Count/summary"
+          },
+          "response": []
+        },
+        {
+          "name": "18.5 Weather Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"what's the weather like in Tampa?\",\n  \"session_id\": \"e2e-mixed-intent\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Switch to weather"
+          },
+          "response": []
+        },
+        {
+          "name": "18.6 Back to Projects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"ok back to projects - show the last one\",\n  \"session_id\": \"e2e-mixed-intent\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Switch back + ordinal"
+          },
+          "response": []
+        },
+        {
+          "name": "18.7 Schedule Tomorrow",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"schedule it for tomorrow afternoon\",\n  \"session_id\": \"e2e-mixed-intent\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Scheduling"
+          },
+          "response": []
+        },
+        {
+          "name": "18.8 Select Time",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"2pm works\",\n  \"session_id\": \"e2e-mixed-intent\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Time selection"
+          },
+          "response": []
+        },
+        {
+          "name": "18.9 Confirm",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"confirm\",\n  \"session_id\": \"e2e-mixed-intent\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Confirm"
+          },
+          "response": []
+        },
+        {
+          "name": "18.10 Thanks Close",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"thank you so much!\",\n  \"session_id\": \"e2e-mixed-intent\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Chitchat close"
+          },
+          "response": []
+        }
+      ],
+      "description": "E2E Workflow 18: User switches between different intents naturally"
+    },
+    {
+      "name": "7. E2E - Context Resolution Deep Dive",
+      "item": [
+        {
+          "name": "19.1 List Projects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"list projects\",\n  \"session_id\": \"e2e-context-resolution\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "E2E Workflow 19: Test various pronoun and reference resolutions"
+          },
+          "response": []
+        },
+        {
+          "name": "19.2 First One",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show me the first one\",\n  \"session_id\": \"e2e-context-resolution\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Ordinal: first"
+          },
+          "response": []
+        },
+        {
+          "name": "19.3 Last One",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"what about the last one?\",\n  \"session_id\": \"e2e-context-resolution\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Ordinal: last"
+          },
+          "response": []
+        },
+        {
+          "name": "19.4 Third Project",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show the 3rd project\",\n  \"session_id\": \"e2e-context-resolution\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Ordinal: specific number"
+          },
+          "response": []
+        },
+        {
+          "name": "19.5 Schedule It",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"I want to schedule it\",\n  \"session_id\": \"e2e-context-resolution\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Pronoun: it"
+          },
+          "response": []
+        },
+        {
+          "name": "19.6 Provide Date",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"December 15, 2025\",\n  \"session_id\": \"e2e-context-resolution\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Date for scheduling"
+          },
+          "response": []
+        },
+        {
+          "name": "19.7 Provide Time",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"11am\",\n  \"session_id\": \"e2e-context-resolution\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Time for scheduling"
+          },
+          "response": []
+        },
+        {
+          "name": "19.8 Switch to Second",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"actually, go back to the second project\",\n  \"session_id\": \"e2e-context-resolution\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Context switch"
+          },
+          "response": []
+        },
+        {
+          "name": "19.9 Schedule That One Too",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"schedule that one too for the same day\",\n  \"session_id\": \"e2e-context-resolution\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Pronoun + reference"
+          },
+          "response": []
+        },
+        {
+          "name": "19.10 Different Time",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"3pm\",\n  \"session_id\": \"e2e-context-resolution\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Different time"
+          },
+          "response": []
+        },
+        {
+          "name": "19.11 Confirm Both",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"confirm both\",\n  \"session_id\": \"e2e-context-resolution\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Confirmation"
+          },
+          "response": []
+        }
+      ],
+      "description": "E2E Workflow 19: Test various pronoun and reference resolutions"
+    },
+    {
+      "name": "8. E2E - Error Recovery Flow",
+      "item": [
+        {
+          "name": "20.1 List Projects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show my projects\",\n  \"session_id\": \"e2e-error-recovery\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "E2E Workflow 20: User makes mistakes and recovers gracefully"
+          },
+          "response": []
+        },
+        {
+          "name": "20.2 Invalid Project ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"details for project 99999999\",\n  \"session_id\": \"e2e-error-recovery\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Invalid project ID"
+          },
+          "response": []
+        },
+        {
+          "name": "20.3 Correct Project ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"sorry, I meant 7751744\",\n  \"session_id\": \"e2e-error-recovery\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Correction"
+          },
+          "response": []
+        },
+        {
+          "name": "20.4 Schedule It",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"schedule it\",\n  \"session_id\": \"e2e-error-recovery\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Initiate scheduling"
+          },
+          "response": []
+        },
+        {
+          "name": "20.5 Invalid Past Date",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"yesterday at 2pm\",\n  \"session_id\": \"e2e-error-recovery\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Invalid past date"
+          },
+          "response": []
+        },
+        {
+          "name": "20.6 Correct Date",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"I mean tomorrow at 2pm\",\n  \"session_id\": \"e2e-error-recovery\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Correction with valid date"
+          },
+          "response": []
+        },
+        {
+          "name": "20.7 Abort Flow",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"no wait, cancel that\",\n  \"session_id\": \"e2e-error-recovery\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Abort flow"
+          },
+          "response": []
+        },
+        {
+          "name": "20.8 Start Over",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"let me start over - list my projects again\",\n  \"session_id\": \"e2e-error-recovery\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Restart"
+          },
+          "response": []
+        }
+      ],
+      "description": "E2E Workflow 20: User makes mistakes and recovers gracefully"
     }
   ]
 }

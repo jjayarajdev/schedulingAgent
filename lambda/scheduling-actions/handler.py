@@ -517,7 +517,19 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
             # Check status filter
             if filter_status:
                 project_status = project.get('status', '').lower()
-                if filter_status.lower() not in project_status:
+                filter_status_lower = filter_status.lower()
+
+                # Handle "unscheduled" - means status is "New" (not yet scheduled)
+                if filter_status_lower == 'unscheduled':
+                    # Unscheduled = status is "New" OR no scheduledDate
+                    if project_status != 'new' and project.get('scheduledDate'):
+                        continue
+                # Handle "scheduled" - means status is "Scheduled" or has scheduledDate
+                elif filter_status_lower == 'scheduled':
+                    if project_status != 'scheduled':
+                        continue
+                # Default: check if filter is contained in status
+                elif filter_status_lower not in project_status:
                     continue
 
             # Check category filter

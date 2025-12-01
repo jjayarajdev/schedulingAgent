@@ -188,8 +188,10 @@ list_projects:
 - MUST be pure queries (show/list/get/display)
 - NO action verbs allowed
 - IMPORTANT: Extract filter parameters if mentioned:
-  * status: "scheduled", "new", "completed", "pending", etc.
-    Examples: "show scheduled projects", "list new projects", "my completed projects"
+  * status: "scheduled", "unscheduled", "new", "completed", "pending", etc.
+    - "unscheduled" = projects with status "New" (not yet scheduled)
+    - "scheduled" = projects with status "Scheduled" (have appointment)
+    Examples: "show scheduled projects", "show unscheduled projects", "list new projects", "my completed projects"
   * category: "Decking", "Flooring", "Kitchen", "Bathroom", etc.
     Examples: "show decking projects", "my flooring jobs"
   * projectType: "Call Back", "Installation", "Repair", etc.
