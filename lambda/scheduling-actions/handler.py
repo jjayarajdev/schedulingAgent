@@ -37,6 +37,7 @@ from mock_data import (
     get_mock_time_slots,
     get_mock_confirm_appointment,
     get_mock_cancel_appointment,
+    get_mock_rescheduler_slots,
     get_mock_business_hours
 )
 
@@ -1107,13 +1108,13 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
 def handle_reschedule_appointment(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
     """
     Action: reschedule_appointment
-    Reschedules an existing appointment (cancel + confirm)
+    Reschedules an existing appointment using the full API flow:
+    1. Cancel/initiate reschedule via cancel-reschedule endpoint
+    2. Get available rescheduler slots (if no date provided)
+    3. Confirm new appointment with the new date/time
 
-    Real API Flow:
-    1. Cancel existing appointment (if exists)
-    2. Confirm new appointment with the new date/time
-
-    Required Parameters: project_id, client_id, new_date, new_time, request_id
+    Required Parameters: project_id, client_id
+    Optional Parameters: new_date, new_time, request_id (if not provided, returns available dates)
     """
     project_id = params.get('project_id')
     client_id = params.get('client_id')
@@ -1121,36 +1122,79 @@ def handle_reschedule_appointment(params: Dict, config: Dict, auth_headers: Dict
     new_time = params.get('new_time')
     request_id = params.get('request_id')
 
-    if not all([project_id, new_date, new_time, request_id]):
-        raise ValueError("Missing required parameters: project_id, new_date, new_time, request_id")
+    if not project_id:
+        raise ValueError("Missing required parameter: project_id")
 
     logger.info(f"Rescheduling appointment for project {project_id}")
 
-    # Step 1: Cancel existing appointment - DISABLED (cancel endpoint not available)
-    # NOTE: For now, reschedule only creates a new appointment without canceling the old one
-    # Users should manually cancel via support if needed
-    logger.warning(" Cancel step skipped - cancel endpoint not yet available. Only scheduling new appointment.")
-    cancel_result = {
-        "status": "skipped",
-        "message": "Cancel endpoint not available. Creating new appointment only."
-    }
+    # Step 1: Cancel/initiate reschedule via the cancel-reschedule endpoint
+    try:
+        cancel_result = handle_cancel_appointment(
+            {
+                'project_id': project_id,
+                'client_id': client_id
+            },
+            config,
+            auth_headers
+        )
+        logger.info(f"Cancel/reschedule initiation result: {cancel_result}")
 
-    # # COMMENTED OUT - Cancel step (uncomment when cancel endpoint is available)
-    # try:
-    #     cancel_result = handle_cancel_appointment(
-    #         {
-    #             'project_id': project_id,
-    #             'client_id': client_id
-    #         },
-    #         config,
-    #         auth_headers
-    #     )
-    #     logger.info(f"Successfully canceled existing appointment: {cancel_result}")
-    # except Exception as e:
-    #     logger.warning(f"Cancel failed (might not have existing appointment): {str(e)}")
-    #     cancel_result = {"status": "skipped", "message": str(e)}
+        # If project cannot be cancelled, return early
+        if cancel_result.get('status') == 'cannot_cancel':
+            return {
+                "action": "reschedule_appointment",
+                "project_id": project_id,
+                "status": "cannot_reschedule",
+                "message": cancel_result.get('message', 'Cannot reschedule this project'),
+                "mock_mode": USE_MOCK_API
+            }
+    except Exception as e:
+        logger.warning(f"Cancel/reschedule initiation failed: {str(e)}")
+        cancel_result = {"status": "error", "message": str(e)}
 
-    # Step 2: Confirm new appointment
+    # Step 2: If no date provided, get available rescheduler slots
+    if not new_date:
+        from datetime import datetime
+        today = datetime.now().strftime('%Y-%m-%d')
+
+        try:
+            slots_result = handle_get_rescheduler_slots(
+                {
+                    'project_id': project_id,
+                    'client_id': client_id,
+                    'date': today
+                },
+                config,
+                auth_headers
+            )
+            logger.info(f"Rescheduler slots result: {slots_result}")
+
+            return {
+                "action": "reschedule_appointment",
+                "project_id": project_id,
+                "status": "awaiting_date_selection",
+                "available_dates": slots_result.get('available_dates', []),
+                "slots": slots_result.get('slots', []),
+                "request_id": slots_result.get('request_id'),
+                "message": "Please select a new date for your appointment",
+                "mock_mode": USE_MOCK_API
+            }
+        except Exception as e:
+            logger.error(f"Failed to get rescheduler slots: {str(e)}")
+            return {
+                "action": "reschedule_appointment",
+                "project_id": project_id,
+                "status": "error",
+                "message": f"Failed to get available dates: {str(e)}",
+                "mock_mode": USE_MOCK_API
+            }
+
+    # Step 3: If date/time provided, confirm the new appointment
+    if not new_time:
+        raise ValueError("Missing required parameter: new_time")
+    if not request_id:
+        raise ValueError("Missing required parameter: request_id")
+
     confirm_result = handle_confirm_appointment(
         {
             'project_id': project_id,
@@ -1170,6 +1214,7 @@ def handle_reschedule_appointment(params: Dict, config: Dict, auth_headers: Dict
         "project_id": project_id,
         "new_date": new_date,
         "new_time": new_time,
+        "status": "success",
         "cancel_result": cancel_result,
         "confirm_result": confirm_result,
         "message": f"Appointment rescheduled to {new_date} at {new_time}",
@@ -1179,78 +1224,177 @@ def handle_reschedule_appointment(params: Dict, config: Dict, auth_headers: Dict
 def handle_cancel_appointment(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
     """
     Action: cancel_appointment
-    TEMPORARILY DISABLED - Cancel endpoint not yet available in production API
+    Cancels/initiates reschedule for a scheduled appointment
 
-    # Real API Endpoint: GET /scheduler/client/{client_id}/project/{project_id}/cancel-reschedule
-    # (Assuming similar pattern to schedule endpoint)
-    # Required Parameters: project_id, client_id (for real API)
+    Real API Endpoint: POST /scheduler/client/{client_id}/project/{project_id}/cancel-reschedule
+    Required Parameters: project_id, client_id
+
+    Response indicates if project can be cancelled based on its status.
+    Project status must be "Customer to Schedule" to allow cancellation.
     """
     project_id = params.get('project_id')
+    client_id = params.get('client_id')
 
-    logger.warning(f" Cancel appointment feature is currently disabled for project {project_id}")
+    if not project_id:
+        raise ValueError("Missing required parameter: project_id")
+
+    if USE_MOCK_API:
+        logger.info(f"[MOCK] Cancelling appointment for project {project_id}")
+        response = get_mock_cancel_appointment(project_id)
+    else:
+        # Validate client_id for real API calls
+        if not client_id:
+            raise ValueError("Missing required parameter for real API: client_id")
+
+        logger.info(f"[REAL] Cancelling appointment for project {project_id}, client {client_id}")
+
+        # API endpoint from documentation
+        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/cancel-reschedule"
+
+        logger.info(f"POST {url}")
+
+        try:
+            # Use retry logic with automatic token refresh on 401
+            res = make_api_request_with_retry("POST", url, auth_headers, timeout=30)
+            response = res.json()
+            logger.info(f"Cancel/Reschedule API response: {response}")
+        except requests.HTTPError as e:
+            status_code = e.response.status_code
+            error_body = e.response.text
+            logger.error(f"HTTP {status_code} error canceling appointment: {error_body}")
+
+            # Handle specific error codes
+            if status_code == 400:
+                raise ValueError(f"Invalid cancellation request: {error_body}")
+            elif status_code == 404:
+                raise ValueError("No appointment found to cancel")
+            elif status_code == 401:
+                raise ValueError("Authentication failed - token may be expired (after retry)")
+            else:
+                raise ValueError(f"Failed to cancel appointment: HTTP {status_code}")
+        except requests.RequestException as e:
+            logger.error(f"Request error canceling appointment: {str(e)}")
+            raise ValueError(f"Unable to connect to scheduling API: {str(e)}")
+
+    # Handle the "Project status should be Customer to Schedule" response
+    message = response.get("message", "")
+    if "Project status should be" in message:
+        return {
+            "action": "cancel_appointment",
+            "project_id": project_id,
+            "status": "cannot_cancel",
+            "message": f"This project cannot be cancelled. {message}",
+            "mock_mode": USE_MOCK_API
+        }
 
     return {
         "action": "cancel_appointment",
         "project_id": project_id,
-        "message": "Cancel appointment feature is temporarily disabled. Please contact support to cancel appointments.",
-        "status": "disabled",
-        "mock_mode": False
+        "status": "success",
+        "message": response.get("message", "Appointment cancelled successfully"),
+        "cancellation_data": response.get("data", {}),
+        "mock_mode": USE_MOCK_API
     }
 
-    # COMMENTED OUT - Real API implementation (uncomment when endpoint is available)
-    # client_id = params.get('client_id')
-    #
-    # if not project_id:
-    #     raise ValueError("Missing required parameter: project_id")
-    #
-    # # Use mock if global flag is set OR if real cancel is not enabled
-    # use_mock = USE_MOCK_API or not ENABLE_REAL_CANCEL
-    #
-    # if use_mock:
-    #     logger.info(f"[MOCK] Cancelling appointment for project {project_id}")
-    #     response = get_mock_cancel_appointment(project_id)
-    # else:
-    #     # Validate client_id for real API calls
-    #     if not client_id:
-    #         raise ValueError("Missing required parameter for real API: client_id")
-    #
-    #     logger.info(f"[REAL] Cancelling appointment for project {project_id}, client {client_id}")
-    #
-    #     # Updated URL to include client_id (matching schedule endpoint pattern)
-    #     url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/cancel-reschedule"
-    #
-    #     logger.info(f"GET {url}")
-    #
-    #     try:
-    #         # Use retry logic with automatic token refresh on 401
-    #         res = make_api_request_with_retry("GET", url, auth_headers, timeout=30)
-    #         response = res.json()
-    #         logger.info(f"Cancellation successful: {response}")
-    #     except requests.HTTPError as e:
-    #         status_code = e.response.status_code
-    #         error_body = e.response.text
-    #         logger.error(f"HTTP {status_code} error canceling appointment: {error_body}")
-    #
-    #         # Handle specific error codes
-    #         if status_code == 400:
-    #             raise ValueError(f"Invalid cancellation request: {error_body}")
-    #         elif status_code == 404:
-    #             raise ValueError("No appointment found to cancel")
-    #         elif status_code == 401:
-    #             raise ValueError("Authentication failed - token may be expired (after retry)")
-    #         else:
-    #             raise ValueError(f"Failed to cancel appointment: HTTP {status_code}")
-    #     except requests.RequestException as e:
-    #         logger.error(f"Request error canceling appointment: {str(e)}")
-    #         raise ValueError(f"Unable to connect to scheduling API: {str(e)}")
-    #
-    # return {
-    #     "action": "cancel_appointment",
-    #     "project_id": project_id,
-    #     "message": response.get("message", "Appointment cancelled"),
-    #     "cancellation_data": response.get("data", {}),
-    #     "mock_mode": use_mock
-    # }
+# ============================================================================
+# Rescheduler Slots Action Handler
+# ============================================================================
+
+def handle_get_rescheduler_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
+    """
+    Action: get_rescheduler_slots
+    Gets available slots specifically for rescheduling a project
+
+    Real API Endpoint: GET /scheduler/client/{client_id}/project/{project_id}/date/{date}/selected/{selected_date}/get-rescheduler-slots
+
+    Required Parameters: project_id, client_id, date
+    Optional Parameters: selected_date (defaults to date)
+
+    Response format:
+    {
+        "data": {
+            "slots": [],
+            "dates": ["2025-10-29", "2025-10-30", "2025-10-31"],
+            "request_id": 1619
+        },
+        "message": "Slots fetched successfully"
+    }
+    """
+    project_id = params.get('project_id')
+    client_id = params.get('client_id')
+    date = params.get('date')  # Format: YYYY-MM-DD
+    selected_date = params.get('selected_date', date)  # Defaults to date
+
+    if not project_id:
+        raise ValueError("Missing required parameter: project_id")
+    if not date:
+        raise ValueError("Missing required parameter: date")
+
+    if USE_MOCK_API:
+        logger.info(f"[MOCK] Getting rescheduler slots for project {project_id}, date {date}")
+        response = get_mock_rescheduler_slots(project_id, date)
+    else:
+        if not client_id:
+            raise ValueError("Missing required parameter for real API: client_id")
+
+        logger.info(f"[REAL] Getting rescheduler slots for project {project_id}, date {date}")
+
+        # API endpoint from documentation
+        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/date/{date}/selected/{selected_date}/get-rescheduler-slots"
+
+        logger.info(f"GET {url}")
+
+        try:
+            res = make_api_request_with_retry("GET", url, auth_headers, timeout=30)
+            response = res.json()
+            logger.info(f"Rescheduler slots response: {response}")
+        except requests.HTTPError as e:
+            status_code = e.response.status_code
+            error_body = e.response.text
+            logger.error(f"HTTP {status_code} error getting rescheduler slots: {error_body}")
+
+            if status_code == 400:
+                raise ValueError(f"Invalid request: {error_body}")
+            elif status_code == 404:
+                raise ValueError("Project not found")
+            elif status_code == 401:
+                raise ValueError("Authentication failed - token may be expired")
+            else:
+                raise ValueError(f"Failed to get rescheduler slots: HTTP {status_code}")
+        except requests.RequestException as e:
+            logger.error(f"Request error getting rescheduler slots: {str(e)}")
+            raise ValueError(f"Unable to connect to scheduling API: {str(e)}")
+
+    # Handle status constraint message (same as cancel)
+    message = response.get("message", "")
+    if "Project status should be" in message:
+        return {
+            "action": "get_rescheduler_slots",
+            "project_id": project_id,
+            "status": "cannot_reschedule",
+            "message": f"Cannot get reschedule slots. {message}",
+            "slots": [],
+            "available_dates": [],
+            "mock_mode": USE_MOCK_API
+        }
+
+    # Extract data from response
+    data = response.get("data", {})
+    slots = data.get("slots", [])
+    available_dates = data.get("dates", [])
+    request_id = data.get("request_id")
+
+    return {
+        "action": "get_rescheduler_slots",
+        "project_id": project_id,
+        "date": date,
+        "slots": slots,
+        "available_dates": available_dates,
+        "request_id": request_id,
+        "message": response.get("message", "Rescheduler slots fetched successfully"),
+        "mock_mode": USE_MOCK_API
+    }
+
 
 # ============================================================================
 # Business Hours Action Handler
@@ -1527,6 +1671,7 @@ def lambda_handler(event, context):
             'confirm-appointment': handle_confirm_appointment,
             'reschedule-appointment': handle_reschedule_appointment,
             'cancel-appointment': handle_cancel_appointment,
+            'get-rescheduler-slots': handle_get_rescheduler_slots,
             'add-note': handle_add_note,
             'list-notes': handle_list_notes
         }

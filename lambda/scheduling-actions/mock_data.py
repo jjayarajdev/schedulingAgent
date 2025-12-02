@@ -201,17 +201,58 @@ def get_mock_confirm_appointment(project_id: str, date: str, time: str, request_
 
 def get_mock_cancel_appointment(project_id: str) -> Dict[str, Any]:
     """
-    Mock response for Cancel Appointment API
-    GET /scheduler/.../cancel-reschedule
+    Mock response for Cancel/Reschedule API
+    POST /scheduler/client/{client_id}/project/{project_id}/cancel-reschedule
+
+    Real API returns: {"message": "Project status should be Customer to Schedule"}
+    when project cannot be cancelled.
     """
     return {
         "status": "success",
-        "message": f" [MOCK] Appointment cancelled successfully for project {project_id}",
+        "message": f"[MOCK] Reschedule initiated successfully for project {project_id}",
         "data": {
             "project_id": project_id,
             "cancelled_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "cancellation_id": f"CANC-{int(datetime.now().timestamp())}"
         }
+    }
+
+
+def get_mock_rescheduler_slots(project_id: str, date: str) -> Dict[str, Any]:
+    """
+    Mock response for Get Rescheduler Slots API
+    GET /scheduler/client/{client_id}/project/{project_id}/date/{date}/selected/{selected_date}/get-rescheduler-slots
+
+    Returns available dates and slots for rescheduling.
+    """
+    today = datetime.now()
+    # Generate next 5 available dates (weekdays only)
+    dates = []
+    check_date = today
+    while len(dates) < 5:
+        check_date = check_date + timedelta(days=1)
+        if check_date.weekday() < 5:  # Weekdays only
+            dates.append(check_date.strftime("%Y-%m-%d"))
+
+    # Generate time slots
+    slots = [
+        {"time": "08:00", "available": True},
+        {"time": "09:00", "available": True},
+        {"time": "10:00", "available": False},  # Some slots unavailable
+        {"time": "11:00", "available": True},
+        {"time": "13:00", "available": True},
+        {"time": "14:00", "available": True},
+        {"time": "15:00", "available": False},
+        {"time": "16:00", "available": True}
+    ]
+
+    return {
+        "data": {
+            "slots": slots,
+            "dates": dates,
+            "request_id": int(datetime.now().timestamp())
+        },
+        "message": "[MOCK] Slots fetched successfully"
     }
 
 def get_mock_business_hours(client_id: str) -> Dict[str, Any]:

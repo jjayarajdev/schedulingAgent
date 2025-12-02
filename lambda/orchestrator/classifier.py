@@ -235,12 +235,18 @@ confirm_appointment:
 - Response: intent=scheduling, action=confirm_appointment, can_call_direct=true, params extracted
 
 reschedule_appointment:
-- Examples: "reschedule project 123", "change my appointment"
+- Examples: "reschedule project 123", "change my appointment", "I need to reschedule", "move my appointment"
+- This initiates a reschedule flow: cancel existing -> get new slots -> confirm new appointment
 - Response: intent=scheduling, action=reschedule_appointment, can_call_direct=true, params={{"project_id":"..."}}
 
 cancel_appointment:
-- Examples: "cancel my appointment", "cancel project 123"
+- Examples: "cancel my appointment", "cancel project 123", "I need to cancel", "cancel the booking"
 - Response: intent=scheduling, action=cancel_appointment, can_call_direct=true, params={{"project_id":"..."}}
+
+get_rescheduler_slots:
+- Examples: "what dates are available to reschedule?", "show reschedule options", "when can I reschedule to?"
+- Use when user explicitly asks about rescheduling availability (not regular scheduling)
+- Response: intent=scheduling, action=get_rescheduler_slots, can_call_direct=true, params={{"project_id":"...", "date":"YYYY-MM-DD" if mentioned}}
 
 add_note:
 - Examples: "add a note to project 123", "add note"
