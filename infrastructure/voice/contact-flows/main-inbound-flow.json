@@ -261,7 +261,7 @@
             "NextAction": "GoodbyeMessage",
             "Condition": {
               "Operator": "TextContains",
-              "Operands": ["no", "No", "NO", "goodbye", "bye", "that's all"]
+              "Operands": ["no", "No", "NO", "nope", "done", "Done", "finished", "goodbye", "bye", "Bye", "that's all", "thats all", "that's it", "thats it", "I'm good", "im good", "all set"]
             }
           }
         ],

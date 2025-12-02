@@ -130,6 +130,7 @@ docs/**/*.md
 /*.md
 !README.md
 !CHANGELOG.md
+!VOICE_CONFIG_REFERENCE.md
 
 # Ignore other non-essential MD files
 backend/**/*.md
@@ -166,3 +167,6 @@ infrastructure/voice/contact-flows/*.generated.json
 
 # Friend's changes for merge comparison
 friend_changes/
+
+# Meeting transcripts and documents
+*.docx

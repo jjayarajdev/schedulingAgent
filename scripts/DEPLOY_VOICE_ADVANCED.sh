@@ -236,7 +236,7 @@ LEX_ASSISTED_NLU_MODE="Primary"         # Options: Primary (LLM default), Fallba
 
 # SSML wait message settings
 LEX_WAIT_DELAY_SECONDS="1"              # Seconds before first wait message plays
-LEX_UPDATE_FREQUENCY_SECONDS="8"        # Seconds between update messages
+LEX_UPDATE_FREQUENCY_SECONDS="5"        # Seconds between update messages (reduced from 8 for better UX)
 LEX_FULFILLMENT_TIMEOUT="90"            # Max seconds to wait for Lambda response
 
 # ============================================================================
@@ -1545,6 +1545,13 @@ try:
                 'not at this time',
                 'I am okay',
                 'im okay',
+                'am done',
+                'no more',
+                'finished',
+                'no am done',
+                'all set',
+                'done here',
+                'nothing more',
             ]
         },
         {
@@ -1599,7 +1606,6 @@ try:
                 'hows your day',
                 'hows it going today',
                 'you good',
-                'all good',
                 'everything alright',
                 'are you okay',
                 'are you well',
@@ -1743,6 +1749,25 @@ try:
                 'i want details',
                 'the second one',
                 'show me project 1',
+                'whats happening with my project',
+                'whats happening with my job',
+                'what is happening with my project',
+                'what is happening with my job',
+                'whats happening with my first job',
+                'whats happening with my second job',
+                'whats going on with my project',
+                'any updates on my project',
+                'who is the technician',
+                'who is the tech',
+                'who is coming',
+                'who is assigned',
+                'who is working on my project',
+                'tell me about the technician',
+                'who is the installer',
+                'who is the crew',
+                'where is the technician',
+                'where is the plumber',
+                'where is the carpenter',
             ]
         },
         {
@@ -2050,6 +2075,30 @@ try:
         },
     ]
 
+    # ========== DUPLICATE UTTERANCE CHECK ==========
+    # CRITICAL: Lex V2 does not allow the same utterance in multiple intents
+    print("  Checking for duplicate utterances across intents...")
+    all_utterances = {}  # utterance -> intent_name
+    duplicates_found = []
+
+    for intent_def in intents:
+        for utt in intent_def['utterances']:
+            utt_lower = utt.lower().strip()
+            if utt_lower in all_utterances:
+                duplicates_found.append(f"'{utt}' in both '{all_utterances[utt_lower]}' and '{intent_def['name']}'")
+            else:
+                all_utterances[utt_lower] = intent_def['name']
+
+    if duplicates_found:
+        print(f"  [ERROR] Found {len(duplicates_found)} duplicate utterances:")
+        for dup in duplicates_found:
+            print(f"    - {dup}")
+        print("  [FAIL] Fix duplicates in the intents list above before deploying!")
+        raise Exception("Duplicate utterances found - bot build will fail. Fix the intents list.")
+    else:
+        print(f"  [OK] No duplicates found. {len(all_utterances)} unique utterances across all intents.")
+    # ========== END DUPLICATE CHECK ==========
+
     created_intents = {}
 
     # Fulfillment updates config - FAST "please wait" (1 second delay)
@@ -2083,7 +2132,7 @@ try:
             'allowInterrupt': False
         },
         'updateResponse': {
-            'frequencyInSeconds': 10,  # Play update every 10 sec if still waiting
+            'frequencyInSeconds': 5,  # Play update every 5 sec if still waiting
             'messageGroups': [
                 {
                     'message': {
@@ -3242,7 +3291,7 @@ fulfillment_updates_spec = {
         'allowInterrupt': False  # Don't let user interrupt wait message
     },
     'updateResponse': {
-        'frequencyInSeconds': 8,  # Play update every 8 seconds if still waiting
+        'frequencyInSeconds': 5,  # Play update every 5 seconds if still waiting
         'messageGroups': [
             {'message': {'ssmlMessage': {'value': '<speak><prosody rate="medium">Still working on that<break time="200ms"/>almost there.</prosody></speak>'}}},
             {'message': {'ssmlMessage': {'value': '<speak><prosody rate="medium" pitch="low">Thank you for your patience.</prosody></speak>'}}},
@@ -3309,6 +3358,29 @@ try:
         print(f"  [WARN] Missing intents: {missing}")
     else:
         print("  [OK] All required intents exist")
+
+    # ========== DUPLICATE UTTERANCE CHECK FOR REQUIRED_INTENTS ==========
+    print("  Checking for duplicate utterances in REQUIRED_INTENTS...")
+    all_utterances = {}
+    duplicates_found = []
+
+    for intent_name, config in REQUIRED_INTENTS.items():
+        for utt in config['utterances']:
+            utt_lower = utt.lower().strip()
+            if utt_lower in all_utterances:
+                duplicates_found.append(f"'{utt}' in both '{all_utterances[utt_lower]}' and '{intent_name}'")
+            else:
+                all_utterances[utt_lower] = intent_name
+
+    if duplicates_found:
+        print(f"  [ERROR] Found {len(duplicates_found)} duplicate utterances:")
+        for dup in duplicates_found:
+            print(f"    - {dup}")
+        print("  [FAIL] Fix duplicates in REQUIRED_INTENTS before deploying!")
+        raise Exception("Duplicate utterances found in REQUIRED_INTENTS")
+    else:
+        print(f"  [OK] No duplicates in REQUIRED_INTENTS. {len(all_utterances)} unique utterances.")
+    # ========== END DUPLICATE CHECK ==========
 
     # Create missing intents
     created_count = 0
@@ -3662,13 +3734,27 @@ hows the weather	3
 weather tomorrow	3
 weather forecast	3
 whats the weather	3
-project	2
-projects	2
-first project	2
-second project	2
-third project	2
-fourth project	2
-project details	2
+project	3
+projects	3
+first project	3
+second project	3
+third project	3
+fourth project	3
+project details	3
+job	3
+jobs	3
+my job	3
+my jobs	3
+the job	3
+first job	3
+second job	3
+third job	3
+fourth job	3
+work	2
+my work	2
+the work	2
+installation	3
+my installation	3
 schedule	2
 appointment	2
 reschedule	2
@@ -3681,8 +3767,53 @@ roofing	3
 kitchen and bath	2
 generator installation	2
 windows and doors	2
-technician	2
-installer	2
+technician	3
+the technician	3
+who is the technician	3
+who is the tech	3
+tech	3
+installer	3
+the installer	3
+who is the installer	3
+crew	3
+the crew	3
+crew member	3
+who is the crew	3
+worker	3
+the worker	3
+contractor	3
+the contractor	3
+person working	3
+the person working	3
+who is the person	3
+who is coming	3
+who is assigned	3
+assigned technician	3
+plumber	3
+the plumber	3
+where is the plumber	3
+carpenter	3
+the carpenter	3
+where is the carpenter	3
+electrician	3
+the electrician	3
+where is the electrician	3
+where is the technician	3
+where is the person	3
+where is the crew	3
+where is the worker	3
+whats happening	3
+what is happening	3
+whats happening with my job	3
+whats happening with my project	3
+whats happening with my second job	3
+whats happening with my first job	3
+happening with my project	3
+status of my job	3
+status of my project	3
+my first job	3
+my second job	3
+my third job	3
 LEX_VOCAB_TSV
 
     # Create zip file

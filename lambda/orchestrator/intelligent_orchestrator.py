@@ -492,6 +492,12 @@ Address queries -> context_query with query_type: "address"
 Examples: "what's the address", "where is the work being done", "installation address",
 "where are they coming", "what address do you have", "job location", "where is the project"
 
+Status/General queries -> context_query with query_type: "status"
+Examples: "what's happening with my job", "status of my project", "what's going on with my project",
+"update on my job", "how is my project going", "any updates", "what's the status", "tell me about my project",
+"what's happening with my second job", "status update", "project update", "what's new with my project",
+"whats happening", "hows my project", "whats going on", "progress on my job", "any news on my project"
+
 For these: Check if project details are in conversation history. Return intent=information, action=context_query
 IMPORTANT: If user specifies a project reference (e.g., "for the 1st project", "for project 7751741", "for my Decking project"):
 - Extract project_index (0-based) if ordinal: "1st project" -> project_index: 0, "2nd project" -> project_index: 1
@@ -830,6 +836,115 @@ def orchestrate_intelligent_workflow(
         project_data = extract_project_data_from_history(conversation_history, classification)
         logger.info(f"[CONTEXT] Extracted project data: {project_data}")
 
+        # VOICE-ONLY AUTO-FETCH: If no context in history but project_index specified, fetch projects automatically
+        # This avoids asking "would you like me to look up project details?" and saves a round-trip on voice calls
+        # Chat/SMS have conversation history with JSON responses, so they don't need this
+        if not project_data and channel == 'voice':
+            entities = classification.get('entities', {})
+            project_index = entities.get('project_index')
+            target_project_id = entities.get('project_id')
+
+            if project_index is not None or target_project_id:
+                logger.info(f"[VOICE-AUTOFETCH] No context in history but project reference found: index={project_index}, id={target_project_id}")
+                logger.info(f"[VOICE-AUTOFETCH] Auto-fetching projects to answer context query...")
+
+                try:
+                    autofetch_start = time.time()
+
+                    # Call list_projects to get all projects
+                    list_response = call_lambda_directly('list_projects', {
+                        'customer_id': customer_id,
+                        'client_id': client_id,
+                        'pf_bearer_token': pf_bearer_token
+                    })
+
+                    # Extract projects from response
+                    list_data = list_response.get('response', {})
+                    list_func = list_data.get('functionResponse', {})
+                    list_body_wrapper = list_func.get('responseBody', {})
+                    list_text = list_body_wrapper.get('TEXT', {})
+                    list_body_str = list_text.get('body', '{}')
+
+                    if isinstance(list_body_str, str):
+                        list_body = json.loads(list_body_str)
+                    else:
+                        list_body = list_body_str
+
+                    # Extract project data from fetched list
+                    if 'projects' in list_body and isinstance(list_body['projects'], list):
+                        fetched_projects = list_body['projects']
+                        logger.info(f"[VOICE-AUTOFETCH] Fetched {len(fetched_projects)} projects in {time.time() - autofetch_start:.2f}s")
+
+                        # Find target project by index or ID
+                        target_proj = None
+                        if target_project_id:
+                            for p in fetched_projects:
+                                if str(p.get('id')) == str(target_project_id):
+                                    target_proj = p
+                                    logger.info(f"[VOICE-AUTOFETCH] Found project by ID: {target_project_id}")
+                                    break
+                        elif project_index is not None and isinstance(project_index, int):
+                            if 0 <= project_index < len(fetched_projects):
+                                target_proj = fetched_projects[project_index]
+                                logger.info(f"[VOICE-AUTOFETCH] Found project by index: {project_index} -> #{target_proj.get('id')}")
+
+                        if target_proj:
+                            # Build project_data from fetched project
+                            project_data = {}
+
+                            # Extract technician info
+                            if target_proj.get('installer'):
+                                inst = target_proj['installer']
+                                if isinstance(inst, dict):
+                                    project_data['technician_name'] = inst.get('name', '')
+                                    project_data['technician_id'] = str(inst.get('id', ''))
+
+                            # Extract scheduled date/time
+                            if target_proj.get('scheduledDate'):
+                                sched = target_proj['scheduledDate']
+                                project_data['scheduled_date'] = sched
+                                # Parse time from "11-29-2025 08:00 AM - 11-29-2025 09:00 AM" format
+                                time_match = re.search(
+                                    r'(\d{1,2}:\d{2}\s*(?:AM|PM))\s*-\s*\d{1,2}-\d{1,2}-\d{4}\s*(\d{1,2}:\d{2}\s*(?:AM|PM))',
+                                    sched, re.IGNORECASE
+                                )
+                                if time_match:
+                                    project_data['scheduled_time'] = f"{time_match.group(1)} - {time_match.group(2)}"
+
+                            # Extract other fields
+                            if target_proj.get('category'):
+                                project_data['category'] = target_proj['category']
+                            if target_proj.get('id'):
+                                project_data['project_id'] = str(target_proj['id'])
+                            if target_proj.get('address'):
+                                addr = target_proj['address']
+                                if isinstance(addr, dict):
+                                    project_data['address'] = addr.get('fullAddress') or f"{addr.get('address1', '')}, {addr.get('city', '')}, {addr.get('state', '')} {addr.get('zipcode', '')}"
+                                    project_data['city'] = addr.get('city', '')
+                                    project_data['state'] = addr.get('state', '')
+                                else:
+                                    project_data['address'] = addr
+                            if target_proj.get('status'):
+                                project_data['status'] = target_proj['status']
+
+                            logger.info(f"[VOICE-AUTOFETCH] Built project_data: {project_data}")
+
+                            # Save project_ids to workflow state for future queries
+                            fetched_ids = [str(p.get('id', '')) for p in fetched_projects if p.get('id')]
+                            if fetched_ids:
+                                state_manager.save_state(session_id, {
+                                    'workflow_type': 'project_listing',
+                                    'current_stage': 'listing_projects',
+                                    'context': {'project_ids': fetched_ids}
+                                })
+                                logger.info(f"[VOICE-AUTOFETCH] Saved {len(fetched_ids)} project_ids to workflow state")
+
+                            timing['autofetch'] = time.time() - autofetch_start
+
+                except Exception as autofetch_err:
+                    logger.error(f"[VOICE-AUTOFETCH] Auto-fetch failed: {autofetch_err}")
+                    # Continue with None project_data - will ask user for context
+
         if project_data:
             if query_type == 'technician':
                 tech_name = project_data.get('technician_name', 'Not assigned yet')
@@ -888,10 +1003,97 @@ def orchestrate_intelligent_workflow(
                     response += f" is **{address}**."
                 else:
                     response = "I don't have the address details in our current conversation. Would you like me to look up your project details?"
+
+            elif query_type in ['status', 'general', 'update', 'info', 'details', 'happening', 'progress']:
+                # COMPREHENSIVE STATUS HANDLER - "whats happening with my job", "status of my project", etc.
+                category = project_data.get('category', 'project')
+                project_id = project_data.get('project_id', '')
+                status = project_data.get('status', '')
+                scheduled_date = project_data.get('scheduled_date', '')
+                scheduled_time = project_data.get('scheduled_time', '')
+                tech_name = project_data.get('technician_name', '')
+                address = project_data.get('address', '')
+
+                # Build comprehensive status response
+                response = f"Here's the status of your **{category}** project"
+                if project_id:
+                    response += f" (#{project_id})"
+                response += ":\n\n"
+
+                # Status
+                if status:
+                    response += f"**Status:** {status}\n"
+
+                # Scheduled date/time
+                if scheduled_date:
+                    formatted_date = format_date_natural(scheduled_date)
+                    response += f"**Scheduled:** {formatted_date}"
+                    if scheduled_time and scheduled_time not in formatted_date:
+                        response += f" at {scheduled_time}"
+                    response += "\n"
+                else:
+                    response += "**Scheduled:** Not yet scheduled\n"
+
+                # Technician
+                if tech_name and tech_name != 'Not assigned yet':
+                    response += f"**Technician:** {tech_name}\n"
+                else:
+                    response += "**Technician:** Not yet assigned\n"
+
+                # Address
+                if address:
+                    response += f"**Location:** {address}\n"
+
+                # Helpful prompt
+                if not scheduled_date:
+                    response += "\nWould you like to schedule an appointment for this project?"
+                else:
+                    response += "\nIs there anything else you'd like to know about this project?"
+
             else:
-                response = "I'm not sure what information you're looking for. Could you be more specific?"
+                # SMART FALLBACK: If we have project_data but unknown query_type, show a summary anyway
+                # This is better than saying "I'm not sure what you're looking for"
+                logger.info(f"[CONTEXT] Unknown query_type '{query_type}', using smart fallback with available project_data")
+
+                category = project_data.get('category', 'project')
+                project_id = project_data.get('project_id', '')
+                status = project_data.get('status', '')
+                scheduled_date = project_data.get('scheduled_date', '')
+                tech_name = project_data.get('technician_name', '')
+
+                response = f"Here's what I know about your **{category}** project"
+                if project_id:
+                    response += f" (#{project_id})"
+                response += ":\n\n"
+
+                info_added = False
+                if status:
+                    response += f"**Status:** {status}\n"
+                    info_added = True
+                if scheduled_date:
+                    formatted_date = format_date_natural(scheduled_date)
+                    response += f"**Scheduled:** {formatted_date}\n"
+                    info_added = True
+                if tech_name and tech_name != 'Not assigned yet':
+                    response += f"**Technician:** {tech_name}\n"
+                    info_added = True
+
+                if not info_added:
+                    response = f"I found your **{category}** project"
+                    if project_id:
+                        response += f" (#{project_id})"
+                    response += ", but I don't have detailed status information. Would you like me to get the full project details?"
+                else:
+                    response += "\nWhat specific information would you like to know? I can tell you about the technician, scheduled time, or address."
+
         else:
-            response = "I don't have that information in our current conversation. Would you like me to look up your project details?"
+            # NO PROJECT DATA FALLBACK: Try to be helpful even when we can't find project info
+            logger.info(f"[CONTEXT] No project_data found, offering helpful alternatives")
+            response = "I couldn't find the project details you're asking about. Here's what I can do:\n\n"
+            response += "1. **List your projects** - Just say 'show my projects'\n"
+            response += "2. **Get specific project details** - Say 'details for project' followed by the project number\n"
+            response += "3. **Schedule an appointment** - Say 'schedule' followed by the project\n\n"
+            response += "Which would you like to do?"
 
         timing['total'] = time.time() - start_time
         return {
