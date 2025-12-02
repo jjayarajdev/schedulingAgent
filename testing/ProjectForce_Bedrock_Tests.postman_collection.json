@@ -3256,6 +3256,459 @@
         }
       ],
       "description": "E2E Workflow 20: User makes mistakes and recovers gracefully"
+    },
+    {
+      "name": "9. E2E - Cancel Appointment Flow",
+      "item": [
+        {
+          "name": "21.1 List Scheduled Projects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show scheduled projects\",\n  \"session_id\": \"e2e-cancel-flow\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "E2E Workflow 21: Test cancel appointment functionality"
+          },
+          "response": []
+        },
+        {
+          "name": "21.2 Get Details",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"details for the first one\",\n  \"session_id\": \"e2e-cancel-flow\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Get project details using ordinal reference"
+          },
+          "response": []
+        },
+        {
+          "name": "21.3 Initiate Cancel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"cancel this appointment\",\n  \"session_id\": \"e2e-cancel-flow\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Initiate cancel appointment - tests cancel intent recognition"
+          },
+          "response": []
+        },
+        {
+          "name": "21.4 Confirm Cancel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"yes, confirm cancellation\",\n  \"session_id\": \"e2e-cancel-flow\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Confirm the cancellation"
+          },
+          "response": []
+        },
+        {
+          "name": "21.5 Verify Cancelled",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show my projects\",\n  \"session_id\": \"e2e-cancel-flow\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Verify the project status after cancellation"
+          },
+          "response": []
+        }
+      ],
+      "description": "E2E Workflow 21: Test cancel appointment functionality - List scheduled → Get details → Initiate cancel → Confirm → Verify"
+    },
+    {
+      "name": "10. E2E - Industry Terminology",
+      "item": [
+        {
+          "name": "22.1 Industry List (show my jobs)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"show my jobs\",\n  \"session_id\": \"e2e-terminology\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "E2E Workflow 22: Test industry terminology - 'jobs' should map to list_projects"
+          },
+          "response": []
+        },
+        {
+          "name": "22.2 Category Filter (hardwood installs)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"my hardwood installs\",\n  \"session_id\": \"e2e-terminology\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Test 'hardwood installs' maps to flooring category filter"
+          },
+          "response": []
+        },
+        {
+          "name": "22.3 Schedule Slang (what's on the books)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"what's on the books?\",\n  \"session_id\": \"e2e-terminology\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Test 'on the books' maps to scheduled projects"
+          },
+          "response": []
+        },
+        {
+          "name": "22.4 Booking Phrase (book me in)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is acceptable\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"book me in for next week\",\n  \"session_id\": \"e2e-terminology\",\n  \"pf_token\": \"{{pf_token}}\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": {{pf_user_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/invoke-agent",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoke-agent"
+              ]
+            },
+            "description": "Test 'book me in' maps to schedule action"
+          },
+          "response": []
+        }
+      ],
+      "description": "E2E Workflow 22: Test industry terminology recognition - jobs, installs, on the books, book me in"
     }
   ]
 }
