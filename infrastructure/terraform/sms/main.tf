@@ -408,11 +408,6 @@ output "dynamodb_tables" {
   }
 }
 
-output "phone_number" {
-  description = "Phone number for SMS messaging"
-  value       = local.phone_number
-}
-
 output "test_command" {
   description = "Command to test the SMS processor"
   value       = "python scripts/test-sms-sns-trigger.py --environment ${var.environment} --phone +15555551234 --message 'Test message'"

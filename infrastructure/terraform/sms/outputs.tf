@@ -1,37 +1,9 @@
 # Outputs for AWS End User Messaging SMS Infrastructure
 
 #==============================================================================
-# Phone Number
+# Note: Phone number, opt-out list, and configuration set are managed
+# by deploy_sms_config_setup.sh script, not by Terraform
 #==============================================================================
-
-output "phone_number" {
-  description = "Provisioned toll-free phone number"
-  value       = aws_pinpointsmsvoicev2_phone_number.main.phone_number
-}
-
-output "phone_number_id" {
-  description = "Phone number ID for API operations"
-  value       = aws_pinpointsmsvoicev2_phone_number.main.id
-}
-
-output "phone_number_arn" {
-  description = "Phone number ARN"
-  value       = aws_pinpointsmsvoicev2_phone_number.main.arn
-}
-
-#==============================================================================
-# Opt-Out List
-#==============================================================================
-
-output "opt_out_list_name" {
-  description = "Opt-out list name"
-  value       = aws_pinpointsmsvoicev2_opt_out_list.main.opt_out_list_name
-}
-
-output "opt_out_list_arn" {
-  description = "Opt-out list ARN"
-  value       = aws_pinpointsmsvoicev2_opt_out_list.main.arn
-}
 
 #==============================================================================
 # SNS Topic
@@ -114,23 +86,9 @@ output "lambda_role_arn" {
 # CloudWatch Logs
 #==============================================================================
 
-output "sms_events_log_group" {
-  description = "CloudWatch log group for SMS events"
-  value       = aws_cloudwatch_log_group.sms_events.name
-}
-
 output "lambda_log_group" {
   description = "CloudWatch log group for Lambda function"
   value       = aws_cloudwatch_log_group.lambda_sms_inbound.name
-}
-
-#==============================================================================
-# Configuration
-#==============================================================================
-
-output "configuration_set_name" {
-  description = "SMS configuration set name"
-  value       = aws_pinpointsmsvoicev2_configuration_set.main.name
 }
 
 #==============================================================================
@@ -140,12 +98,10 @@ output "configuration_set_name" {
 output "environment_summary" {
   description = "Summary of deployed SMS infrastructure"
   value = {
-    environment      = var.environment
-    phone_number     = aws_pinpointsmsvoicev2_phone_number.main.phone_number
-    region           = data.aws_region.current.name
-    account_id       = data.aws_caller_identity.current.account_id
-    supervisor_agent = var.supervisor_agent_id
-    tables_deployed  = 4
-    lambda_deployed  = 1
+    environment     = var.environment
+    region          = data.aws_region.current.name
+    account_id      = data.aws_caller_identity.current.account_id
+    tables_deployed = 4
+    lambda_deployed = 1
   }
 }

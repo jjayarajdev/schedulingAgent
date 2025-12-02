@@ -20,20 +20,6 @@
 
 set -e
 
-# Wrapper function to execute AWS CLI commands (cross-platform)
-aws_cmd() {
-    if command -v aws &> /dev/null; then
-        aws "$@"
-    elif [ -f "/c/Program Files/Amazon/AWSCLIV2/aws.exe" ]; then
-        "/c/Program Files/Amazon/AWSCLIV2/aws.exe" "$@"
-    elif [ -f "/c/Program Files (x86)/Amazon/AWSCLIV2/aws.exe" ]; then
-        "/c/Program Files (x86)/Amazon/AWSCLIV2/aws.exe" "$@"
-    else
-        echo "AWS CLI not found" >&2
-        return 1
-    fi
-}
-
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -102,7 +88,7 @@ echo ""
 # Check prerequisites
 log_info "Checking prerequisites..."
 
-if ! aws_cmd sts get-caller-identity &> /dev/null; then
+if ! aws sts get-caller-identity &> /dev/null; then
     log_error "AWS CLI not found or credentials not configured"
     log_error "Please install AWS CLI and run: aws configure"
     exit 1
@@ -114,7 +100,7 @@ if ! command -v terraform &> /dev/null; then
     exit 1
 fi
 
-ACCOUNT_ID=$(aws_cmd sts get-caller-identity --query Account --output text)
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 log_success "Prerequisites verified (Account: $ACCOUNT_ID)"
 echo ""
 
@@ -198,14 +184,14 @@ if [ -z "$PHONE_ID" ]; then
     log_info "Phone ID not provided (set SMS_PHONE_ID environment variable to cleanup phone config)"
 else
     # Check if phone number exists
-    PHONE_EXISTS=$(aws_cmd pinpoint-sms-voice-v2 describe-phone-numbers \
+    PHONE_EXISTS=$(aws pinpoint-sms-voice-v2 describe-phone-numbers \
         --region "$REGION" \
         --phone-number-ids "$PHONE_ID" \
         --query 'PhoneNumbers[0].PhoneNumberId' \
         --output text 2>/dev/null || echo "None")
 
     if [ "$PHONE_EXISTS" != "None" ] && [ -n "$PHONE_EXISTS" ]; then
-        TWO_WAY_ENABLED=$(aws_cmd pinpoint-sms-voice-v2 describe-phone-numbers \
+        TWO_WAY_ENABLED=$(aws pinpoint-sms-voice-v2 describe-phone-numbers \
             --region "$REGION" \
             --phone-number-ids "$PHONE_ID" \
             --query 'PhoneNumbers[0].TwoWayEnabled' \
@@ -214,7 +200,7 @@ else
         if [ "$TWO_WAY_ENABLED" = "True" ]; then
             execute_or_simulate \
                 "Disable two-way messaging on phone $PHONE_ID" \
-                "aws_cmd pinpoint-sms-voice-v2 update-phone-number --phone-number-id '$PHONE_ID' --no-two-way-enabled --region '$REGION' &> /dev/null"
+                "aws pinpoint-sms-voice-v2 update-phone-number --phone-number-id '$PHONE_ID' --no-two-way-enabled --region '$REGION' &> /dev/null"
         else
             log_info "Two-way messaging already disabled or not configured"
         fi
@@ -228,7 +214,7 @@ echo ""
 # Step 2: Delete event destination
 log_info "Step 2/6: Deleting event destination..."
 
-CONFIG_EXISTS=$(aws_cmd pinpoint-sms-voice-v2 describe-configuration-sets \
+CONFIG_EXISTS=$(aws pinpoint-sms-voice-v2 describe-configuration-sets \
     --configuration-set-names "$CONFIG_SET_NAME" \
     --region "$REGION" \
     --query 'ConfigurationSets[0].ConfigurationSetName' \
@@ -237,7 +223,7 @@ CONFIG_EXISTS=$(aws_cmd pinpoint-sms-voice-v2 describe-configuration-sets \
 if [ "$CONFIG_EXISTS" != "None" ] && [ -n "$CONFIG_EXISTS" ]; then
     execute_or_simulate \
         "Delete event destination: $EVENT_DESTINATION_NAME" \
-        "$AWS_CLI pinpoint-sms-voice-v2 delete-event-destination --event-destination-name '$EVENT_DESTINATION_NAME' --configuration-set-name '$CONFIG_SET_NAME' --region '$REGION' &> /dev/null"
+        "aws pinpoint-sms-voice-v2 delete-event-destination --event-destination-name '$EVENT_DESTINATION_NAME' --configuration-set-name '$CONFIG_SET_NAME' --region '$REGION' &> /dev/null"
 else
     log_info "Configuration set not found"
 fi
@@ -250,7 +236,7 @@ log_info "Step 3/6: Deleting configuration set..."
 if [ "$CONFIG_EXISTS" != "None" ] && [ -n "$CONFIG_EXISTS" ]; then
     execute_or_simulate \
         "Delete configuration set: $CONFIG_SET_NAME" \
-        "$AWS_CLI pinpoint-sms-voice-v2 delete-configuration-set --configuration-set-name '$CONFIG_SET_NAME' --region '$REGION' &> /dev/null"
+        "aws pinpoint-sms-voice-v2 delete-configuration-set --configuration-set-name '$CONFIG_SET_NAME' --region '$REGION' &> /dev/null"
 else
     log_info "Configuration set not found"
 fi
@@ -260,18 +246,18 @@ echo ""
 # Step 4: Delete IAM role
 log_info "Step 4/6: Deleting IAM role and policies..."
 
-IAM_ROLE_EXISTS=$(aws_cmd iam get-role --role-name "$IAM_ROLE_NAME" --query 'Role.RoleName' --output text 2>/dev/null || echo "None")
+IAM_ROLE_EXISTS=$(aws iam get-role --role-name "$IAM_ROLE_NAME" --query 'Role.RoleName' --output text 2>/dev/null || echo "None")
 
 if [ "$IAM_ROLE_EXISTS" != "None" ] && [ -n "$IAM_ROLE_EXISTS" ]; then
     # Delete inline policies first
     execute_or_simulate \
         "Delete inline policy from IAM role: $IAM_ROLE_NAME" \
-        "$AWS_CLI iam delete-role-policy --role-name '$IAM_ROLE_NAME' --policy-name 'SNSPublishPolicy' &> /dev/null"
+        "aws iam delete-role-policy --role-name '$IAM_ROLE_NAME' --policy-name 'SNSPublishPolicy' &> /dev/null"
 
     # Delete role
     execute_or_simulate \
         "Delete IAM role: $IAM_ROLE_NAME" \
-        "$AWS_CLI iam delete-role --role-name '$IAM_ROLE_NAME' &> /dev/null"
+        "aws iam delete-role --role-name '$IAM_ROLE_NAME' &> /dev/null"
 else
     log_info "IAM role not found"
 fi
@@ -336,7 +322,7 @@ if [ "$DRY_RUN" = false ]; then
     log_info "Checking if resources still exist..."
 
     # Check Lambda
-    LAMBDA_CHECK=$(aws_cmd lambda get-function --function-name "$LAMBDA_NAME" --region "$REGION" 2>/dev/null || echo "")
+    LAMBDA_CHECK=$(aws lambda get-function --function-name "$LAMBDA_NAME" --region "$REGION" 2>/dev/null || echo "")
     if [ -z "$LAMBDA_CHECK" ]; then
         log_success "✓ Lambda deleted: $LAMBDA_NAME"
     else
@@ -344,7 +330,7 @@ if [ "$DRY_RUN" = false ]; then
     fi
 
     # Check SNS topic
-    SNS_CHECK=$(aws_cmd sns list-topics --region "$REGION" --query "Topics[?contains(TopicArn, '$SNS_TOPIC_NAME')].TopicArn" --output text 2>/dev/null || echo "")
+    SNS_CHECK=$(aws sns list-topics --region "$REGION" --query "Topics[?contains(TopicArn, '$SNS_TOPIC_NAME')].TopicArn" --output text 2>/dev/null || echo "")
     if [ -z "$SNS_CHECK" ]; then
         log_success "✓ SNS topic deleted: $SNS_TOPIC_NAME"
     else
@@ -353,7 +339,7 @@ if [ "$DRY_RUN" = false ]; then
 
     # Check DynamoDB tables
     for table in "$MESSAGES_TABLE" "$SESSIONS_TABLE" "$CONSENT_TABLE" "$OPT_OUT_TABLE"; do
-        TABLE_CHECK=$(aws_cmd dynamodb describe-table --table-name "$table" --region "$REGION" 2>/dev/null || echo "")
+        TABLE_CHECK=$(aws dynamodb describe-table --table-name "$table" --region "$REGION" 2>/dev/null || echo "")
         if [ -z "$TABLE_CHECK" ]; then
             log_success "✓ DynamoDB table deleted: $table"
         else
@@ -362,7 +348,7 @@ if [ "$DRY_RUN" = false ]; then
     done
 
     # Check Configuration Set
-    CONFIG_CHECK=$(aws_cmd pinpoint-sms-voice-v2 describe-configuration-sets --configuration-set-names "$CONFIG_SET_NAME" --region "$REGION" 2>/dev/null || echo "")
+    CONFIG_CHECK=$(aws pinpoint-sms-voice-v2 describe-configuration-sets --configuration-set-names "$CONFIG_SET_NAME" --region "$REGION" 2>/dev/null || echo "")
     if [ -z "$CONFIG_CHECK" ]; then
         log_success "✓ Configuration set deleted: $CONFIG_SET_NAME"
     else
@@ -370,7 +356,7 @@ if [ "$DRY_RUN" = false ]; then
     fi
 
     # Check IAM role
-    IAM_CHECK=$(aws_cmd iam get-role --role-name "$IAM_ROLE_NAME" 2>/dev/null || echo "")
+    IAM_CHECK=$(aws iam get-role --role-name "$IAM_ROLE_NAME" 2>/dev/null || echo "")
     if [ -z "$IAM_CHECK" ]; then
         log_success "✓ IAM role deleted: $IAM_ROLE_NAME"
     else
