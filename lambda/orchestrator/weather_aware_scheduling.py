@@ -192,31 +192,41 @@ def analyze_weather_suitability(
             warnings.append(f"{forecast.get('condition', 'Unknown')} forecasted")
             severity = "high" if bad_cond in ['thunderstorm', 'ice', 'snow'] else "medium"
 
-    # Check precipitation
-    precip = forecast.get('precipitation_probability', 0)
+    # Check precipitation - ensure numeric comparison
+    try:
+        precip = float(forecast.get('precipitation_probability', 0) or 0)
+    except (ValueError, TypeError):
+        precip = 0
     if precip >= criteria['rain_threshold']:
-        warnings.append(f"{precip}% chance of precipitation")
+        warnings.append(f"{int(precip)}% chance of precipitation")
         if precip >= 70:
             severity = "high"
         elif severity == "low":
             severity = "medium"
 
-    # Check temperature
-    max_temp = forecast.get('max_temp_f', 75)
-    min_temp = forecast.get('min_temp_f', 60)
+    # Check temperature - ensure numeric comparison
+    try:
+        max_temp = float(forecast.get('max_temp_f', 75) or 75)
+        min_temp = float(forecast.get('min_temp_f', 60) or 60)
+    except (ValueError, TypeError):
+        max_temp = 75
+        min_temp = 60
 
     if max_temp < criteria['temp_min']:
-        warnings.append(f"Temperature too cold (high of {max_temp}F)")
+        warnings.append(f"Temperature too cold (high of {int(max_temp)}F)")
         severity = "medium" if severity == "low" else severity
 
     if min_temp > criteria['temp_max']:
-        warnings.append(f"Temperature too hot (low of {min_temp}F)")
+        warnings.append(f"Temperature too hot (low of {int(min_temp)}F)")
         severity = "medium" if severity == "low" else severity
 
-    # Check wind (if available)
-    wind = forecast.get('wind_mph', 0)
+    # Check wind (if available) - ensure numeric comparison
+    try:
+        wind = float(forecast.get('wind_mph', 0) or 0)
+    except (ValueError, TypeError):
+        wind = 0
     if wind >= criteria['wind_max']:
-        warnings.append(f"High winds ({wind} mph)")
+        warnings.append(f"High winds ({int(wind)} mph)")
         severity = "high" if wind >= criteria['wind_max'] + 10 else severity
 
     # Determine suitability

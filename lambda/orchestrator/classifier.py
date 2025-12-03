@@ -105,11 +105,45 @@ Respond in JSON format with FOUR fields:
 3. can_call_direct: true/false
 4. params: object with extracted parameters (or null if none)
 
+** INDUSTRY TERMINOLOGY MAPPING **
+
+The user may use contractor/customer industry slang. Map these to the correct actions:
+
+PROJECT SYNONYMS (all refer to projects):
+- "job/jobs" = projects (e.g., "show my jobs" = "show my projects")
+- "install/installs" = projects, often type=Installation
+- "work order/work orders" = projects
+- "ticket/tickets" = projects
+- "booking/bookings" = projects with appointments
+- "service call" = project (often type=Repair or Call Back)
+- "appointment/appointments" = scheduled projects
+
+CATEGORY KEYWORDS (map to category filter):
+- Flooring: "floor", "flooring", "hardwood", "carpet", "LVP", "luxury vinyl", "vinyl", "tile", "laminate"
+- Decking: "deck", "decking", "patio", "composite", "outdoor", "pergola"
+- Kitchen: "cabinet", "cabinets", "countertop", "granite", "quartz", "kitchen reno", "kitchen remodel", "backsplash"
+- Windows: "window", "windows", "door", "doors", "patio door", "sliding door", "entry door", "replacement"
+- Bathroom: "bathroom", "bath", "bathroom remodel"
+
+SCHEDULING PHRASES:
+- "book me in" / "get me booked" / "get me scheduled" = schedule_project
+- "when are they coming?" / "when are they coming out?" = get_project_details (asking for scheduled date)
+- "what's my slot?" / "when's my slot?" = get_project_details or get_time_slots
+- "what's on the calendar?" / "what's on the books?" = list_projects with status=Scheduled
+
+STATUS PHRASES:
+- "ready to go" = status: Ready To Schedule
+- "on the books" / "on the calendar" = status: Scheduled
+- "waiting" / "in the queue" = status: Pending
+- "done" / "finished" = status: Completed
+- "underway" = status: In Progress
+
 ** INTENT CATEGORIES **
 
 **SCHEDULING intent:**
 - Anything related to projects, appointments, dates, times, booking, project notes
-- Examples: "show my projects", "schedule project 123", "available dates", "add a note", "show notes for project 123"
+- Includes industry terms: jobs, installs, work orders, tickets, bookings, service calls
+- Examples: "show my projects", "show my jobs", "list my installs", "schedule project 123", "book me in"
 
 **INFORMATION intent:**
 - Weather queries ONLY
@@ -185,23 +219,34 @@ get_weather:
 
 list_projects:
 - Examples: "show my projects", "list projects", "what projects do I have", "display projects"
-- MUST be pure queries (show/list/get/display)
+- ALSO RECOGNIZES (industry terms): "show my jobs", "list my installs", "what work orders do I have",
+  "my appointments", "my service calls", "show my floor jobs", "my deck work", "what's on the books"
+- MUST be pure queries (show/list/get/display/what)
 - NO action verbs allowed
 - IMPORTANT: Extract filter parameters if mentioned:
-  * status: "scheduled", "unscheduled", "new", "completed", "pending", etc.
+  * status: "scheduled", "unscheduled", "new", "completed", "pending", "on the books", "ready to go", etc.
     - "unscheduled" = projects with status "New" (not yet scheduled)
-    - "scheduled" = projects with status "Scheduled" (have appointment)
-    Examples: "show scheduled projects", "show unscheduled projects", "list new projects", "my completed projects"
-  * category: "Decking", "Flooring", "Kitchen", "Bathroom", etc.
-    Examples: "show decking projects", "my flooring jobs"
-  * projectType: "Call Back", "Installation", "Repair", etc.
-    Examples: "list call back projects", "show installation jobs"
+    - "scheduled" / "on the books" / "on the calendar" = projects with status "Scheduled" (have appointment)
+    - "ready to go" = status "Ready To Schedule"
+    Examples: "show scheduled projects", "what's on the books", "show unscheduled projects", "list new projects"
+  * category: "Decking", "Flooring", "Kitchen", "Bathroom", "Windows", etc.
+    - Flooring keywords: floor, flooring, hardwood, carpet, LVP, vinyl, tile, laminate
+    - Decking keywords: deck, decking, patio, composite, outdoor
+    - Kitchen keywords: cabinet, countertop, granite, quartz, kitchen reno
+    - Windows keywords: window, door, replacement
+    Examples: "show decking projects", "my flooring jobs", "hardwood installs", "my deck jobs", "cabinet work"
+  * projectType: "Call Back", "Installation", "Repair", "Measurement", etc.
+    - "install/installs" often implies type=Installation
+    - "service call" often implies type=Repair or Call Back
+    Examples: "list call back projects", "show installation jobs", "my repair work"
 - Response: intent=scheduling, action=list_projects, can_call_direct=true, params={{status/category/projectType if found, otherwise null}}
 
 get_project_details:
 - Examples: "show details for 7751742", "details for project 123", "show me project 7751742"
+- ALSO RECOGNIZES: "tell me about that job", "details for the install", "what's happening with my floor job?",
+  "when are they coming?", "when are they coming out?", "what's my slot?"
 - MUST be pure queries
-- CRITICAL FOR POSITION REFERENCES: "2nd project", "3rd one", "first project", "details for 2"
+- CRITICAL FOR POSITION REFERENCES: "2nd project", "3rd one", "first project", "details for 2", "that job", "the install"
 - When user uses ordinal/position reference (1st, 2nd, 3rd, first, second, etc):
   * Look in conversation history for project IDs
   * Extract the Nth project ID from that list
@@ -227,6 +272,8 @@ get_time_slots:
 **SCHEDULING WORKFLOW actions (multi-step but using Lambda orchestration):**
 schedule_project:
 - Examples: "schedule it", "book project 123", "I want to schedule", "schedule the last one"
+- ALSO RECOGNIZES: "book me in", "get me booked", "get me scheduled", "set up an appointment",
+  "get this on the calendar", "when can they come out?", "let's get this scheduled"
 - This triggers a multi-step workflow managed by Lambda (not Bedrock)
 - Response: intent=scheduling, action=schedule_project, can_call_direct=true, params={{"project_id":"..."}}
 
@@ -235,12 +282,22 @@ confirm_appointment:
 - Response: intent=scheduling, action=confirm_appointment, can_call_direct=true, params extracted
 
 reschedule_appointment:
-- Examples: "reschedule project 123", "change my appointment"
+- Examples: "reschedule project 123", "change my appointment", "I need to reschedule", "move my appointment"
+- ALSO RECOGNIZES: "move my install", "change the time", "push it back", "can we move it?",
+  "need a different time", "that date doesn't work", "change my booking"
+- This initiates a reschedule flow: cancel existing -> get new slots -> confirm new appointment
 - Response: intent=scheduling, action=reschedule_appointment, can_call_direct=true, params={{"project_id":"..."}}
 
 cancel_appointment:
-- Examples: "cancel my appointment", "cancel project 123"
+- Examples: "cancel my appointment", "cancel project 123", "I need to cancel", "cancel the booking"
+- ALSO RECOGNIZES: "cancel the install", "cancel my job", "I can't make it", "need to cancel",
+  "scratch that appointment", "remove the booking"
 - Response: intent=scheduling, action=cancel_appointment, can_call_direct=true, params={{"project_id":"..."}}
+
+get_rescheduler_slots:
+- Examples: "what dates are available to reschedule?", "show reschedule options", "when can I reschedule to?"
+- Use when user explicitly asks about rescheduling availability (not regular scheduling)
+- Response: intent=scheduling, action=get_rescheduler_slots, can_call_direct=true, params={{"project_id":"...", "date":"YYYY-MM-DD" if mentioned}}
 
 add_note:
 - Examples: "add a note to project 123", "add note"
@@ -315,6 +372,31 @@ For "show scheduled decking projects":
 {{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":{{"status":"Scheduled","category":"Decking"}}}}
 Reasoning: User wants to VIEW with multiple filters -> QUERY with multiple params
 
+Example 13 - Industry term "jobs" (Direct Lambda):
+For "show my jobs":
+{{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":null}}
+Reasoning: "jobs" = "projects" in industry terminology -> list_projects
+
+Example 14 - Industry term with category (Direct Lambda):
+For "my hardwood installs":
+{{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":{{"category":"Flooring"}}}}
+Reasoning: "hardwood" maps to Flooring category, "installs" = projects
+
+Example 15 - Industry scheduling phrase (Direct Lambda):
+For "book me in for next week":
+{{"intent":"scheduling","action":"schedule_project","can_call_direct":true,"params":null}}
+Reasoning: "book me in" = schedule_project trigger
+
+Example 16 - Industry status phrase (Direct Lambda):
+For "what's on the books":
+{{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":{{"status":"Scheduled"}}}}
+Reasoning: "on the books" = scheduled status filter
+
+Example 17 - Deck work query (Direct Lambda):
+For "show my deck jobs":
+{{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":{{"category":"Decking"}}}}
+Reasoning: "deck" maps to Decking category, "jobs" = projects
+
 Remember: Focus on WHAT THE USER WANTS TO ACCOMPLISH, not the exact words they use.
 Weather queries ALWAYS go to "information" intent, NOT "chitchat".
 For filters: Match natural language to field values (e.g., "scheduled" -> "Scheduled", "call back" -> "Call Back").
@@ -326,13 +408,27 @@ Analyze the current user message: "{message}"
 Step 1: Identify the intent (scheduling/information/chitchat)
 Step 2: Identify the action (list_projects/get_project_details/etc)
 Step 3: Extract ANY filters mentioned in the message:
-   - If "scheduled" is mentioned (but NOT "ready to schedule") -> add {{"status":"Scheduled"}} to params
-   - If "ready to schedule" is mentioned -> add {{"status":"Ready To Schedule"}} to params
-   - If "new" is mentioned -> add {{"status":"New"}} to params
-   - If "completed" is mentioned -> add {{"status":"Completed"}} to params
-   - If "decking" is mentioned -> add {{"category":"Decking"}} to params
-   - If "flooring" is mentioned -> add {{"category":"Flooring"}} to params
-   - If "call back" is mentioned -> add {{"projectType":"Call Back"}} to params
+   STATUS FILTERS:
+   - "scheduled" / "on the books" / "on the calendar" -> {{"status":"Scheduled"}}
+   - "ready to schedule" / "ready to go" -> {{"status":"Ready To Schedule"}}
+   - "new" / "unscheduled" -> {{"status":"New"}}
+   - "completed" / "done" / "finished" -> {{"status":"Completed"}}
+   - "pending" / "waiting" / "in the queue" -> {{"status":"Pending"}}
+   - "in progress" / "underway" -> {{"status":"In Progress"}}
+
+   CATEGORY FILTERS (industry terms):
+   - "decking" / "deck" / "patio" / "composite" -> {{"category":"Decking"}}
+   - "flooring" / "floor" / "hardwood" / "carpet" / "LVP" / "tile" / "laminate" / "vinyl" -> {{"category":"Flooring"}}
+   - "kitchen" / "cabinet" / "countertop" / "granite" / "quartz" -> {{"category":"Kitchen"}}
+   - "window" / "windows" / "door" / "doors" / "replacement" -> {{"category":"Windows"}}
+   - "bathroom" / "bath" -> {{"category":"Bathroom"}}
+
+   PROJECT TYPE FILTERS:
+   - "call back" / "callback" -> {{"projectType":"Call Back"}}
+   - "installation" / "install" -> {{"projectType":"Installation"}}
+   - "repair" / "service call" -> {{"projectType":"Repair"}}
+   - "measurement" -> {{"projectType":"Measurement"}}
+
    - If NO filters mentioned -> params should be null
 
 Respond ONLY with the JSON object, nothing else."""

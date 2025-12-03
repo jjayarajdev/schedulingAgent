@@ -335,7 +335,7 @@ def handle_get_weather(params: Dict, config: Dict, auth_headers: Dict) -> Dict[s
             f"&wind_speed_unit=mph"
             f"&precipitation_unit=inch"
             f"&timezone=auto"
-            f"&forecast_days=3"
+            f"&forecast_days=7"
         )
 
         try:
@@ -380,7 +380,7 @@ def handle_get_weather(params: Dict, config: Dict, auth_headers: Dict) -> Dict[s
                     "weather_code": daily["weather_code"][i],
                     "precipitation_probability": daily["precipitation_probability_max"][i]
                 }
-                for i in range(min(3, len(daily.get("time", []))))
+                for i in range(min(7, len(daily.get("time", []))))
             ],
             "context": {
                 "project_id": project_id,

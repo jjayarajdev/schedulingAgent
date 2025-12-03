@@ -119,6 +119,7 @@ claude_history/
 # Documentation - Ignore auto-generated/temporary MD files
 # Keep only MD files referenced in main README.md
 docs/**/*.md
+docs/**/*.pdf
 !docs/ARCHITECTURE.md
 !docs/NEW_ENVIRONMENT_DEPLOYMENT.md
 !docs/README.md

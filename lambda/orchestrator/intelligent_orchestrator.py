@@ -38,6 +38,233 @@ logger = logging.getLogger()
 _bedrock_runtime = None
 
 
+# ============================================================================
+# STAGE-DRIVEN WORKFLOW CONTINUATION
+# These functions check if user is providing what we're waiting for,
+# bypassing context_resolver and classification to avoid "5th Dec" being
+# interpreted as "5th project".
+# ============================================================================
+
+def extract_date_from_message(message: str) -> Optional[str]:
+    """
+    Extract date from message without LLM - simple patterns only.
+    Returns date in YYYY-MM-DD format or None if no date found.
+    """
+    from datetime import datetime
+
+    msg = message.lower().strip()
+
+    # Month name patterns (3-letter abbreviations)
+    months = {
+        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+        'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+    }
+
+    # Pattern 1: "5th Dec", "5 Dec", "5th of December"
+    pattern1 = re.search(r'(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s+)?([a-z]+)', msg)
+    if pattern1:
+        day_str, month_str = pattern1.groups()
+        for m_name, m_num in months.items():
+            if month_str.startswith(m_name):
+                year = datetime.now().year
+                # Handle year rollover (if date is in past, assume next year)
+                proposed_date = datetime(year, m_num, int(day_str))
+                if proposed_date < datetime.now():
+                    year += 1
+                return f"{year}-{m_num:02d}-{int(day_str):02d}"
+
+    # Pattern 2: "Dec 5", "December 5th"
+    pattern2 = re.search(r'([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?', msg)
+    if pattern2:
+        month_str, day_str = pattern2.groups()
+        for m_name, m_num in months.items():
+            if month_str.startswith(m_name):
+                year = datetime.now().year
+                proposed_date = datetime(year, m_num, int(day_str))
+                if proposed_date < datetime.now():
+                    year += 1
+                return f"{year}-{m_num:02d}-{int(day_str):02d}"
+
+    # Pattern 3: YYYY-MM-DD (already formatted)
+    pattern3 = re.search(r'(\d{4})-(\d{2})-(\d{2})', msg)
+    if pattern3:
+        return pattern3.group(0)
+
+    # Pattern 4: MM/DD/YYYY or MM-DD-YYYY
+    pattern4 = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})', msg)
+    if pattern4:
+        month, day, year = pattern4.groups()
+        return f"{year}-{int(month):02d}-{int(day):02d}"
+
+    return None
+
+
+def extract_ordinal_project_reference(message: str) -> Optional[int]:
+    """
+    Extract ordinal project reference from message.
+    Returns project_index (0-based, supports negative) or None if no ordinal reference found.
+
+    Examples:
+        "first project" -> 0
+        "1st project" -> 0
+        "second project" -> 1
+        "2nd project" -> 1
+        "last project" -> -1
+        "details for the last one" -> -1
+    """
+    msg = message.lower().strip()
+
+    # Check if message is about project details/info (not scheduling a date)
+    project_keywords = ['project', 'one', 'details', 'show', 'info', 'about']
+    has_project_context = any(kw in msg for kw in project_keywords)
+
+    if not has_project_context:
+        return None
+
+    # Pattern for "last project", "the last one", "last"
+    if re.search(r'\blast\b', msg):
+        logger.info(f"[ORDINAL] Detected 'last' reference in: {msg}")
+        return -1
+
+    # Pattern for "first project", "the first one", "1st"
+    if re.search(r'\b(first|1st)\b', msg):
+        logger.info(f"[ORDINAL] Detected 'first' reference in: {msg}")
+        return 0
+
+    # Pattern for "second", "2nd"
+    if re.search(r'\b(second|2nd)\b', msg):
+        logger.info(f"[ORDINAL] Detected 'second' reference in: {msg}")
+        return 1
+
+    # Pattern for "third", "3rd"
+    if re.search(r'\b(third|3rd)\b', msg):
+        logger.info(f"[ORDINAL] Detected 'third' reference in: {msg}")
+        return 2
+
+    # Pattern for numeric ordinals: "4th project", "5th one", etc.
+    # IMPORTANT: Only match if followed by project-related word to avoid "5th Dec"
+    numeric_match = re.search(r'\b(\d+)(?:st|nd|rd|th)\s+(?:project|one)\b', msg)
+    if numeric_match:
+        index = int(numeric_match.group(1)) - 1  # Convert to 0-based
+        logger.info(f"[ORDINAL] Detected numeric ordinal {numeric_match.group(1)} -> index {index}")
+        return index
+
+    return None
+
+
+def extract_time_from_message(message: str) -> Optional[str]:
+    """
+    Extract time from message without LLM - simple patterns only.
+    Returns time in HH:MM format (24-hour) or None if no time found.
+    """
+    msg = message.lower().strip()
+
+    # Pattern 1: "2pm", "2 pm", "2:00pm", "2:00 pm"
+    pattern1 = re.search(r'(\d{1,2}):?(\d{2})?\s*(am|pm)', msg)
+    if pattern1:
+        hour = int(pattern1.group(1))
+        minute = int(pattern1.group(2) or 0)
+        ampm = pattern1.group(3)
+
+        if ampm == 'pm' and hour < 12:
+            hour += 12
+        elif ampm == 'am' and hour == 12:
+            hour = 0
+
+        return f"{hour:02d}:{minute:02d}"
+
+    # Pattern 2: "2 o'clock", "2 oclock"
+    pattern2 = re.search(r'(\d{1,2})\s*o\'?clock', msg)
+    if pattern2:
+        hour = int(pattern2.group(1))
+        # Assume PM for business hours (1-6 o'clock)
+        if 1 <= hour <= 6:
+            hour += 12
+        return f"{hour:02d}:00"
+
+    # Pattern 3: 24-hour format "14:00", "14:30"
+    pattern3 = re.search(r'\b(\d{2}):(\d{2})\b', msg)
+    if pattern3:
+        hour, minute = int(pattern3.group(1)), int(pattern3.group(2))
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return f"{hour:02d}:{minute:02d}"
+
+    return None
+
+
+def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[Dict]:
+    """
+    Check if user is providing what we're waiting for (date or time selection).
+    If yes, return the next action directly (skip classification).
+    If no, return None to proceed with normal classification.
+
+    This prevents "5th Dec" from being interpreted as "5th project" when
+    we're awaiting date selection.
+    """
+    if not workflow_state:
+        return None
+
+    current_stage = workflow_state.get('current_stage')
+    context = workflow_state.get('context', {})
+    workflow_type = workflow_state.get('workflow_type', '')
+
+    logger.info(f"[CONTINUATION] Checking continuation: stage={current_stage}, workflow_type={workflow_type}")
+
+    # Stage: Waiting for date selection
+    if current_stage == 'awaiting_date_selection':
+        date = extract_date_from_message(message)
+        if date:
+            logger.info(f"[CONTINUATION] User provided date '{date}' at stage '{current_stage}' - bypassing classification")
+            return {
+                'continue_workflow': True,
+                'action': 'get_time_slots',
+                'params': {
+                    'project_id': context.get('project_id'),
+                    'date': date,
+                    'request_id': context.get('request_id')
+                },
+                'next_stage': 'awaiting_time_selection',
+                'preserve_context': {
+                    'project_id': context.get('project_id'),
+                    'date': date,
+                    'request_id': context.get('request_id'),
+                    'category': context.get('category'),
+                    'city': context.get('city'),
+                    'state': context.get('state'),
+                    # Preserve batch mode context if present
+                    'batch_mode': context.get('batch_mode'),
+                    'project_ids': context.get('project_ids'),
+                    'current_index': context.get('current_index'),
+                    'total_projects': context.get('total_projects'),
+                    'completed_projects': context.get('completed_projects')
+                },
+                'workflow_type': workflow_type
+            }
+
+    # Stage: Waiting for time selection
+    if current_stage == 'awaiting_time_selection':
+        time_val = extract_time_from_message(message)
+        if time_val:
+            logger.info(f"[CONTINUATION] User provided time '{time_val}' at stage '{current_stage}' - bypassing classification")
+            return {
+                'continue_workflow': True,
+                'action': 'confirm_appointment',
+                'params': {
+                    'project_id': context.get('project_id'),
+                    'date': context.get('date'),
+                    'time': time_val,
+                    'request_id': context.get('request_id')
+                },
+                'next_stage': 'complete',
+                'preserve_context': context,
+                'workflow_type': workflow_type
+            }
+
+    # Not a continuation - proceed with normal classification
+    logger.info(f"[CONTINUATION] No continuation match for stage '{current_stage}' - proceeding with classification")
+    return None
+
+
 def format_date_natural(date_str: str) -> str:
     """
     Convert date from "MM-DD-YYYY HH:MM AM/PM" format to natural language.
@@ -225,9 +452,14 @@ def extract_project_data_from_history(conversation_history: List[Dict], classifi
                                 target_proj = p
                                 logger.info(f"[CONTEXT] Matched project by ID: {target_project_id}")
                                 break
-                    elif target_project_index is not None and target_project_index < len(projects_list):
-                        target_proj = projects_list[target_project_index]
-                        logger.info(f"[CONTEXT] Matched project by index: {target_project_index}")
+                    elif target_project_index is not None:
+                        # Support negative indices: -1 = last, -2 = second to last, etc.
+                        try:
+                            target_proj = projects_list[target_project_index]
+                            actual_id = target_proj.get('id', 'unknown')
+                            logger.info(f"[CONTEXT] Matched project by index: {target_project_index} -> project #{actual_id}")
+                        except IndexError:
+                            logger.warning(f"[CONTEXT] Index {target_project_index} out of range for {len(projects_list)} projects")
                     elif len(projects_list) == 1:
                         # Only one project, use it
                         target_proj = projects_list[0]
@@ -524,11 +756,20 @@ ACTION SELECTION GUIDE:
 - "show project X" / "details for project X" / "what is project X" -> get_project_details (just show info, NOT scheduling)
 - User selects a DATE from available dates -> get_time_slots
 - User selects a TIME from time slots -> confirm_appointment
+- "cancel this appointment" / "cancel my appointment" / "cancel this" / "cancel the booking" -> cancel_appointment (extract project_id from context)
+- "reschedule this" / "reschedule my appointment" / "change the date" / "move the appointment" -> reschedule_appointment (extract project_id from context)
 
 IMPORTANT RULES:
 1. Extract ALL entities from the message AND conversation history
-2. If user says "it", "that", "the last one" - look back and find what they're referring to
-3. Handle ordinal references: "last project" = most recent in list, "first project" = first in list, "second project" = 2nd in list, etc.
+2. If user says "it", "that" (pronoun) - look back and find the MOST RECENTLY DISCUSSED project
+3. CRITICAL - Handle ORDINAL references ("first", "last", "2nd", "3rd", etc.):
+   - These refer to the ORIGINAL PROJECT LIST shown at start of conversation, NOT the most recently discussed project
+   - "first project" -> return project_index: 0
+   - "second project" / "2nd project" -> return project_index: 1
+   - "third project" / "3rd project" -> return project_index: 2
+   - "last project" -> return project_index: -1 (ALWAYS use -1, never extract project_id for "last")
+   - NEVER extract project_id directly for ordinal references - ALWAYS use project_index
+   - The system will resolve project_index to the actual project_id from the stored list
 4. If user provides a date/time, extract it even if implicit (e.g., "tomorrow", "2pm")
 5. If in an active workflow, determine what stage we're at
 6. Be intelligent about corrections: "actually, make it the 28th" means update the date
@@ -555,12 +796,28 @@ Scheduling:
     "reasoning": "User selected Nov 27 from available dates."
 }}
 
-Ordinal reference to project:
+Ordinal reference to project (IMPORTANT: use project_index, not project_id):
 {{
     "intent": "scheduling",
     "action": "get_project_details",
-    "entities": {{"project_id": "7751748"}},
-    "reasoning": "User said 'details for the last project'. Looking at conversation, the last project mentioned in the list was #7751748."
+    "entities": {{"project_index": -1}},
+    "reasoning": "User said 'details for the last project'. Using project_index: -1 to get the LAST project from the original list (not the most recently discussed one)."
+}}
+
+First project reference:
+{{
+    "intent": "scheduling",
+    "action": "get_project_details",
+    "entities": {{"project_index": 0}},
+    "reasoning": "User said 'details for the first project'. Using project_index: 0 to get project at position 0 in the list."
+}}
+
+Second project reference:
+{{
+    "intent": "scheduling",
+    "action": "get_project_details",
+    "entities": {{"project_index": 1}},
+    "reasoning": "User said 'show me the 2nd project'. Using project_index: 1 to get project at position 1 in the list."
 }}
 
 Weather (with context extraction):
@@ -611,6 +868,24 @@ Abandon workflow (user cancels):
     "entities": {{}},
     "reasoning": "User said 'never mind' - they want to cancel the current scheduling process."
 }}
+
+Cancel appointment (cancel existing scheduled appointment):
+{{
+    "intent": "scheduling",
+    "action": "cancel_appointment",
+    "entities": {{"project_id": "7751742"}},
+    "reasoning": "User said 'cancel this appointment'. Looking at conversation, user was just viewing project #7751742 which has a scheduled appointment. Extracting project_id from context."
+}}
+
+Reschedule appointment (reschedule existing scheduled appointment):
+{{
+    "intent": "scheduling",
+    "action": "reschedule_appointment",
+    "entities": {{"project_id": "7751742"}},
+    "reasoning": "User said 'reschedule this'. Looking at conversation, user was viewing project #7751742. Extracting project_id from context to start reschedule flow."
+}}
+
+CRITICAL: For cancel_appointment and reschedule_appointment, ALWAYS extract project_id from the conversation context when user says "this", "this appointment", "this one", etc. Look for the most recently discussed project ID (format: #7751742 or Project 7751742 or id: 7751742).
 
 Respond ONLY with valid JSON."""
 
@@ -682,6 +957,8 @@ Determine the next step:
    - For get_available_dates: need project_id (returns dates + request_id)
    - For get_time_slots: need project_id + date + request_id (request_id comes from get_available_dates)
    - For confirm_appointment: need project_id + date + time + request_id
+   - For cancel_appointment: need project_id - extract from conversation context if user says "cancel this appointment" after viewing project details
+   - For reschedule_appointment: need project_id - extract from conversation context if user says "reschedule this" after viewing project details
    - For list_projects: just need customer_id (already available), optional: status filter if user specified (e.g., "Scheduled", "New", "Customer Scheduled", "Ready To Schedule", "Awaiting Confirmation", "Pending Signature")
    - For get_weather: need location as "City, State" format (e.g., "Minneapolis, MN") - combine city and state from entities
 
@@ -737,6 +1014,61 @@ OR if we need more info:
     "workflow_complete": false
 }}
 
+CRITICAL EXAMPLE FOR DATE SELECTION (after showing available dates):
+
+When user says "08th Dec", "December 8", "the 8th", "next Monday", etc. (AFTER seeing available dates for a project):
+This is DATE SELECTION to get time slots - NOT a new scheduling request!
+
+User says "08th Dec" (after seeing available dates for project #7751741 with request_id 12345):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "get_time_slots",
+    "lambda_params": {{
+        "project_id": "7751741",
+        "date": "2025-12-08",
+        "request_id": "12345"
+    }},
+    "update_workflow_state": {{
+        "workflow_type": "schedule_appointment",
+        "current_stage": "awaiting_time_selection",
+        "context": {{
+            "project_id": "7751741",
+            "date": "2025-12-08",
+            "request_id": "12345"
+        }}
+    }},
+    "workflow_complete": false
+}}
+
+User says "December 15th" or "15th" (after seeing available dates for project #7751742):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "get_time_slots",
+    "lambda_params": {{
+        "project_id": "7751742",
+        "date": "2025-12-15",
+        "request_id": "67890"
+    }},
+    "update_workflow_state": {{
+        "workflow_type": "schedule_appointment",
+        "current_stage": "awaiting_time_selection",
+        "context": {{
+            "project_id": "7751742",
+            "date": "2025-12-15",
+            "request_id": "67890"
+        }}
+    }},
+    "workflow_complete": false
+}}
+
+IMPORTANT DATE SELECTION RULES:
+1. When user provides JUST a date after available dates were shown, call get_time_slots (NOT get_available_dates)
+2. Use the project_id and request_id from the CURRENT workflow context (most recently shown project)
+3. Convert user's date format to YYYY-MM-DD (e.g., "08th Dec" -> "2025-12-08", "December 15" -> "2025-12-15")
+4. Do NOT start a new scheduling flow - CONTINUE the existing one!
+5. If "08" could be date or project, and user just saw available dates, it's a DATE selection
+6. The workflow context contains the project_id and request_id you need - use them!
+
 EXAMPLES FOR LIST_PROJECTS:
 
 User says "list my projects" (NO status filter):
@@ -763,6 +1095,31 @@ User asks "what is the weather like" (after viewing project in Minneapolis):
         "location": "Minneapolis, MN"  // Combine city and state - do NOT pass city/state/address/zipcode separately
     }}
 }}
+
+EXAMPLES FOR CANCEL/RESCHEDULE:
+
+User says "cancel this appointment" (after viewing project #7751742 details):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "cancel_appointment",
+    "lambda_params": {{
+        "project_id": "7751742"  // Extract from conversation context - the most recently discussed project
+    }}
+}}
+
+User says "reschedule this" (after viewing project #7751742 details):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "reschedule_appointment",
+    "lambda_params": {{
+        "project_id": "7751742"  // Extract from conversation context - the most recently discussed project
+    }}
+}}
+
+IMPORTANT FOR CONTEXT RESOLUTION:
+- When user refers to "this appointment", "this project", "this one", etc., extract the project_id from the MOST RECENT project mentioned or displayed in the conversation history.
+- Look for project IDs in formats: #7751742, Project 7751742, "id": "7751742"
+- If multiple projects were shown in a list and user says "the second one" or "2nd project", use that position from the list.
 
 Respond ONLY with valid JSON."""
 
@@ -814,6 +1171,212 @@ def orchestrate_intelligent_workflow(
 
     # Load current workflow state (if any)
     workflow_state = state_manager.get_state(session_id)
+
+    # ========================================================================
+    # STEP 0: Check for workflow continuation FIRST (before classification)
+    # This prevents "5th Dec" from being interpreted as "5th project"
+    # ========================================================================
+    continuation = check_workflow_continuation(message, workflow_state)
+    if continuation and continuation.get('continue_workflow'):
+        logger.info(f"[CONTINUATION] Bypassing classification - user provided data at stage '{workflow_state.get('current_stage')}'")
+
+        # Execute the continuation action directly
+        try:
+            action = continuation['action']
+            params = continuation['params']
+            next_stage = continuation['next_stage']
+            preserve_context = continuation.get('preserve_context', {})
+            cont_workflow_type = continuation.get('workflow_type', '')
+
+            # Determine if this is a reschedule workflow
+            is_reschedule = cont_workflow_type == 'reschedule_appointment'
+
+            # Convert action to reschedule-specific if needed
+            if is_reschedule and action in ['get_time_slots']:
+                action = 'get_rescheduler_slots'
+                logger.info(f"[CONTINUATION] Converting {continuation['action']} to {action} for reschedule workflow")
+
+            # Add common params
+            params.update({
+                'customer_id': customer_id,
+                'client_id': client_id,
+                'pf_bearer_token': pf_bearer_token
+            })
+
+            logger.info(f"[CONTINUATION] Calling Lambda: action={action}, params={list(params.keys())}")
+
+            # Call Lambda directly
+            lambda_start = time.time()
+            lambda_response = call_lambda_directly(action, params)
+            timing['lambda_call'] = time.time() - lambda_start
+
+            # Extract response
+            response_data = lambda_response.get('response', {})
+            func_response = response_data.get('functionResponse', {})
+            body_wrapper = func_response.get('responseBody', {})
+            text_body = body_wrapper.get('TEXT', {})
+            body_str = text_body.get('body', '{}')
+
+            if isinstance(body_str, str):
+                response_body = json.loads(body_str)
+            else:
+                response_body = body_str
+
+            # WEATHER ENRICHMENT for time slots (outdoor projects)
+            if action in ['get_time_slots', 'get_rescheduler_slots']:
+                project_category = preserve_context.get('category')
+                if project_category and is_outdoor_project(project_category):
+                    logger.info(f"[CONTINUATION][WEATHER] Outdoor project ({project_category}), enriching time slots with weather")
+                    location = None
+                    city = preserve_context.get('city')
+                    state = preserve_context.get('state')
+                    if city and state:
+                        location = f"{city}, {state}"
+
+                    if location:
+                        try:
+                            weather_params = {
+                                'location': location,
+                                'customer_id': customer_id,
+                                'client_id': client_id,
+                                'pf_bearer_token': pf_bearer_token
+                            }
+                            weather_response = call_lambda_directly('get_weather', weather_params)
+
+                            w_data = weather_response.get('response', {})
+                            w_func = w_data.get('functionResponse', {})
+                            w_body_wrapper = w_func.get('responseBody', {})
+                            w_text = w_body_wrapper.get('TEXT', {})
+                            w_body_str = w_text.get('body', '{}')
+
+                            if isinstance(w_body_str, str):
+                                weather_body = json.loads(w_body_str)
+                            else:
+                                weather_body = w_body_str
+
+                            # Find forecast for the selected date
+                            target_date = params.get('date')
+                            forecast = find_forecast_for_date(weather_body, target_date)
+
+                            if forecast:
+                                suitability = analyze_weather_suitability(forecast, project_category)
+                                response_body['weather_forecast'] = forecast
+                                response_body['weather_suitability'] = suitability
+                                logger.info(f"[CONTINUATION][WEATHER] Added weather for {target_date}: {suitability.get('suitable', 'N/A')}")
+                        except Exception as weather_err:
+                            logger.warning(f"[CONTINUATION][WEATHER] Weather enrichment failed (non-fatal): {weather_err}")
+
+            # Format the response
+            response_text = format_lambda_response(action, response_body, message)
+
+            # Update workflow state
+            if next_stage == 'complete':
+                state_manager.clear_state(session_id)
+                logger.info("[CONTINUATION] Workflow complete, state cleared")
+            else:
+                # Update context with preserved values and selected date
+                new_context = {k: v for k, v in preserve_context.items() if v is not None}
+
+                # Update date in context if this was a date selection
+                if action == 'get_time_slots' or action == 'get_rescheduler_slots':
+                    new_context['date'] = params.get('date')
+                    # Also extract request_id from response for next step
+                    if response_body.get('request_id'):
+                        new_context['request_id'] = response_body['request_id']
+
+                state_manager.save_state(session_id, {
+                    'workflow_type': cont_workflow_type,
+                    'current_stage': next_stage,
+                    'context': new_context
+                })
+                logger.info(f"[CONTINUATION] State updated: stage={next_stage}")
+
+            timing['total'] = time.time() - start_time
+            return {
+                'response': response_text,
+                'intent': 'scheduling',
+                'action': action,
+                'agent_name': 'Intelligent Orchestrator (Stage-Driven Continuation)',
+                'direct_call': True,
+                'timing': timing
+            }
+
+        except Exception as cont_err:
+            logger.error(f"[CONTINUATION] Error executing continuation: {cont_err}")
+            # Fall through to normal classification on error
+
+    # ========================================================================
+    # STEP 0.5: Check for ORDINAL PROJECT REFERENCE (before classification)
+    # This handles "last project", "first project", "2nd project" etc.
+    # by directly resolving the ordinal to a project_id from the stored list
+    # and fetching project details - bypassing Sonnet to avoid misinterpretation
+    # ========================================================================
+    ordinal_index = extract_ordinal_project_reference(message)
+    if ordinal_index is not None:
+        logger.info(f"[ORDINAL] Detected ordinal reference: index={ordinal_index}")
+
+        # Get project_ids from workflow state (stored when projects were listed)
+        project_ids = workflow_state.get('context', {}).get('project_ids', [])
+
+        if project_ids:
+            try:
+                # Resolve ordinal index to project_id (supports negative indices)
+                resolved_project_id = str(project_ids[ordinal_index])
+                logger.info(f"[ORDINAL] Resolved index {ordinal_index} to project_id={resolved_project_id} from list of {len(project_ids)} projects")
+
+                # Call get_project_details directly
+                ordinal_start = time.time()
+                details_response = call_lambda_directly('get_project_details', {
+                    'project_id': resolved_project_id,
+                    'customer_id': customer_id,
+                    'client_id': client_id,
+                    'pf_bearer_token': pf_bearer_token
+                })
+                timing['lambda_call'] = time.time() - ordinal_start
+
+                # Extract response body
+                response_data = details_response.get('response', {})
+                func_response = response_data.get('functionResponse', {})
+                body_wrapper = func_response.get('responseBody', {})
+                text_body = body_wrapper.get('TEXT', {})
+                body_str = text_body.get('body', '{}')
+
+                if isinstance(body_str, str):
+                    response_body = json.loads(body_str)
+                else:
+                    response_body = body_str
+
+                # Generate response using Sonnet for natural language
+                project_data = response_body.get('project', response_body)
+
+                response_gen_start = time.time()
+                response_text = generate_response_with_sonnet(
+                    intent='information',
+                    action='get_project_details',
+                    lambda_response=response_body,
+                    original_message=message,
+                    conversation_history=conversation_history
+                )
+                timing['response_generation'] = time.time() - response_gen_start
+
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': response_text,
+                    'intent': 'information',
+                    'action': 'get_project_details',
+                    'agent_name': 'Intelligent Orchestrator (Ordinal Reference)',
+                    'direct_call': True,
+                    'timing': timing
+                }
+
+            except IndexError:
+                logger.warning(f"[ORDINAL] Index {ordinal_index} out of range for {len(project_ids)} projects")
+                # Fall through to normal classification
+            except Exception as ordinal_err:
+                logger.error(f"[ORDINAL] Error handling ordinal reference: {ordinal_err}")
+                # Fall through to normal classification
+        else:
+            logger.info("[ORDINAL] No project_ids in workflow state, falling through to classification")
 
     # Step 1: Intelligent classification using Sonnet 3.7
     logger.info("[SONNET] Step 1: Intelligent classification with Sonnet 3.7")
@@ -1203,6 +1766,83 @@ def orchestrate_intelligent_workflow(
             logger.warning("[WEATHER] Could not determine location for weather query")
             # Fall through to let normal flow handle it (Sonnet might ask for location)
 
+    # HANDLE CANCEL CONFIRMATION (User says "yes" after seeing project details for cancel)
+    if workflow_state and workflow_state.get('current_stage') == 'awaiting_cancel_confirmation':
+        user_lower = message.lower().strip()
+        affirmative_responses = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'confirm', 'do it', 'go ahead', 'proceed', 'cancel it', 'yes please']
+        negative_responses = ['no', 'nope', 'nah', 'cancel', 'never mind', 'nevermind', 'stop', 'dont', "don't", 'abort']
+
+        if any(affirm in user_lower for affirm in affirmative_responses):
+            logger.info("[CANCEL] User confirmed cancellation, proceeding with actual cancel")
+            cancel_context = workflow_state.get('context', {})
+            project_id = cancel_context.get('project_id')
+
+            if project_id:
+                try:
+                    # Call cancel_appointment with confirmed=True
+                    cancel_response = call_lambda_directly('cancel_appointment', {
+                        'project_id': project_id,
+                        'confirmed': 'true',  # This triggers the actual cancellation
+                        'customer_id': customer_id,
+                        'client_id': client_id,
+                        'pf_bearer_token': pf_bearer_token
+                    })
+
+                    # Extract response
+                    cancel_data = cancel_response.get('response', {})
+                    cancel_func = cancel_data.get('functionResponse', {})
+                    cancel_body_wrapper = cancel_func.get('responseBody', {})
+                    cancel_text = cancel_body_wrapper.get('TEXT', {})
+                    cancel_body_str = cancel_text.get('body', '{}')
+
+                    if isinstance(cancel_body_str, str):
+                        cancel_body = json.loads(cancel_body_str)
+                    else:
+                        cancel_body = cancel_body_str
+
+                    # Format response
+                    formatted_cancel = format_lambda_response('cancel_appointment', cancel_body, message)
+
+                    # Clear workflow state
+                    state_manager.clear_state(session_id)
+                    logger.info("[CANCEL] Cancellation complete, workflow state cleared")
+
+                    timing['total'] = time.time() - start_time
+                    return {
+                        'response': formatted_cancel,
+                        'intent': 'scheduling',
+                        'action': 'cancel_appointment',
+                        'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                        'direct_call': True,
+                        'timing': timing
+                    }
+
+                except Exception as cancel_err:
+                    logger.error(f"[CANCEL] Cancellation failed: {cancel_err}")
+                    state_manager.clear_state(session_id)
+                    timing['total'] = time.time() - start_time
+                    return {
+                        'response': f"I encountered an error while cancelling the appointment: {str(cancel_err)}. Please try again.",
+                        'intent': 'scheduling',
+                        'action': 'cancel_appointment',
+                        'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                        'direct_call': True,
+                        'timing': timing
+                    }
+
+        elif any(neg in user_lower for neg in negative_responses):
+            logger.info("[CANCEL] User declined cancellation")
+            state_manager.clear_state(session_id)
+            timing['total'] = time.time() - start_time
+            return {
+                'response': "No problem, I've cancelled the cancellation request. Your appointment remains scheduled. Is there anything else I can help with?",
+                'intent': 'scheduling',
+                'action': 'cancel_appointment_declined',
+                'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                'direct_call': True,
+                'timing': timing
+            }
+
     # HANDLE WORKFLOW DEFERRAL/ABANDONMENT
     if classification.get('action') in ['defer_workflow', 'abandon_workflow']:
         action_type = classification.get('action')
@@ -1342,11 +1982,87 @@ def orchestrate_intelligent_workflow(
         lambda_action = decision['lambda_action']
         lambda_params = decision['lambda_params']
 
-        # VOICE-SPECIFIC: Resolve project_index to project_id from workflow state
-        # Chat handles this via context_resolver.py, but voice path needs it here
-        if channel == 'voice' and 'project_index' in lambda_params and 'project_id' not in lambda_params:
+        # WORKFLOW SWITCH DETECTION (Hybrid Approach):
+        # Clear stale workflow state when user starts a DIFFERENT workflow type
+        # This prevents issues like "schedule 3rd project" using reschedule API
+        # because old workflow_state had workflow_type='reschedule_appointment'
+        WORKFLOW_ACTIONS = {
+            'schedule_appointment': 'schedule_appointment',
+            'get_available_dates': 'schedule_appointment',
+            'get_time_slots': 'schedule_appointment',
+            'reschedule_appointment': 'reschedule_appointment',
+            'cancel_appointment': 'cancel_appointment',
+            'list_projects': 'project_listing',
+        }
+
+        new_workflow_type = None
+        classified_action = classification.get('action', '')
+
+        # Determine what workflow the NEW action belongs to
+        if classified_action in WORKFLOW_ACTIONS:
+            new_workflow_type = WORKFLOW_ACTIONS[classified_action]
+
+        # Also check if classification explicitly specifies workflow_type
+        if classification.get('workflow_type'):
+            new_workflow_type = classification.get('workflow_type')
+
+        # If we have an old workflow state AND the new action is for a DIFFERENT workflow, clear it
+        if workflow_state and new_workflow_type:
+            old_workflow_type = workflow_state.get('workflow_type')
+
+            # Check if user is working with a different project (same workflow type but new project)
+            # IMPORTANT: Only consider this a "new project" if the classification explicitly has workflow_type
+            # (indicating a new workflow request like "schedule project X"), NOT for continuations like date selection
+            new_project_id = classification.get('entities', {}).get('project_id')
+            old_project_id = workflow_state.get('context', {}).get('project_id')
+
+            # Only treat as new project if:
+            # 1. Classification explicitly has workflow_type (new workflow, not continuation)
+            # 2. AND the project IDs are different
+            has_explicit_workflow = classification.get('workflow_type') is not None
+            is_new_project = (has_explicit_workflow and
+                              new_project_id and
+                              old_project_id and
+                              str(new_project_id) != str(old_project_id))
+
+            if old_workflow_type and old_workflow_type != new_workflow_type:
+                logger.info(f"[WORKFLOW SWITCH] Clearing old '{old_workflow_type}' state - user starting new '{new_workflow_type}' workflow")
+                state_manager.clear_state(session_id)
+                workflow_state = None  # Reset local variable too
+            elif is_new_project and new_workflow_type in ['schedule_appointment', 'reschedule_appointment', 'cancel_appointment']:
+                logger.info(f"[WORKFLOW SWITCH] New project {new_project_id} detected (explicit workflow_type={classification.get('workflow_type')}) - clearing old workflow state for project {old_project_id}")
+                state_manager.clear_state(session_id)
+                workflow_state = None
+
+        # RESCHEDULE: Use get_rescheduler_slots instead of get_available_dates/get_time_slots
+        # For already scheduled projects, the normal slots API returns "Job already requested"
+        # NOTE: Only use classification's workflow_type, NOT old workflow_state, to avoid
+        # confusing a new "schedule" request with an old "reschedule" workflow
+        is_reschedule = (
+            classification.get('action') == 'reschedule_appointment' or
+            classification.get('workflow_type') == 'reschedule_appointment'
+        )
+
+        # Also check workflow state but ONLY if classification doesn't have workflow_type
+        # (meaning we're continuing an existing workflow, not starting a new one)
+        if not classification.get('workflow_type') and workflow_state:
+            is_reschedule = is_reschedule or workflow_state.get('workflow_type') == 'reschedule_appointment'
+
+        if is_reschedule and lambda_action in ['get_available_dates', 'get_time_slots']:
+            logger.info(f"[RESCHEDULE] Converting {lambda_action} to get_rescheduler_slots for reschedule workflow")
+            lambda_action = 'get_rescheduler_slots'
+            decision['lambda_action'] = 'get_rescheduler_slots'
+            # Use the selected date if provided, otherwise use today's date
+            from datetime import datetime
+            if 'date' not in lambda_params:
+                lambda_params['date'] = datetime.now().strftime("%Y-%m-%d")
+
+        # RESOLVE project_index to project_id for ALL channels
+        # This handles ordinal references like "last project", "first project", "3rd project"
+        # project_index can be negative (-1 = last, -2 = second to last, etc.)
+        if 'project_index' in lambda_params and 'project_id' not in lambda_params:
             project_index = lambda_params.get('project_index')
-            logger.info(f"[VOICE] Resolving project_index={project_index} to project_id")
+            logger.info(f"[ORDINAL] Resolving project_index={project_index} to project_id")
 
             resolved = False
 
@@ -1355,20 +2071,21 @@ def orchestrate_intelligent_workflow(
                 context = workflow_state.get('context', {})
                 project_ids = context.get('project_ids', [])
                 if project_ids and isinstance(project_ids, list):
-                    logger.info(f"[VOICE] Found {len(project_ids)} project_ids in workflow_state")
-                    # project_index is 0-based (third project = index 2)
-                    if isinstance(project_index, int) and 0 <= project_index < len(project_ids):
-                        resolved_id = str(project_ids[project_index])
-                        lambda_params['project_id'] = resolved_id
-                        del lambda_params['project_index']
-                        logger.info(f"[VOICE] Resolved from workflow_state: project_index={project_index} -> project_id={resolved_id}")
-                        resolved = True
-                    else:
-                        logger.warning(f"[VOICE] project_index={project_index} out of range (have {len(project_ids)} projects)")
+                    logger.info(f"[ORDINAL] Found {len(project_ids)} project_ids in workflow_state")
+                    # project_index supports negative indices: -1 = last, -2 = second to last, etc.
+                    if isinstance(project_index, int):
+                        try:
+                            resolved_id = str(project_ids[project_index])
+                            lambda_params['project_id'] = resolved_id
+                            del lambda_params['project_index']
+                            logger.info(f"[ORDINAL] Resolved from workflow_state: project_index={project_index} -> project_id={resolved_id}")
+                            resolved = True
+                        except IndexError:
+                            logger.warning(f"[ORDINAL] project_index={project_index} out of range (have {len(project_ids)} projects)")
 
             if not resolved:
                 # AUTO-FETCH: If no project_ids in workflow_state, fetch them first
-                logger.info(f"[VOICE] No project_ids in workflow_state - auto-fetching projects first")
+                logger.info(f"[ORDINAL] No project_ids in workflow_state - auto-fetching projects first")
                 try:
                     # Call list_projects to get all projects
                     list_response = call_lambda_directly('list_projects', {
@@ -1395,7 +2112,7 @@ def orchestrate_intelligent_workflow(
                         fetched_ids = [str(p.get('id', '')) for p in fetched_projects if p.get('id')]
 
                         if fetched_ids:
-                            logger.info(f"[VOICE] Auto-fetched {len(fetched_ids)} project_ids: {fetched_ids[:5]}...")
+                            logger.info(f"[ORDINAL] Auto-fetched {len(fetched_ids)} project_ids: {fetched_ids[:5]}...")
 
                             # Save to workflow_state for future queries
                             if not workflow_state:
@@ -1411,21 +2128,22 @@ def orchestrate_intelligent_workflow(
                                 'context': {'project_ids': fetched_ids}
                             })
 
-                            # Now resolve project_index
-                            if isinstance(project_index, int) and 0 <= project_index < len(fetched_ids):
-                                resolved_id = str(fetched_ids[project_index])
-                                lambda_params['project_id'] = resolved_id
-                                del lambda_params['project_index']
-                                logger.info(f"[VOICE] Auto-resolved: project_index={project_index} -> project_id={resolved_id}")
-                                resolved = True
-                            else:
-                                logger.warning(f"[VOICE] project_index={project_index} out of range (fetched {len(fetched_ids)} projects)")
+                            # Now resolve project_index (supports negative indices)
+                            if isinstance(project_index, int):
+                                try:
+                                    resolved_id = str(fetched_ids[project_index])
+                                    lambda_params['project_id'] = resolved_id
+                                    del lambda_params['project_index']
+                                    logger.info(f"[ORDINAL] Auto-resolved: project_index={project_index} -> project_id={resolved_id}")
+                                    resolved = True
+                                except IndexError:
+                                    logger.warning(f"[ORDINAL] project_index={project_index} out of range (fetched {len(fetched_ids)} projects)")
 
                 except Exception as fetch_err:
-                    logger.error(f"[VOICE] Auto-fetch projects failed: {fetch_err}")
+                    logger.error(f"[ORDINAL] Auto-fetch projects failed: {fetch_err}")
 
                 if not resolved:
-                    logger.warning(f"[VOICE] Could not resolve project_index={project_index}")
+                    logger.warning(f"[ORDINAL] Could not resolve project_index={project_index}")
 
         # Add auth params
         lambda_params.update({
@@ -1644,47 +2362,51 @@ def orchestrate_intelligent_workflow(
                             else:
                                 weather_body = weather_body_str
 
-                            # Find forecast for target date
-                            forecast = find_forecast_for_date(weather_body, target_date)
+                            # Get forecast for target date + 5 days
+                            # Simple: just show the weather info to the customer
+                            weather_info = weather_body.get('weather', {})
+                            forecast_list = weather_info.get('forecast', [])
 
-                            if forecast:
-                                # Analyze weather suitability
-                                assessment = analyze_weather_suitability(
-                                    forecast,
-                                    project_category,
-                                    target_date
-                                )
+                            if forecast_list:
+                                # Find forecasts starting from target date
+                                from datetime import datetime, timedelta
+                                try:
+                                    target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+                                    end_dt = target_dt + timedelta(days=5)
 
-                                if not assessment['suitable']:
-                                    # Inject weather warning into response
-                                    logger.info(f"[WARNING]  Weather warning: {assessment['severity']} - {', '.join(assessment['warnings'])}")
-                                    response_body['weather_warning'] = assessment
+                                    # Filter forecast to target date + 5 days
+                                    relevant_forecast = []
+                                    for day in forecast_list:
+                                        day_date = day.get('date', '')
+                                        if day_date:
+                                            try:
+                                                day_dt = datetime.strptime(day_date, "%Y-%m-%d")
+                                                if target_dt <= day_dt <= end_dt:
+                                                    relevant_forecast.append({
+                                                        'date': day_date,
+                                                        'condition': day.get('condition', 'Unknown'),
+                                                        'high_temp': day.get('max_temp_f'),
+                                                        'low_temp': day.get('min_temp_f'),
+                                                        'precipitation': day.get('precipitation_probability', 0)
+                                                    })
+                                            except:
+                                                continue
 
-                                    # Find better dates with suitable weather
-                                    # Get available dates from workflow state or fetch them
-                                    available_dates = workflow_state.get('context', {}).get('available_dates', [])
-                                    if not available_dates and 'available_dates' in response_body:
-                                        available_dates = response_body.get('available_dates', [])
+                                    if relevant_forecast:
+                                        logger.info(f"[WEATHER] Showing {len(relevant_forecast)} days forecast starting {target_date}")
+                                        response_body['weather_forecast'] = relevant_forecast
 
-                                    if available_dates:
-                                        logger.info(f"[SEARCH] Looking for better weather dates from {len(available_dates)} available dates")
-                                        better_dates = find_better_weather_dates(
-                                            weather_body,
-                                            available_dates,
-                                            project_category,
-                                            limit=3
-                                        )
-
-                                        if better_dates:
-                                            logger.info(f"[FOUND] Found {len(better_dates)} better weather dates")
-                                            response_body['better_dates'] = better_dates
-                                        else:
-                                            logger.info("No better weather dates found in available dates")
-                                            # Flag that ALL available dates have weather concerns
-                                            response_body['all_dates_have_weather_concerns'] = True
-                                            response_body['weather_warning']['all_dates_affected'] = True
-                                else:
-                                    logger.info(f"[OK] Weather looks good for {project_category}")
+                                        # Also include current conditions if available
+                                        current = weather_info.get('current', {})
+                                        if current:
+                                            response_body['current_weather'] = {
+                                                'temp': current.get('temp_f'),
+                                                'condition': current.get('condition', 'Unknown'),
+                                                'humidity': current.get('humidity'),
+                                                'wind': current.get('wind_mph')
+                                            }
+                                except Exception as e:
+                                    logger.warning(f"Error processing forecast dates: {e}")
 
                         except Exception as weather_error:
                             logger.warning(f"Weather check failed (non-fatal): {weather_error}")
@@ -1696,6 +2418,36 @@ def orchestrate_intelligent_workflow(
             formatted_response = format_lambda_response(lambda_action, response_body, message)
 
             response_text = formatted_response
+
+            # HANDLE CANCEL CONFIRMATION WORKFLOW: When cancel returns awaiting_confirmation, set workflow state
+            if lambda_action == 'cancel_appointment' and response_body.get('status') == 'awaiting_confirmation':
+                project_id = response_body.get('project_id') or lambda_params.get('project_id')
+                project = response_body.get('project', {})
+
+                logger.info(f"[CANCEL] Setting awaiting_cancel_confirmation workflow state for project {project_id}")
+
+                # Save workflow state for confirmation step
+                state_manager.save_state(session_id, {
+                    'workflow_type': 'cancel_appointment',
+                    'current_stage': 'awaiting_cancel_confirmation',
+                    'context': {
+                        'project_id': project_id,
+                        'project': project,
+                        'category': project.get('category', ''),
+                        'scheduled_date': project.get('scheduledDate', '')
+                    },
+                    'conversation_summary': f"User wants to cancel project #{project_id}, awaiting confirmation"
+                })
+
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': response_text,
+                    'intent': 'scheduling',
+                    'action': 'cancel_appointment',
+                    'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                    'direct_call': True,
+                    'timing': timing
+                }
 
             # CRITICAL: Extract request_id from Lambda response and add to workflow state
             # request_id is required for get_time_slots and confirm_appointment

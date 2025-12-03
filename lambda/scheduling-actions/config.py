@@ -40,8 +40,9 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", "scheduling-agent-sessions-dev")
 
 # Feature flags (for gradual rollout)
-ENABLE_REAL_CONFIRM = os.getenv("ENABLE_REAL_CONFIRM", "false").lower() == "true"
-ENABLE_REAL_CANCEL = os.getenv("ENABLE_REAL_CANCEL", "false").lower() == "true"
+# Changed defaults to "true" to enable real API calls for cancel/reschedule
+ENABLE_REAL_CONFIRM = os.getenv("ENABLE_REAL_CONFIRM", "true").lower() == "true"
+ENABLE_REAL_CANCEL = os.getenv("ENABLE_REAL_CANCEL", "true").lower() == "true"
 
 def get_api_config(client_id: str = None, env: str = None) -> Dict[str, str]:
     """

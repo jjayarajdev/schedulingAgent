@@ -328,7 +328,9 @@ def _resolve_position_references(message: str, context: Dict) -> tuple:
         (r'\b(?:the\s+)?third(?:\s+one| project| item)?\b', 2),
         (r'\b(?:the\s+)?fourth(?:\s+one| project| item)?\b', 3),
         (r'\b(?:the\s+)?fifth(?:\s+one| project| item)?\b', 4),
-        (r'\b(?:the\s+)?(\d+)(?:st|nd|rd|th)(?:\s+one| project| item)?\b', None),  # "3rd one"
+        # IMPORTANT: Only match numeric ordinals when followed by "one", "project", or "item"
+        # This prevents "5th Dec" (date) from being interpreted as "5th project"
+        (r'\b(?:the\s+)?(\d+)(?:st|nd|rd|th)\s+(?:one|project|item)\b', None),  # "3rd one", "3rd project"
         (r'\b(?:the\s+)?last(?:\s+one| project| item)?\b', -1)
     ]
 

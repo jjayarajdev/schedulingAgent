@@ -1358,10 +1358,17 @@
                                 const dayShort = dateObj.dayShort || '';
                                 const monthDay = dateObj.monthDay || dateStr;
                                 const dayName = dateObj.dayName || '';
+                                // Weather info
+                                const weatherIcon = dateObj.weatherIndicator || dateObj.indicator || '';
+                                const highTemp = dateObj.highTemp || dateObj.high_temp || '';
+                                const weatherSuitable = dateObj.weatherSuitable !== false;
+                                const borderColor = weatherSuitable ? '#0066cc' : '#ff9800';
 
-                                html += `<button style="background: white; border: 2px solid #0066cc; border-radius: 10px; padding: 14px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,102,204,0.15); text-align: center;" onmouseover="this.style.background='linear-gradient(135deg, #0066cc 0%, #0052a3 100%)'; this.style.color='white'; this.style.transform='translateY(-3px)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.3)';" onmouseout="this.style.background='white'; this.style.color='#333'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 6px rgba(0,102,204,0.15)';">
+                                html += `<button style="background: white; border: 2px solid ${borderColor}; border-radius: 10px; padding: 14px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,102,204,0.15); text-align: center;" onmouseover="this.style.background='linear-gradient(135deg, #0066cc 0%, #0052a3 100%)'; this.style.color='white'; this.style.transform='translateY(-3px)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.3)';" onmouseout="this.style.background='white'; this.style.color='#333'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 6px rgba(0,102,204,0.15)';">
+                                    ${weatherIcon ? `<div style="font-size: 18px; margin-bottom: 4px;">${weatherIcon}</div>` : ''}
                                     ${dayShort ? `<div style="font-size: 13px; font-weight: 600; color: #6c757d; margin-bottom: 6px;">${dayShort}</div>` : ''}
                                     <div style="font-size: 16px; font-weight: 700; color: #0066cc;">${monthDay}</div>
+                                    ${highTemp ? `<div style="font-size: 11px; color: #666; margin-top: 4px;">${highTemp}°F</div>` : ''}
                                     ${dayName && !dayShort ? `<div style="font-size: 12px; color: #6c757d; margin-top: 4px;">${dayName}</div>` : ''}
                                 </button>`;
                             });
@@ -1680,6 +1687,96 @@
                                 <ul style="margin: 0; padding-left: 20px; color: #555; font-size: 14px; line-height: 1.8;">
                                     ${data.nextSteps.map(step => `<li>${step}</li>`).join('')}
                                 </ul>
+                            </div>`;
+                        }
+
+                        // Display conversational text FIRST, then structured data
+                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="padding: 12px 0; font-size: 15px; line-height: 1.7; color: #333;">
+    ${textBeforeJson.replace(/\n/g, '<br>')}
+</div>` : '';
+                        return conversationalHtml + html;
+                    }
+
+                    // Handle error responses (status: "error")
+                    if (data.status === 'error' && data.message) {
+                        let html = `
+                            <div style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; padding: 20px 28px; border-radius: 12px; margin: 20px 0; box-shadow: 0 4px 16px rgba(220,53,69,0.3);">
+                                <div style="display: flex; align-items: center; gap: 14px;">
+                                    <span style="font-size: 32px;">&#10060;</span>
+                                    <div>
+                                        <div style="font-size: 18px; font-weight: 700;">Unable to Complete Request</div>
+                                        <div style="font-size: 14px; opacity: 0.9; margin-top: 6px;">${data.message.replace('[ERROR] ', '')}</div>
+                                    </div>
+                                </div>
+                            </div>`;
+
+                        // Add details if available
+                        if (data.details && typeof data.details === 'object') {
+                            html += `
+                            <div style="background: #fff5f5; border: 1px solid #f5c6cb; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+                                <div style="font-size: 14px; font-weight: 600; color: #721c24; margin-bottom: 8px;">Details:</div>
+                                <div style="font-size: 13px; color: #856404; font-family: monospace;">
+                                    ${data.details.error ? `<div>Error: ${data.details.error}</div>` : ''}
+                                    ${data.details.action ? `<div>Action: ${data.details.action}</div>` : ''}
+                                </div>
+                            </div>`;
+                        }
+
+                        // Display conversational text FIRST, then structured data
+                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="padding: 12px 0; font-size: 15px; line-height: 1.7; color: #333;">
+    ${textBeforeJson.replace(/\n/g, '<br>')}
+</div>` : '';
+                        return conversationalHtml + html;
+                    }
+
+                    // Handle success responses (status: "success")
+                    if (data.status === 'success' && data.message) {
+                        let html = `
+                            <div style="background: linear-gradient(135deg, #28a745 0%, #218838 100%); color: white; padding: 20px 28px; border-radius: 12px; margin: 20px 0; box-shadow: 0 4px 16px rgba(40,167,69,0.3);">
+                                <div style="display: flex; align-items: center; gap: 14px;">
+                                    <span style="font-size: 32px;">&#10003;</span>
+                                    <div>
+                                        <div style="font-size: 18px; font-weight: 700;">${data.message}</div>
+                                    </div>
+                                </div>
+                            </div>`;
+
+                        // Add cancellation data if available
+                        if (data.cancellation_data && typeof data.cancellation_data === 'object') {
+                            html += `
+                            <div style="background: #f8f9fa; border: 1px solid #e1e4e8; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+                                <div style="font-size: 14px; font-weight: 600; color: #333; margin-bottom: 8px;">Confirmation:</div>
+                                <div style="font-size: 13px; color: #495057;">
+                                    ${data.project_id ? `<div>Project: #${data.project_id}</div>` : ''}
+                                    ${data.cancellation_data.request_id ? `<div>Request ID: ${data.cancellation_data.request_id}</div>` : ''}
+                                </div>
+                            </div>`;
+                        }
+
+                        // Display conversational text FIRST, then structured data
+                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="padding: 12px 0; font-size: 15px; line-height: 1.7; color: #333;">
+    ${textBeforeJson.replace(/\n/g, '<br>')}
+</div>` : '';
+                        return conversationalHtml + html;
+                    }
+
+                    // Handle cannot_cancel status
+                    if (data.status === 'cannot_cancel' && data.message) {
+                        let html = `
+                            <div style="background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%); color: #212529; padding: 20px 28px; border-radius: 12px; margin: 20px 0; box-shadow: 0 4px 16px rgba(255,193,7,0.3);">
+                                <div style="display: flex; align-items: center; gap: 14px;">
+                                    <span style="font-size: 32px;">&#9888;</span>
+                                    <div>
+                                        <div style="font-size: 18px; font-weight: 700;">Cannot Cancel Appointment</div>
+                                        <div style="font-size: 14px; margin-top: 6px;">${data.message}</div>
+                                    </div>
+                                </div>
+                            </div>`;
+
+                        if (data.project_id) {
+                            html += `
+                            <div style="background: #fff3cd; border: 1px solid #ffc107; padding: 12px 16px; border-radius: 8px; margin: 20px 0; font-size: 14px; color: #856404;">
+                                Project: #${data.project_id}
                             </div>`;
                         }
 
