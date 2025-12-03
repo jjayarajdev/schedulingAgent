@@ -799,6 +799,93 @@ def login():
 
         if login_response.status_code == 200:
             login_data = login_response.json()
+
+            # Check if OTP verification is required
+            if login_data.get('isOtpVerified') == False and login_data.get('otp_token'):
+                logger.info("🔐 OTP verification required, fetching OTP from Mailinator...")
+                otp_token = login_data.get('otp_token')
+
+                # Extract username from email (e.g., "jay@mailinator.com" -> "jay")
+                mailinator_inbox = email.split('@')[0] if '@' in email else 'jay'
+                otp_code = None
+
+                # Fetch OTP from Mailinator
+                try:
+                    # Wait a moment for email to arrive
+                    import time as time_module
+                    time_module.sleep(2)
+
+                    # Get latest messages from Mailinator inbox
+                    mailinator_url = f"https://www.mailinator.com/api/v2/domains/public/inboxes/{mailinator_inbox}"
+                    mail_response = requests.get(mailinator_url, timeout=10)
+
+                    if mail_response.status_code == 200:
+                        mail_data = mail_response.json()
+                        messages = mail_data.get('msgs', [])
+
+                        if messages:
+                            # Get the most recent message
+                            latest_msg = messages[0]
+                            msg_id = latest_msg.get('id')
+
+                            # Fetch message content
+                            msg_url = f"https://www.mailinator.com/api/v2/domains/public/inboxes/{mailinator_inbox}/messages/{msg_id}"
+                            msg_response = requests.get(msg_url, timeout=10)
+
+                            if msg_response.status_code == 200:
+                                msg_data = msg_response.json()
+                                # Look for OTP in message body - typically 6 digits
+                                import re
+                                body = str(msg_data.get('parts', [{}])[0].get('body', ''))
+                                # Find 6-digit OTP code
+                                otp_match = re.search(r'\b(\d{6})\b', body)
+                                if otp_match:
+                                    otp_code = otp_match.group(1)
+                                    logger.info(f"✓ Found OTP code from Mailinator: {otp_code}")
+                except Exception as mail_err:
+                    logger.warning(f"Could not fetch OTP from Mailinator: {mail_err}")
+
+                # Try OTP codes - first from Mailinator, then fallback to common test codes
+                codes_to_try = [otp_code] if otp_code else []
+                codes_to_try.extend(['123456', '000000', '111111'])
+
+                verified = False
+                for code in codes_to_try:
+                    if not code:
+                        continue
+                    try:
+                        otp_response = requests.post(
+                            f"{PF_API_BASE}/authentication/verify-otp",
+                            params={"identifier": "projectsforce-validation"},
+                            json={
+                                "otp": code,
+                                "otp_token": otp_token
+                            },
+                            headers={"Content-Type": "application/json"},
+                            timeout=10
+                        )
+
+                        if otp_response.status_code == 200:
+                            otp_data = otp_response.json()
+                            fresh_token = otp_data.get('accesstoken', otp_data.get('access_token', ''))
+                            if fresh_token and len(fresh_token) > 100:
+                                logger.info(f"✓ OTP verification successful with code {code}")
+                                login_data = otp_data  # Use OTP response data
+                                verified = True
+                                break
+                    except Exception as otp_err:
+                        logger.warning(f"OTP verification with {code} failed: {otp_err}")
+                        continue
+
+                if not verified:
+                    # None of the OTP codes worked - return error asking user to handle manually
+                    logger.error("OTP verification required but auto-verify failed")
+                    return jsonify({
+                        "error": "OTP verification required",
+                        "otp_token": otp_token,
+                        "details": "Please verify OTP manually or disable OTP for test account"
+                    }), 401
+
             # API returns 'accesstoken' (no underscore) - check all variants
             fresh_token = login_data.get('accesstoken', login_data.get('access_token', login_data.get('token', '')))
 

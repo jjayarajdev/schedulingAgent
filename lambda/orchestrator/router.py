@@ -223,6 +223,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             dates_with_weather = response_body.get('dates_with_weather', [])
             has_weather_concerns = response_body.get('has_weather_concerns', False)
 
+            # DEBUG: Log what we received
+            logger.info(f"[DEBUG] dates_with_weather count: {len(dates_with_weather)}")
+            if dates_with_weather:
+                logger.info(f"[DEBUG] First date with weather: {dates_with_weather[0]}")
+
             # Format dates for UI rendering
             from datetime import datetime
             formatted_dates = []
@@ -277,22 +282,100 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 "dateCount": len(formatted_dates)
             }
 
-            # Add weather summary if there are concerns
-            if has_weather_concerns:
-                suitable_count = response_body.get('suitable_date_count', 0)
-                unsuitable_count = response_body.get('unsuitable_date_count', 0)
-                result['weatherSummary'] = {
-                    "hasWeatherConcerns": True,
-                    "suitableDateCount": suitable_count,
-                    "unsuitableDateCount": unsuitable_count,
-                    "message": f"{unsuitable_count} of {len(formatted_dates)} dates have weather concerns"
-                }
-                logger.info(f"[WARNING] Weather summary: {unsuitable_count}/{len(formatted_dates)} dates have concerns")
+            # Note: Weather forecast will be shown when user selects a specific date
+            # This keeps the available dates response simple and focused
 
             # Generate conversational response using Claude
             conversational = generate_conversational_response(action, user_message, result)
 
             # Return both conversational and structured
+            return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
+
+        elif action == 'get_rescheduler_slots':
+            # Handle rescheduler slots response
+            # This API returns both dates and slots - check which we're showing
+            slots = response_body.get('slots', [])
+            dates = response_body.get('available_dates', [])
+
+            # Check for error/timeout status
+            if response_body.get('status') == 'cannot_reschedule':
+                return response_body.get('message', 'Cannot reschedule this project.')
+            if response_body.get('status') == 'timeout':
+                return response_body.get('message', 'The rescheduling service is temporarily unavailable. Please try again in a few minutes.')
+
+            # If we have time slots, show them (user selected a date)
+            if slots:
+                formatted_slots = []
+                grouped_slots = {"morning": [], "afternoon": [], "evening": []}
+
+                for slot in slots:
+                    try:
+                        time_parts = slot.split(":")
+                        hour = int(time_parts[0])
+                        minute = int(time_parts[1])
+
+                        am_pm = "AM" if hour < 12 else "PM"
+                        display_hour = hour if hour <= 12 else hour - 12
+                        display_hour = 12 if display_hour == 0 else display_hour
+
+                        formatted_time = f"{display_hour}:{minute:02d} {am_pm}"
+                        formatted_slots.append(formatted_time)
+
+                        if hour < 12:
+                            grouped_slots["morning"].append(formatted_time)
+                        elif hour < 17:
+                            grouped_slots["afternoon"].append(formatted_time)
+                        else:
+                            grouped_slots["evening"].append(formatted_time)
+                    except:
+                        formatted_slots.append(slot)
+
+                result = {
+                    "message": "Available time slots for rescheduling:",
+                    "timeSlots": formatted_slots,
+                    "timeSlotsGrouped": {
+                        "morning": {"label": "Morning", "slots": grouped_slots["morning"], "count": len(grouped_slots["morning"])},
+                        "afternoon": {"label": "Afternoon", "slots": grouped_slots["afternoon"], "count": len(grouped_slots["afternoon"])},
+                        "evening": {"label": "Evening", "slots": grouped_slots["evening"], "count": len(grouped_slots["evening"])}
+                    },
+                    "slotCount": len(formatted_slots),
+                    "isReschedule": True
+                }
+
+                conversational = generate_conversational_response('get_time_slots', user_message, result)
+                return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Otherwise show available dates
+            if not dates:
+                return "No available dates found for rescheduling this project."
+
+            # Format dates - same format as schedule flow
+            formatted_dates = []
+            for date_str in dates:
+                try:
+                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                    formatted_dates.append({
+                        "date": date_str,
+                        "dayShort": date_obj.strftime("%a"),
+                        "monthDay": date_obj.strftime("%b %d"),
+                        "dayName": date_obj.strftime("%A"),
+                        "formatted": date_obj.strftime("%A, %B %d, %Y")
+                    })
+                except:
+                    formatted_dates.append({"date": date_str, "monthDay": date_str})
+
+            # Sort dates chronologically
+            formatted_dates.sort(key=lambda x: x.get('date', ''))
+
+            result = {
+                "message": "Available dates for rescheduling:",
+                "dates": formatted_dates,
+                "dateCount": len(formatted_dates),
+                "isReschedule": True
+            }
+
+            # Generate conversational response
+            conversational = generate_conversational_response(action, user_message, result)
             return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action in ['get_time_slots', 'get_available_timeslots']:
@@ -342,20 +425,13 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 "slotCount": len(formatted_slots)
             }
 
-            # Add weather warning if present (from weather-aware scheduling)
-            if 'weather_warning' in response_body:
-                result['weatherWarning'] = response_body['weather_warning']
-                logger.info(f"[WARNING]  Including weather warning in time slots response")
+            # Add weather forecast if present (for selected date + 5 days)
+            if 'weather_forecast' in response_body:
+                result['weatherForecast'] = response_body['weather_forecast']
+                logger.info(f"[WEATHER] Including {len(response_body['weather_forecast'])} day forecast")
 
-                # Add better dates suggestions if available
-                if 'better_dates' in response_body:
-                    result['betterDates'] = response_body['better_dates']
-                    logger.info(f"[FOUND] Including {len(response_body['better_dates'])} better weather dates in response")
-
-                # Flag when ALL available dates have weather concerns
-                if response_body.get('all_dates_have_weather_concerns'):
-                    result['allDatesHaveWeatherConcerns'] = True
-                    logger.info(f"[WARNING]  All available dates have weather concerns")
+            if 'current_weather' in response_body:
+                result['currentWeather'] = response_body['current_weather']
 
             # Generate conversational response using Claude
             conversational = generate_conversational_response(action, user_message, result)
@@ -450,6 +526,35 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     "details": response_body
                 }
                 return f"```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Check if awaiting confirmation (two-step cancel flow)
+            if response_body.get('status') == 'awaiting_confirmation':
+                project = response_body.get('project', {})
+                project_id = response_body.get('project_id', '')
+                scheduled_date = project.get('scheduledDate', 'N/A')
+                category = project.get('category', 'Project')
+                project_type = project.get('projectType', '')
+
+                result = {
+                    "message": f"Found project #{project_id} ({category} - {project_type}) scheduled for {scheduled_date}. Please confirm you want to cancel this appointment.",
+                    "status": "awaiting_confirmation",
+                    "project": project,
+                    "requires_confirmation": True
+                }
+
+                # Generate conversational response asking for confirmation
+                conversational = generate_conversational_response(action, user_message, result)
+                return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Check for "cannot cancel" status
+            if response_body.get('status') in ['cannot_cancel', 'not_scheduled']:
+                result = {
+                    "message": response_body.get('message', 'Cannot cancel this appointment'),
+                    "status": response_body.get('status'),
+                    "details": response_body
+                }
+                conversational = generate_conversational_response(action, user_message, result)
+                return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
             # Format successful cancellation confirmation response
             result = {
@@ -676,6 +781,26 @@ def handle_welcome_request(
         projects = response_body.get('projects', [])
         logger.info(f"[INFO] Found {len(projects)} projects for user")
 
+        # STORE project_ids in workflow_state for ordinal reference resolution
+        # This enables "first project", "last project", "3rd project" to work correctly
+        if projects:
+            project_ids = [str(p.get('id', '')) for p in projects if p.get('id')]
+            if project_ids:
+                try:
+                    from workflow_state import get_state_manager
+                    state_manager = get_state_manager()
+                    state_manager.save_state(session_id, {
+                        'workflow_type': 'project_list',
+                        'current_stage': 'projects_displayed',
+                        'context': {
+                            'project_ids': project_ids,
+                            'project_count': len(project_ids)
+                        }
+                    })
+                    logger.info(f"[WORKFLOW] Stored {len(project_ids)} project_ids in workflow state for ordinal refs")
+                except Exception as e:
+                    logger.warning(f"[WORKFLOW] Failed to store project_ids in workflow state: {e}")
+
         # Generate personalized greeting
         greeting = generate_welcome_greeting(user_name, projects)
 
@@ -756,6 +881,7 @@ def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         'get_time_slots': config.scheduling_lambda,
         'get_available_timeslots': config.scheduling_lambda,  # Alias for get_time_slots
         'get_business_hours': config.scheduling_lambda,
+        'get_rescheduler_slots': config.scheduling_lambda,  # For reschedule workflow
         # Scheduling write actions
         'confirm_appointment': config.scheduling_lambda,
         'reschedule_appointment': config.scheduling_lambda,
@@ -904,6 +1030,38 @@ def route_request(
 
     timing = {}
     start_time = time.time()
+
+    # ========================================================================
+    # ORDINAL PROJECT REFERENCES: Route directly to intelligent orchestrator
+    # Skip context_resolver for "first project", "last project", "2nd project" etc.
+    # to use workflow_state's project_ids list instead of conversation history parsing
+    # ========================================================================
+    from intelligent_orchestrator import extract_ordinal_project_reference
+
+    ordinal_index = extract_ordinal_project_reference(message)
+    if ordinal_index is not None:
+        logger.info(f"[ORDINAL] Detected ordinal reference in message: index={ordinal_index}")
+        logger.info(f"[ORDINAL] Routing directly to intelligent orchestrator (skip context_resolver)")
+
+        try:
+            from intelligent_orchestrator import orchestrate_intelligent_workflow
+
+            intelligent_result = orchestrate_intelligent_workflow(
+                message=message,  # Pass ORIGINAL message (not resolved)
+                session_id=session_id,
+                customer_id=customer_id,
+                client_id=client_id,
+                pf_bearer_token=pf_bearer_token,
+                conversation_history=conversation_history,
+                channel=channel
+            )
+
+            timing['total'] = time.time() - start_time
+            return intelligent_result
+
+        except Exception as e:
+            logger.error(f"[ORDINAL] Error in ordinal routing: {e}")
+            # Fall through to normal flow on error
 
     # CONTEXT RESOLUTION: Resolve references like "last project", "it", "that" BEFORE classification
     resolved_context = resolve_context_references(message, conversation_history)
