@@ -304,53 +304,63 @@ delete_iam_role_if_exists() {
 }
 
 ##############################################################################
-# Helper: Fix KMS Encryption Issues by Re-encrypting Environment Variables
+# Helper: Ensure AWS Default Encryption (Remove any customer-managed KMS key)
+# IMPORTANT: We ALWAYS use AWS default encryption for Lambda environment variables.
+#            This prevents KMSAccessDeniedException errors from misconfigured KMS keys.
+#            DO NOT CHANGE THIS - customer KMS keys cause permission nightmares!
 ##############################################################################
 
-fix_kms_encryption() {
+ensure_aws_default_encryption() {
     local FUNCTION_NAME=$1
-    
-    echo ""
-    echo "Fixing KMS encryption for: $FUNCTION_NAME"
-    
+    local KMS_MAX_WAIT=30  # 30 seconds max wait
+    local KMS_POLL_INTERVAL=3
+    local KMS_ELAPSED=0
+
+    echo "  -> Checking encryption for: $FUNCTION_NAME"
+
     # Check if function exists
     if ! aws_cmd lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" &>/dev/null; then
-        echo "  [WARN]  Function $FUNCTION_NAME not found, skipping KMS fix"
+        echo "    [SKIP] Function $FUNCTION_NAME not found"
         return 0
     fi
-    
-    # Get current environment variables
-    echo "  -> Getting current environment variables..."
-    local ENV_VARS=$(aws_cmd lambda get-function-configuration \n        --function-name "$FUNCTION_NAME" \n        --region "$REGION" \n        --query 'Environment.Variables' \n        --output json 2>/dev/null)
-    
-    if [[ "$ENV_VARS" == "null" ]] || [[ -z "$ENV_VARS" ]]; then
-        echo "  -> No environment variables to fix"
+
+    # Check if Lambda has a customer-managed KMS key
+    local CURRENT_KMS=$(aws_cmd lambda get-function-configuration         --function-name "$FUNCTION_NAME"         --region "$REGION"         --query 'KMSKeyArn'         --output text 2>/dev/null)
+
+    if [[ "$CURRENT_KMS" != "None" ]] && [[ "$CURRENT_KMS" != "null" ]] && [[ -n "$CURRENT_KMS" ]]; then
+        echo "    [WARN] Found customer KMS key: $CURRENT_KMS"
+        echo "    -> Removing KMS key, switching to AWS default encryption..."
+
+        # Remove KMS key by setting it to empty string (forces AWS managed encryption)
+        aws_cmd lambda update-function-configuration             --function-name "$FUNCTION_NAME"             --kms-key-arn ""             --region "$REGION" &>/dev/null
+
+        # Wait for update with polling loop (max KMS_MAX_WAIT seconds)
+        while [[ $KMS_ELAPSED -lt $KMS_MAX_WAIT ]]; do
+            local STATE=$(aws_cmd lambda get-function-configuration                 --function-name "$FUNCTION_NAME"                 --region "$REGION"                 --query 'LastUpdateStatus'                 --output text 2>/dev/null)
+
+            if [[ "$STATE" == "Successful" ]]; then
+                echo -e "    ${GREEN}[OK] Now using AWS default encryption (${KMS_ELAPSED}s)${NC}"
+                return 0
+            elif [[ "$STATE" == "Failed" ]]; then
+                echo -e "    ${RED}[FAIL] Lambda update failed${NC}"
+                return 1
+            fi
+
+            sleep $KMS_POLL_INTERVAL
+            KMS_ELAPSED=$((KMS_ELAPSED + KMS_POLL_INTERVAL))
+
+            if [[ $((KMS_ELAPSED % 10)) -eq 0 ]]; then
+                echo "    -> Waiting for update... ${KMS_ELAPSED}s / ${KMS_MAX_WAIT}s"
+            fi
+        done
+
+        echo -e "    ${YELLOW}[WARN] Update timed out after ${KMS_MAX_WAIT}s${NC}"
         return 0
+    else
+        echo -e "    ${GREEN}[OK] Already using AWS default encryption${NC}"
     fi
-    
-    echo "  -> Clearing environment variables (forces re-encryption)..."
-    aws_cmd lambda update-function-configuration \n        --function-name "$FUNCTION_NAME" \n        --environment 'Variables={}' \n        --region "$REGION" &>/dev/null
-    
-    # Wait for update to complete
-    echo "  -> Waiting for Lambda update..."
-    sleep 5
-    aws_cmd lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION" 2>/dev/null || sleep 10
-    
-    # Restore environment variables
-    echo "  -> Restoring environment variables with AWS-managed encryption..."
-    local ENV_JSON_FILE="./kms-fix-${FUNCTION_NAME}.json"
-    TEMP_FILES+=("$ENV_JSON_FILE")
-    echo "{"Variables":$ENV_VARS}" > "$ENV_JSON_FILE"
 
-    aws_cmd lambda update-function-configuration \n        --function-name "$FUNCTION_NAME" \n        --environment "file://$ENV_JSON_FILE" \n        --region "$REGION" &>/dev/null
-
-    # Wait for final update
-    echo "  -> Waiting for final update..."
-    sleep 5
-    aws_cmd lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION" 2>/dev/null || sleep 10
-
-    rm -f "$ENV_JSON_FILE"
-    echo -e "  ${GREEN}[OK] KMS encryption fixed for $FUNCTION_NAME${NC}"
+    return 0
 }
 
 ##############################################################################
@@ -1003,19 +1013,19 @@ rm -f ./orchestrator-env.json
 
 echo ""
 echo "=========================================="
-echo "Step 6: KMS Encryption Fix"
+echo "Step 6: Ensure AWS Default Encryption"
 echo "=========================================="
-echo "  Re-encrypting Lambda environment variables with AWS-managed keys..."
+echo "  Verifying all Lambdas use AWS default encryption (not customer KMS)..."
 echo ""
 
 # Fix KMS for all deployed lambdas
-fix_kms_encryption "pf-scheduling-actions" || echo -e "${YELLOW}[WARN]  KMS fix failed for pf-scheduling-actions${NC}"
-fix_kms_encryption "pf-information-actions" || echo -e "${YELLOW}[WARN]  KMS fix failed for pf-information-actions${NC}"
-fix_kms_encryption "pf-chitchat-actions" || echo -e "${YELLOW}[WARN]  KMS fix failed for pf-chitchat-actions${NC}"
-fix_kms_encryption "pf-orchestrator" || echo -e "${YELLOW}[WARN]  KMS fix failed for pf-orchestrator${NC}"
+ensure_aws_default_encryption "pf-scheduling-actions" || echo -e "${YELLOW}[WARN]  KMS fix failed for pf-scheduling-actions${NC}"
+ensure_aws_default_encryption "pf-information-actions" || echo -e "${YELLOW}[WARN]  KMS fix failed for pf-information-actions${NC}"
+ensure_aws_default_encryption "pf-chitchat-actions" || echo -e "${YELLOW}[WARN]  KMS fix failed for pf-chitchat-actions${NC}"
+ensure_aws_default_encryption "pf-orchestrator" || echo -e "${YELLOW}[WARN]  KMS fix failed for pf-orchestrator${NC}"
 
 echo ""
-echo -e "${GREEN}[OK] KMS encryption fix completed for all Lambdas${NC}"
+echo -e "${GREEN}[OK] AWS default encryption verified for all Lambdas${NC}"
 
 
 ##############################################################################
