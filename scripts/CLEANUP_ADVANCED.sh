@@ -177,8 +177,6 @@ LAMBDAS=(
     "pf-scheduling-actions"
     "pf-information-actions"
     "pf-chitchat-actions"
-    "pf-lex-fulfillment-dev"
-    "pf-voice-bedrock-bridge-dev"
 )
 
 for LAMBDA in "${LAMBDAS[@]}"; do
@@ -205,8 +203,6 @@ IAM_ROLES=(
     "pf-scheduling-actions-role"
     "pf-information-actions-role"
     "pf-chitchat-actions-role"
-    "pf-lex-fulfillment-role"
-    "pf-voice-bridge-role"
 )
 
 delete_iam_role() {
