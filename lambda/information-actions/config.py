@@ -19,7 +19,7 @@ except ImportError:
 # ============================================================================
 
 # Core Configuration
-USE_MOCK_API = os.getenv("USE_MOCK_API", "true").lower() == "true"
+USE_MOCK_API = os.getenv("USE_MOCK_API", "false").lower() == "true"
 ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
 
 # Real ProjectForce API endpoints (CX Portal API)

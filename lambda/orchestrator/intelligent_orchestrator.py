@@ -2155,9 +2155,9 @@ def orchestrate_intelligent_workflow(
         logger.info(f"[LAMBDA] Calling Lambda: {lambda_action} with params: {lambda_params}")
         lambda_start = time.time()
 
-        # AUTO-FETCH PROJECT DETAILS: When starting scheduling workflow, fetch project info first
+        # AUTO-FETCH PROJECT DETAILS: When starting scheduling/rescheduling workflow, fetch project info first
         # This ensures we have category, city, state for weather-aware scheduling
-        if lambda_action == 'get_available_dates':
+        if lambda_action in ['get_available_dates', 'get_rescheduler_slots']:
             project_id = lambda_params.get('project_id')
             existing_category = workflow_state.get('context', {}).get('category') if workflow_state else None
 
