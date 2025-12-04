@@ -308,6 +308,16 @@ delete_iam_role_if_exists() {
 # IMPORTANT: We ALWAYS use AWS default encryption for Lambda environment variables.
 #            This prevents KMSAccessDeniedException errors from misconfigured KMS keys.
 #            DO NOT CHANGE THIS - customer KMS keys cause permission nightmares!
+#
+# Strategy:
+#   1. During Lambda update (deploy_lambda): --kms-key-arn "" is set to remove KMS
+#   2. After all deployments (Step 6): This function verifies all Lambdas are clean
+#
+# Why this matters:
+#   When Lambda A invokes Lambda B, if B has a custom KMS key for env vars,
+#   A's role needs kms:Decrypt permission on that key. The AWS-managed Lambda
+#   key (alias/aws/lambda) has restrictive policies that only allow access
+#   via the Lambda service itself, causing KMSAccessDeniedException errors.
 ##############################################################################
 
 ensure_aws_default_encryption() {
@@ -769,19 +779,22 @@ EOF
         sleep 5
         aws_cmd lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION" 2>/dev/null || true
 
-        # Update configuration
+        # Update configuration AND ensure AWS default encryption (no custom KMS key)
+        # Setting --kms-key-arn "" removes any custom KMS key, forcing AWS default encryption
         aws_cmd lambda update-function-configuration \
             --function-name "$FUNCTION_NAME" \
             --timeout "$TIMEOUT" \
             --memory-size "$MEMORY" \
+            --kms-key-arn "" \
             --region "$REGION" &>/dev/null
 
-        echo -e "  ${GREEN}[OK] Lambda updated: $FUNCTION_NAME${NC}"
+        echo -e "  ${GREEN}[OK] Lambda updated: $FUNCTION_NAME (using AWS default encryption)${NC}"
     else
         echo "  -> Creating new function..."
 
         # Dynamic polling for Lambda creation (max 5 minutes)
         # IAM role assumability can take time to propagate to Lambda service
+        # Also retry on transient AWS errors (ServiceException, throttling, etc.)
         local CREATE_MAX_WAIT=300  # 5 minutes
         local CREATE_POLL_INTERVAL=10
         local CREATE_ELAPSED=0
@@ -821,11 +834,32 @@ EOF
                 if [[ $((CREATE_ELAPSED % 30)) -eq 0 ]]; then
                     echo "  -> Still waiting for IAM-Lambda consistency... ${CREATE_ELAPSED}s / ${CREATE_MAX_WAIT}s"
                 fi
+            elif echo "$CREATE_OUTPUT" | grep -qE "(ServiceException|ThrottlingException|TooManyRequestsException|ResourceConflictException|InvalidParameterValueException.*temporarily)"; then
+                # Transient AWS errors - retry with backoff
+                echo "  [WAIT] Transient AWS error, retrying..."
+                echo "         Error: $(echo "$CREATE_OUTPUT" | head -1)"
+                sleep $CREATE_POLL_INTERVAL
+                CREATE_ELAPSED=$((CREATE_ELAPSED + CREATE_POLL_INTERVAL))
+            elif echo "$CREATE_OUTPUT" | grep -q "ResourceConflictException"; then
+                # Function exists in a weird state - try to delete and recreate
+                echo "  [WARN] Function exists in conflicting state, attempting cleanup..."
+                aws_cmd lambda delete-function --function-name "$FUNCTION_NAME" --region "$REGION" 2>/dev/null || true
+                sleep 5
+                CREATE_ELAPSED=$((CREATE_ELAPSED + 5))
             else
-                # Some other error - show it and fail
-                echo "$CREATE_OUTPUT"
-                echo -e "  ${RED}[FAIL] Lambda creation FAILED: $FUNCTION_NAME${NC}"
-                return 1
+                # Unknown error - log it, wait, and retry a few times before failing
+                echo "  [WARN] Unexpected error (will retry): $(echo "$CREATE_OUTPUT" | head -2)"
+
+                # After 3 unexpected errors, fail
+                if [[ $ATTEMPT -ge 5 ]]; then
+                    echo "$CREATE_OUTPUT"
+                    echo -e "  ${RED}[FAIL] Lambda creation FAILED after $ATTEMPT attempts: $FUNCTION_NAME${NC}"
+                    return 1
+                fi
+
+                # Otherwise, wait and retry
+                sleep $CREATE_POLL_INTERVAL
+                CREATE_ELAPSED=$((CREATE_ELAPSED + CREATE_POLL_INTERVAL))
             fi
         done
 
@@ -1021,22 +1055,24 @@ fi
 rm -f ./orchestrator-env.json
 
 ##############################################################################
-##############################################################################
-# Step 6: Fix KMS Encryption (Prevents KMSAccessDeniedException)
+# Step 6: Verify AWS Default Encryption (Prevents KMSAccessDeniedException)
+# Note: The deploy_lambda function already sets --kms-key-arn "" during updates.
+#       This step is a safety verification to catch any edge cases.
 ##############################################################################
 
 echo ""
 echo "=========================================="
-echo "Step 6: Ensure AWS Default Encryption"
+echo "Step 6: Verify AWS Default Encryption"
 echo "=========================================="
-echo "  Verifying all Lambdas use AWS default encryption (not customer KMS)..."
+echo "  Verifying all Lambdas use AWS default encryption (no custom KMS keys)..."
+echo "  This prevents KMSAccessDeniedException when Lambdas invoke each other."
 echo ""
 
-# Fix KMS for all deployed lambdas
-ensure_aws_default_encryption "pf-scheduling-actions" || echo -e "${YELLOW}[WARN]  KMS fix failed for pf-scheduling-actions${NC}"
-ensure_aws_default_encryption "pf-information-actions" || echo -e "${YELLOW}[WARN]  KMS fix failed for pf-information-actions${NC}"
-ensure_aws_default_encryption "pf-chitchat-actions" || echo -e "${YELLOW}[WARN]  KMS fix failed for pf-chitchat-actions${NC}"
-ensure_aws_default_encryption "pf-orchestrator" || echo -e "${YELLOW}[WARN]  KMS fix failed for pf-orchestrator${NC}"
+# Verify and fix KMS for all deployed lambdas (safety net)
+ensure_aws_default_encryption "pf-scheduling-actions" || echo -e "${YELLOW}[WARN]  KMS verification failed for pf-scheduling-actions${NC}"
+ensure_aws_default_encryption "pf-information-actions" || echo -e "${YELLOW}[WARN]  KMS verification failed for pf-information-actions${NC}"
+ensure_aws_default_encryption "pf-chitchat-actions" || echo -e "${YELLOW}[WARN]  KMS verification failed for pf-chitchat-actions${NC}"
+ensure_aws_default_encryption "pf-orchestrator" || echo -e "${YELLOW}[WARN]  KMS verification failed for pf-orchestrator${NC}"
 
 echo ""
 echo -e "${GREEN}[OK] AWS default encryption verified for all Lambdas${NC}"
