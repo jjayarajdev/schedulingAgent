@@ -830,6 +830,9 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
     data = response.get("data", {})
     raw_dates = data.get("dates", [])
 
+    # Sort dates chronologically
+    raw_dates = sorted(raw_dates)
+
     # Format dates with day names and group by week for better UI rendering
     formatted_dates = []
     for date_str in raw_dates:
@@ -1125,57 +1128,49 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
 def handle_reschedule_appointment(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
     """
     Action: reschedule_appointment
-    Reschedules an existing appointment using the full API flow:
-    1. Cancel/initiate reschedule via cancel-reschedule endpoint
-    2. Get available rescheduler slots (if no date provided)
-    3. Confirm new appointment with the new date/time
+    Reschedules an existing appointment using a TWO-STEP interactive flow:
+
+    Step 1 (Initial request - no fetch_dates param):
+        - Cancel/initiate reschedule via cancel-reschedule endpoint
+        - Return status "cancelled_awaiting_dates" to prompt user to continue
+
+    Step 2 (User confirms - fetch_dates=True):
+        - Get available dates using regular get_available_dates (faster than get-rescheduler-slots)
+        - Return available dates for selection
+
+    Step 3 (User selects date/time):
+        - Confirm new appointment with the new date/time
 
     Required Parameters: project_id, client_id
-    Optional Parameters: new_date, new_time, request_id (if not provided, returns available dates)
+    Optional Parameters:
+        - fetch_dates: True to fetch available dates (Step 2)
+        - new_date, new_time, request_id: For confirming appointment (Step 3)
     """
     project_id = params.get('project_id')
     client_id = params.get('client_id')
+    customer_id = params.get('customer_id')
     new_date = params.get('new_date')
     new_time = params.get('new_time')
     request_id = params.get('request_id')
+    # fetch_dates comes as string "True" from Lambda event params
+    fetch_dates_raw = params.get('fetch_dates', False)
+    fetch_dates = fetch_dates_raw in [True, 'True', 'true', '1']
 
     if not project_id:
         raise ValueError("Missing required parameter: project_id")
 
-    logger.info(f"Rescheduling appointment for project {project_id}")
+    logger.info(f"Rescheduling appointment for project {project_id}, fetch_dates={fetch_dates}")
 
-    # Step 1: Cancel/initiate reschedule via the cancel-reschedule endpoint
-    try:
-        cancel_result = handle_cancel_appointment(
-            {
-                'project_id': project_id,
-                'client_id': client_id
-            },
-            config,
-            auth_headers
-        )
-        logger.info(f"Cancel/reschedule initiation result: {cancel_result}")
-
-        # If project cannot be cancelled, return early
-        if cancel_result.get('status') == 'cannot_cancel':
-            return {
-                "action": "reschedule_appointment",
-                "project_id": project_id,
-                "status": "cannot_reschedule",
-                "message": cancel_result.get('message', 'Cannot reschedule this project'),
-                "mock_mode": USE_MOCK_API
-            }
-    except Exception as e:
-        logger.warning(f"Cancel/reschedule initiation failed: {str(e)}")
-        cancel_result = {"status": "error", "message": str(e)}
-
-    # Step 2: If no date provided, get available rescheduler slots
-    if not new_date:
+    # STEP 2: If fetch_dates=True, user confirmed - now get available dates
+    # Use regular get_available_dates which is faster than get-rescheduler-slots
+    if fetch_dates and not new_date:
+        logger.info(f"[RESCHEDULE STEP 2] Fetching available dates for project {project_id}")
         from datetime import datetime
         today = datetime.now().strftime('%Y-%m-%d')
 
         try:
-            slots_result = handle_get_rescheduler_slots(
+            # Use regular get_available_dates - it's faster and project is now in "Ready To Schedule" status
+            dates_result = handle_get_available_dates(
                 {
                     'project_id': project_id,
                     'client_id': client_id,
@@ -1184,20 +1179,23 @@ def handle_reschedule_appointment(params: Dict, config: Dict, auth_headers: Dict
                 config,
                 auth_headers
             )
-            logger.info(f"Rescheduler slots result: {slots_result}")
+            logger.info(f"Available dates result: {dates_result}")
+
+            # Sort dates chronologically
+            available_dates = dates_result.get('available_dates', [])
+            available_dates_sorted = sorted(available_dates)
 
             return {
                 "action": "reschedule_appointment",
                 "project_id": project_id,
                 "status": "awaiting_date_selection",
-                "available_dates": slots_result.get('available_dates', []),
-                "slots": slots_result.get('slots', []),
-                "request_id": slots_result.get('request_id'),
-                "message": "Please select a new date for your appointment",
+                "available_dates": available_dates_sorted,
+                "request_id": dates_result.get('request_id'),
+                "message": "Here are the available dates for your rescheduled appointment. Please select a date.",
                 "mock_mode": USE_MOCK_API
             }
         except Exception as e:
-            logger.error(f"Failed to get rescheduler slots: {str(e)}")
+            logger.error(f"Failed to get available dates: {str(e)}")
             return {
                 "action": "reschedule_appointment",
                 "project_id": project_id,
@@ -1206,37 +1204,81 @@ def handle_reschedule_appointment(params: Dict, config: Dict, auth_headers: Dict
                 "mock_mode": USE_MOCK_API
             }
 
-    # Step 3: If date/time provided, confirm the new appointment
-    if not new_time:
-        raise ValueError("Missing required parameter: new_time")
-    if not request_id:
-        raise ValueError("Missing required parameter: request_id")
+    # STEP 3: If date/time provided, confirm the new appointment
+    if new_date:
+        if not new_time:
+            raise ValueError("Missing required parameter: new_time")
+        if not request_id:
+            raise ValueError("Missing required parameter: request_id")
 
-    confirm_result = handle_confirm_appointment(
-        {
-            'project_id': project_id,
-            'client_id': client_id,
-            'date': new_date,
-            'time': new_time,
-            'request_id': request_id
-        },
-        config,
-        auth_headers
-    )
+        confirm_result = handle_confirm_appointment(
+            {
+                'project_id': project_id,
+                'client_id': client_id,
+                'date': new_date,
+                'time': new_time,
+                'request_id': request_id
+            },
+            config,
+            auth_headers
+        )
 
-    logger.info(f"Reschedule complete: {confirm_result}")
+        return {
+            "action": "reschedule_appointment",
+            "project_id": project_id,
+            "status": "rescheduled",
+            "scheduled_date": new_date,
+            "scheduled_time": new_time,
+            "message": "Your appointment has been successfully rescheduled!",
+            "appointment": confirm_result.get('appointment', {}),
+            "mock_mode": USE_MOCK_API
+        }
 
-    return {
-        "action": "reschedule_appointment",
-        "project_id": project_id,
-        "new_date": new_date,
-        "new_time": new_time,
-        "status": "success",
-        "cancel_result": cancel_result,
-        "confirm_result": confirm_result,
-        "message": f"Appointment rescheduled to {new_date} at {new_time}",
-        "mock_mode": USE_MOCK_API
-    }
+    # STEP 1: Initial reschedule request - cancel the existing appointment
+    logger.info(f"[RESCHEDULE STEP 1] Cancelling existing appointment for project {project_id}")
+
+    try:
+        cancel_result = handle_cancel_appointment(
+            {
+                'project_id': project_id,
+                'client_id': client_id,
+                'customer_id': customer_id,
+                'confirmed': True  # Skip validation, directly proceed with cancel-reschedule API
+            },
+            config,
+            auth_headers
+        )
+        logger.info(f"Cancel/reschedule initiation result: {cancel_result}")
+
+        # If project cannot be cancelled, return early
+        if cancel_result.get('status') in ['cannot_cancel', 'error']:
+            return {
+                "action": "reschedule_appointment",
+                "project_id": project_id,
+                "status": "cannot_reschedule",
+                "message": cancel_result.get('message') or cancel_result.get('error', 'Cannot reschedule this project'),
+                "mock_mode": USE_MOCK_API
+            }
+
+        # Success - return status indicating we need user to confirm to fetch dates
+        return {
+            "action": "reschedule_appointment",
+            "project_id": project_id,
+            "status": "cancelled_awaiting_dates",
+            "message": "I've cancelled your existing appointment. Would you like me to show you the available dates for rescheduling? Just say 'yes' or 'show dates' to continue.",
+            "mock_mode": USE_MOCK_API
+        }
+
+    except Exception as e:
+        logger.warning(f"Cancel/reschedule initiation failed: {str(e)}")
+        return {
+            "action": "reschedule_appointment",
+            "project_id": project_id,
+            "status": "error",
+            "message": f"Failed to cancel existing appointment: {str(e)}",
+            "mock_mode": USE_MOCK_API
+        }
+
 
 def handle_cancel_appointment(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
     """

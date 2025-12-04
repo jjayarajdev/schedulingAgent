@@ -210,6 +210,32 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
 
     logger.info(f"[CONTINUATION] Checking continuation: stage={current_stage}, workflow_type={workflow_type}")
 
+    # Stage: Cancelled, waiting for user to confirm fetching dates (two-step reschedule)
+    if current_stage == 'cancelled_awaiting_dates':
+        # Check if user confirms with yes/show dates/continue etc.
+        confirm_patterns = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'show', 'dates', 'continue', 'proceed', 'go ahead']
+        message_lower = message.lower().strip()
+        is_confirmation = any(pattern in message_lower for pattern in confirm_patterns)
+
+        if is_confirmation:
+            logger.info(f"[CONTINUATION] User confirmed to fetch dates at stage '{current_stage}' - fetching available dates")
+            return {
+                'continue_workflow': True,
+                'action': 'reschedule_appointment',
+                'params': {
+                    'project_id': context.get('project_id'),
+                    'fetch_dates': True  # Signal to fetch dates (Step 2)
+                },
+                'next_stage': 'awaiting_date_selection',
+                'preserve_context': {
+                    'project_id': context.get('project_id'),
+                    'category': context.get('category'),
+                    'city': context.get('city'),
+                    'state': context.get('state')
+                },
+                'workflow_type': workflow_type
+            }
+
     # Stage: Waiting for date selection
     if current_stage == 'awaiting_date_selection':
         date = extract_date_from_message(message)
@@ -1222,6 +1248,50 @@ def orchestrate_intelligent_workflow(
             else:
                 response_body = body_str
 
+            # WEATHER ENRICHMENT for reschedule_appointment step 2 (available dates)
+            if action == 'reschedule_appointment' and response_body.get('available_dates'):
+                project_category = preserve_context.get('category')
+                if project_category and is_outdoor_project(project_category):
+                    logger.info(f"[CONTINUATION][WEATHER] Outdoor project ({project_category}), enriching reschedule dates with weather")
+                    location = None
+                    city = preserve_context.get('city')
+                    state = preserve_context.get('state')
+                    if city and state:
+                        location = f"{city}, {state}"
+
+                    if location:
+                        try:
+                            weather_params = {
+                                'location': location,
+                                'customer_id': customer_id,
+                                'client_id': client_id,
+                                'pf_bearer_token': pf_bearer_token
+                            }
+                            weather_response = call_lambda_directly('get_weather', weather_params)
+
+                            w_data = weather_response.get('response', {})
+                            w_func = w_data.get('functionResponse', {})
+                            w_body_wrapper = w_func.get('responseBody', {})
+                            w_text = w_body_wrapper.get('TEXT', {})
+                            w_body_str = w_text.get('body', '{}')
+
+                            if isinstance(w_body_str, str):
+                                weather_body = json.loads(w_body_str)
+                            else:
+                                weather_body = w_body_str
+
+                            # Enrich dates with weather using existing helper
+                            # Signature: add_weather_indicators_to_dates(weather_data, available_dates, category)
+                            available_dates = response_body.get('available_dates', [])
+                            enriched_dates = add_weather_indicators_to_dates(
+                                weather_body, available_dates, project_category
+                            )
+                            # Store as dates_with_weather for UI rendering (same as other flows)
+                            response_body['dates_with_weather'] = enriched_dates
+                            logger.info(f"[CONTINUATION][WEATHER] Enriched {len(enriched_dates)} reschedule dates with weather")
+                        except Exception as weather_err:
+                            logger.warning(f"[CONTINUATION][WEATHER] Reschedule weather enrichment failed (non-fatal): {weather_err}")
+
             # WEATHER ENRICHMENT for time slots (outdoor projects)
             if action in ['get_time_slots', 'get_rescheduler_slots']:
                 project_category = preserve_context.get('category')
@@ -1283,6 +1353,11 @@ def orchestrate_intelligent_workflow(
                     # Also extract request_id from response for next step
                     if response_body.get('request_id'):
                         new_context['request_id'] = response_body['request_id']
+
+                # Extract request_id from reschedule_appointment step 2 response (dates)
+                if action == 'reschedule_appointment' and response_body.get('request_id'):
+                    new_context['request_id'] = response_body['request_id']
+                    logger.info(f"[CONTINUATION] Extracted request_id from reschedule dates: {response_body['request_id']}")
 
                 state_manager.save_state(session_id, {
                     'workflow_type': cont_workflow_type,
@@ -2048,14 +2123,29 @@ def orchestrate_intelligent_workflow(
         if not classification.get('workflow_type') and workflow_state:
             is_reschedule = is_reschedule or workflow_state.get('workflow_type') == 'reschedule_appointment'
 
+        # Determine if this is a NEW reschedule request vs continuing an existing reschedule workflow
+        is_new_reschedule_request = (
+            classification.get('action') == 'reschedule_appointment' or
+            classification.get('workflow_type') == 'reschedule_appointment'
+        )
+
         if is_reschedule and lambda_action in ['get_available_dates', 'get_time_slots']:
-            logger.info(f"[RESCHEDULE] Converting {lambda_action} to get_rescheduler_slots for reschedule workflow")
-            lambda_action = 'get_rescheduler_slots'
-            decision['lambda_action'] = 'get_rescheduler_slots'
-            # Use the selected date if provided, otherwise use today's date
-            from datetime import datetime
-            if 'date' not in lambda_params:
-                lambda_params['date'] = datetime.now().strftime("%Y-%m-%d")
+            # For NEW reschedule requests: use reschedule_appointment action
+            # This action first cancels the existing appointment (changing status from
+            # "Customer Scheduled" to "Customer to Schedule") then gets available slots
+            if is_new_reschedule_request:
+                logger.info(f"[RESCHEDULE] New reschedule request - using reschedule_appointment action (cancel + get slots)")
+                lambda_action = 'reschedule_appointment'
+                decision['lambda_action'] = 'reschedule_appointment'
+            else:
+                # For CONTINUATION (user selecting date/time): use get_rescheduler_slots
+                logger.info(f"[RESCHEDULE] Continuing reschedule workflow - converting {lambda_action} to get_rescheduler_slots")
+                lambda_action = 'get_rescheduler_slots'
+                decision['lambda_action'] = 'get_rescheduler_slots'
+                # Use the selected date if provided, otherwise use today's date
+                from datetime import datetime
+                if 'date' not in lambda_params:
+                    lambda_params['date'] = datetime.now().strftime("%Y-%m-%d")
 
         # RESOLVE project_index to project_id for ALL channels
         # This handles ordinal references like "last project", "first project", "3rd project"
@@ -2157,7 +2247,7 @@ def orchestrate_intelligent_workflow(
 
         # AUTO-FETCH PROJECT DETAILS: When starting scheduling/rescheduling workflow, fetch project info first
         # This ensures we have category, city, state for weather-aware scheduling
-        if lambda_action in ['get_available_dates', 'get_rescheduler_slots']:
+        if lambda_action in ['get_available_dates', 'get_rescheduler_slots', 'reschedule_appointment']:
             project_id = lambda_params.get('project_id')
             existing_category = workflow_state.get('context', {}).get('category') if workflow_state else None
 
@@ -2386,6 +2476,74 @@ def orchestrate_intelligent_workflow(
                     else:
                         logger.warning("No location found for proactive reschedule weather check")
 
+            # PROACTIVE WEATHER WARNINGS FOR reschedule_appointment action: Same as get_rescheduler_slots
+            # The reschedule_appointment action returns available_dates when status='awaiting_date_selection'
+            if lambda_action == 'reschedule_appointment' and response_body.get('status') == 'awaiting_date_selection':
+                available_dates = response_body.get('available_dates', [])
+                project_category = workflow_state.get('context', {}).get('category') if workflow_state else None
+
+                if available_dates and project_category and is_outdoor_project(project_category):
+                    logger.info(f"[WEATHER] Proactive weather check for reschedule_appointment ({project_category}): {len(available_dates)} dates")
+
+                    # Extract location from workflow state
+                    location = extract_location_from_context(workflow_state)
+
+                    if location:
+                        try:
+                            # Fetch weather forecast
+                            weather_params = {
+                                'location': location,
+                                'customer_id': customer_id,
+                                'client_id': client_id,
+                                'pf_bearer_token': pf_bearer_token
+                            }
+
+                            logger.info(f"[WEATHER] Fetching weather for reschedule_appointment at {location}")
+                            weather_response = call_lambda_directly('get_weather', weather_params)
+
+                            # Extract weather data
+                            w_data = weather_response.get('response', {})
+                            w_func = w_data.get('functionResponse', {})
+                            w_body_wrapper = w_func.get('responseBody', {})
+                            w_text = w_body_wrapper.get('TEXT', {})
+                            w_body_str = w_text.get('body', '{}')
+
+                            if isinstance(w_body_str, str):
+                                weather_body = json.loads(w_body_str)
+                            else:
+                                weather_body = w_body_str
+
+                            # Enrich dates with weather indicators
+                            enriched_dates = add_weather_indicators_to_dates(
+                                weather_body,
+                                available_dates,
+                                project_category
+                            )
+
+                            # Inject enriched dates into response
+                            response_body['dates_with_weather'] = enriched_dates
+
+                            # Also add project info for router's weather enrichment
+                            response_body['project_category'] = project_category
+                            response_body['project_city'] = workflow_state.get('context', {}).get('city', '')
+                            response_body['project_state'] = workflow_state.get('context', {}).get('state', '')
+
+                            # Count suitable vs unsuitable dates
+                            suitable_count = sum(1 for d in enriched_dates if d.get('suitable'))
+                            unsuitable_count = len(enriched_dates) - suitable_count
+
+                            if unsuitable_count > 0:
+                                logger.info(f"[WARNING] Proactive reschedule_appointment warning: {unsuitable_count}/{len(enriched_dates)} dates have weather concerns")
+                                response_body['has_weather_concerns'] = True
+                                response_body['suitable_date_count'] = suitable_count
+                                response_body['unsuitable_date_count'] = unsuitable_count
+
+                        except Exception as weather_err:
+                            logger.warning(f"Proactive reschedule_appointment weather check failed (non-fatal): {weather_err}")
+                            # Continue without weather indicators
+                    else:
+                        logger.warning("No location found for proactive reschedule_appointment weather check")
+
             # WEATHER-AWARE SCHEDULING: Check weather for outdoor projects when showing time slots
             if lambda_action in ['get_time_slots', 'get_available_timeslots']:
                 # Get project category from workflow state
@@ -2507,6 +2665,40 @@ def orchestrate_intelligent_workflow(
                     'response': response_text,
                     'intent': 'scheduling',
                     'action': 'cancel_appointment',
+                    'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                    'direct_call': True,
+                    'timing': timing
+                }
+
+            # HANDLE TWO-STEP RESCHEDULE WORKFLOW: When reschedule returns cancelled_awaiting_dates, set workflow state
+            if lambda_action == 'reschedule_appointment' and response_body.get('status') == 'cancelled_awaiting_dates':
+                project_id = response_body.get('project_id') or lambda_params.get('project_id')
+
+                logger.info(f"[RESCHEDULE] Setting cancelled_awaiting_dates workflow state for project {project_id}")
+
+                # Get project details from workflow state or response
+                project_category = workflow_state.get('context', {}).get('category', '') if workflow_state else ''
+                project_city = workflow_state.get('context', {}).get('city', '') if workflow_state else ''
+                project_state = workflow_state.get('context', {}).get('state', '') if workflow_state else ''
+
+                # Save workflow state for Step 2 (fetching dates when user confirms)
+                state_manager.save_state(session_id, {
+                    'workflow_type': 'reschedule_appointment',
+                    'current_stage': 'cancelled_awaiting_dates',
+                    'context': {
+                        'project_id': project_id,
+                        'category': project_category,
+                        'city': project_city,
+                        'state': project_state
+                    },
+                    'conversation_summary': f"User reschedule for project #{project_id} - cancelled existing appointment, awaiting user confirmation to fetch available dates"
+                })
+
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': response_text,
+                    'intent': 'scheduling',
+                    'action': 'reschedule_appointment',
                     'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
                     'direct_call': True,
                     'timing': timing

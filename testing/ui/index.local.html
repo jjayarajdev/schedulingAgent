@@ -1314,7 +1314,9 @@
                     }
 
                     // Handle dates JSON - Enhanced with formatted dates
-                    if (data.dates && Array.isArray(data.dates) && data.dates.length > 0) {
+                    // Supports both "dates" and "available_dates" keys
+                    const datesArray = data.dates || data.available_dates;
+                    if (datesArray && Array.isArray(datesArray) && datesArray.length > 0) {
                         let html = '';
 
                         // Header
@@ -1323,17 +1325,17 @@
                         }
 
                         // Check if dates are week-grouped (new format from agent)
-                        const isWeekGrouped = data.dates[0] && data.dates[0].week && data.dates[0].dates;
+                        const isWeekGrouped = datesArray[0] && datesArray[0].week && datesArray[0].dates;
 
                         if (isWeekGrouped) {
                             // New format: [{week: 1, dates: ["Nov 10", "Nov 11", ...]}, ...]
                             let totalDates = 0;
-                            data.dates.forEach(weekObj => totalDates += weekObj.dates.length);
+                            datesArray.forEach(weekObj => totalDates += weekObj.dates.length);
 
                             html += `<div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 20px; border-radius: 12px; margin: 16px 0;">
                                 <div style="font-weight: 600; color: #495057; margin-bottom: 14px; font-size: 16px;">&#9744; Available Dates (${totalDates})</div>`;
 
-                            data.dates.forEach(weekObj => {
+                            datesArray.forEach(weekObj => {
                                 html += `<div style="margin-bottom: 16px;">
                                     <div style="font-size: 13px; font-weight: 600; color: #6c757d; margin-bottom: 8px;">Week ${weekObj.week}</div>
                                     <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px;">`;
@@ -1349,10 +1351,10 @@
                         } else {
                             // Old format: flat array of date objects or strings
                             html += `<div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 20px; border-radius: 12px; margin: 16px 0;">
-                                <div style="font-weight: 600; color: #495057; margin-bottom: 14px; font-size: 16px;">&#9744; Available Dates (${data.dateCount || data.dates.length})</div>
+                                <div style="font-weight: 600; color: #495057; margin-bottom: 14px; font-size: 16px;">&#9744; Available Dates (${data.dateCount || datesArray.length})</div>
                                 <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px;">`;
 
-                            data.dates.forEach(dateObj => {
+                            datesArray.forEach(dateObj => {
                                 // Handle both old format (string) and new format (object)
                                 const dateStr = typeof dateObj === 'string' ? dateObj : dateObj.date;
                                 const dayShort = dateObj.dayShort || '';
@@ -1771,6 +1773,41 @@
                         }
 
                         // Display conversational text FIRST, then structured data
+                        const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="padding: 12px 0; font-size: 15px; line-height: 1.7; color: #333;">
+    ${textBeforeJson.replace(/\n/g, '<br>')}
+</div>` : '';
+                        return conversationalHtml + html;
+                    }
+
+                    // Handle cancelled_awaiting_dates status (reschedule step 1)
+                    if (data.status === 'cancelled_awaiting_dates') {
+                        let html = `
+                            <div style="background: linear-gradient(135deg, #17a2b8 0%, #138496 100%); color: white; padding: 20px 28px; border-radius: 12px; margin: 20px 0; box-shadow: 0 4px 16px rgba(23,162,184,0.3);">
+                                <div style="display: flex; align-items: center; gap: 14px;">
+                                    <span style="font-size: 32px;">&#10003;</span>
+                                    <div>
+                                        <div style="font-size: 18px; font-weight: 700;">Appointment Cancelled</div>
+                                        <div style="font-size: 14px; margin-top: 6px;">Your existing appointment has been cancelled for rescheduling.</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="background: #e7f5ff; border: 2px solid #17a2b8; padding: 16px 20px; border-radius: 12px; margin: 16px 0;">
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <span style="font-size: 24px;">&#128197;</span>
+                                    <div>
+                                        <div style="font-weight: 600; color: #0c5460;">Ready to see available dates?</div>
+                                        <div style="font-size: 14px; color: #666; margin-top: 4px;">Say <strong>"yes"</strong> or <strong>"show dates"</strong> to continue</div>
+                                    </div>
+                                </div>
+                            </div>`;
+
+                        if (data.project_id) {
+                            html += `
+                            <div style="background: #f8f9fa; padding: 10px 16px; border-radius: 8px; margin: 12px 0; font-size: 13px; color: #666;">
+                                Project: <strong>#${data.project_id}</strong>
+                            </div>`;
+                        }
+
                         const conversationalHtml = textBeforeJson ? `<div class="conversational-response" style="padding: 12px 0; font-size: 15px; line-height: 1.7; color: #333;">
     ${textBeforeJson.replace(/\n/g, '<br>')}
 </div>` : '';

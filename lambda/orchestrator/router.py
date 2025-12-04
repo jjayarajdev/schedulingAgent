@@ -540,6 +540,80 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 logger.warning(f"[ERROR] Appointment reschedule failed: {error_message}")
                 return friendly_error
 
+            # Check for "cannot reschedule" status
+            if response_body.get('status') == 'cannot_reschedule':
+                result = {
+                    "message": response_body.get('message', 'Cannot reschedule this appointment'),
+                    "status": "cannot_reschedule",
+                    "details": response_body
+                }
+                conversational = generate_conversational_response(action, user_message, result)
+                return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Handle timeout status from scheduling Lambda
+            if response_body.get('status') == 'timeout':
+                result = {
+                    "message": response_body.get('message', 'The rescheduling service is taking too long to respond. Please try again in a few minutes.'),
+                    "status": "timeout",
+                    "project_id": response_body.get('project_id'),
+                    "action_type": "reschedule"
+                }
+                conversational = generate_conversational_response(action, user_message, result)
+                return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Handle error status from scheduling Lambda
+            if response_body.get('status') == 'error':
+                result = {
+                    "message": response_body.get('message', 'Unable to reschedule the appointment. Please try again.'),
+                    "status": "error",
+                    "project_id": response_body.get('project_id'),
+                    "action_type": "reschedule"
+                }
+                conversational = generate_conversational_response(action, user_message, result)
+                return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Handle "cancelled_awaiting_dates" status - Step 1 of reschedule complete, waiting for user to confirm
+            if response_body.get('status') == 'cancelled_awaiting_dates':
+                project_id = response_body.get('project_id', '')
+                result = {
+                    "message": response_body.get('message', f"I've cancelled your existing appointment for project #{project_id}. Would you like me to show you the available dates for rescheduling?"),
+                    "project_id": project_id,
+                    "status": "cancelled_awaiting_dates",
+                    "action_type": "reschedule",
+                    "requires_confirmation": True
+                }
+                conversational = generate_conversational_response(action, user_message, result)
+                return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
+
+            # Handle "awaiting_date_selection" status - reschedule workflow started, show available dates
+            if response_body.get('status') == 'awaiting_date_selection':
+                available_dates = response_body.get('available_dates', [])
+                project_id = response_body.get('project_id', '')
+
+                # Add weather indicators to dates if we have project location info
+                if available_dates:
+                    try:
+                        available_dates = add_weather_indicators_to_dates(
+                            available_dates,
+                            response_body.get('project_category'),
+                            response_body.get('project_city'),
+                            response_body.get('project_state')
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to add weather indicators to reschedule dates: {e}")
+
+                result = {
+                    "message": f"I've initiated the rescheduling process for project #{project_id}. Here are the available dates:",
+                    "project_id": project_id,
+                    "available_dates": available_dates,
+                    "request_id": response_body.get('request_id'),
+                    "status": "awaiting_date_selection",
+                    "action_type": "reschedule"
+                }
+
+                conversational = generate_conversational_response(action, user_message, result)
+                return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
+
             # Format successful reschedule confirmation response
             appointment = response_body.get('appointment', {})
             result = {

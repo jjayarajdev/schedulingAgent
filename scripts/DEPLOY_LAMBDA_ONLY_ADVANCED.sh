@@ -871,7 +871,8 @@ EOF
 }
 
 # Deploy all Lambda functions (continue even if one fails)
-deploy_lambda "pf-scheduling-actions" "handler.lambda_handler" 30 1769 || echo -e "${RED}[WARN]  pf-scheduling-actions deployment failed${NC}"
+# Timeouts: scheduling=60s (API calls can be slow), orchestrator=120s (calls other lambdas)
+deploy_lambda "pf-scheduling-actions" "handler.lambda_handler" 60 1769 || echo -e "${RED}[WARN]  pf-scheduling-actions deployment failed${NC}"
 deploy_lambda "pf-information-actions" "handler.lambda_handler" 30 512 || echo -e "${RED}[WARN]  pf-information-actions deployment failed${NC}"
 deploy_lambda "pf-chitchat-actions" "handler.lambda_handler" 30 256 || echo -e "${RED}[WARN]  pf-chitchat-actions deployment failed${NC}"
 deploy_lambda "pf-orchestrator" "handler.lambda_handler" 120 512 || echo -e "${RED}[WARN]  pf-orchestrator deployment failed${NC}"
