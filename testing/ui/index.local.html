@@ -1358,11 +1358,28 @@
                                 const dayShort = dateObj.dayShort || '';
                                 const monthDay = dateObj.monthDay || dateStr;
                                 const dayName = dateObj.dayName || '';
-                                // Weather info
-                                const weatherIcon = dateObj.weatherIndicator || dateObj.indicator || '';
+                                // Weather info - convert text indicators to icons
+                                const rawIndicator = dateObj.weatherIndicator || dateObj.indicator || '';
+                                const weatherSeverity = dateObj.weatherSeverity || 'low';
                                 const highTemp = dateObj.highTemp || dateObj.high_temp || '';
                                 const weatherSuitable = dateObj.weatherSuitable !== false;
-                                const borderColor = weatherSuitable ? '#0066cc' : '#ff9800';
+
+                                // Convert [GOOD]/[WARN]/[BAD] to weather icons
+                                let weatherIcon = '';
+                                let borderColor = '#0066cc';
+                                if (rawIndicator.includes('[GOOD]') || weatherSeverity === 'low') {
+                                    weatherIcon = '&#9728;'; // Sun icon
+                                    borderColor = '#0066cc';
+                                } else if (rawIndicator.includes('[WARN]') || weatherSeverity === 'medium') {
+                                    weatherIcon = '&#9729;'; // Cloud icon
+                                    borderColor = '#ff9800';
+                                } else if (rawIndicator.includes('[BAD]') || weatherSeverity === 'high') {
+                                    weatherIcon = '&#127783;'; // Rain/Storm icon
+                                    borderColor = '#dc3545';
+                                } else if (rawIndicator) {
+                                    // Has some indicator but not recognized - show as-is
+                                    weatherIcon = rawIndicator;
+                                }
 
                                 html += `<button style="background: white; border: 2px solid ${borderColor}; border-radius: 10px; padding: 14px; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,102,204,0.15); text-align: center;" onmouseover="this.style.background='linear-gradient(135deg, #0066cc 0%, #0052a3 100%)'; this.style.color='white'; this.style.transform='translateY(-3px)'; this.style.boxShadow='0 4px 12px rgba(0,102,204,0.3)';" onmouseout="this.style.background='white'; this.style.color='#333'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 6px rgba(0,102,204,0.15)';">
                                     ${weatherIcon ? `<div style="font-size: 18px; margin-bottom: 4px;">${weatherIcon}</div>` : ''}

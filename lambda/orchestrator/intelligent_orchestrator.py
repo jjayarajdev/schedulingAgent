@@ -2323,6 +2323,69 @@ def orchestrate_intelligent_workflow(
                     else:
                         logger.warning("No location found for proactive weather check")
 
+            # PROACTIVE WEATHER WARNINGS FOR RESCHEDULER: Same as get_available_dates
+            if lambda_action == 'get_rescheduler_slots':
+                available_dates = response_body.get('available_dates', [])
+                project_category = workflow_state.get('context', {}).get('category') if workflow_state else None
+
+                # Only add weather if we have dates (not slots) and it's an outdoor project
+                if available_dates and not response_body.get('slots') and project_category and is_outdoor_project(project_category):
+                    logger.info(f"[WEATHER] Proactive weather check for reschedule ({project_category}): {len(available_dates)} dates")
+
+                    # Extract location from workflow state
+                    location = extract_location_from_context(workflow_state)
+
+                    if location:
+                        try:
+                            # Fetch weather forecast
+                            weather_params = {
+                                'location': location,
+                                'customer_id': customer_id,
+                                'client_id': client_id,
+                                'pf_bearer_token': pf_bearer_token
+                            }
+
+                            logger.info(f"[WEATHER] Fetching weather for reschedule at {location}")
+                            weather_response = call_lambda_directly('get_weather', weather_params)
+
+                            # Extract weather data
+                            w_data = weather_response.get('response', {})
+                            w_func = w_data.get('functionResponse', {})
+                            w_body_wrapper = w_func.get('responseBody', {})
+                            w_text = w_body_wrapper.get('TEXT', {})
+                            w_body_str = w_text.get('body', '{}')
+
+                            if isinstance(w_body_str, str):
+                                weather_body = json.loads(w_body_str)
+                            else:
+                                weather_body = w_body_str
+
+                            # Enrich dates with weather indicators
+                            enriched_dates = add_weather_indicators_to_dates(
+                                weather_body,
+                                available_dates,
+                                project_category
+                            )
+
+                            # Inject enriched dates into response
+                            response_body['dates_with_weather'] = enriched_dates
+
+                            # Count suitable vs unsuitable dates
+                            suitable_count = sum(1 for d in enriched_dates if d.get('suitable'))
+                            unsuitable_count = len(enriched_dates) - suitable_count
+
+                            if unsuitable_count > 0:
+                                logger.info(f"[WARNING] Proactive reschedule warning: {unsuitable_count}/{len(enriched_dates)} dates have weather concerns")
+                                response_body['has_weather_concerns'] = True
+                                response_body['suitable_date_count'] = suitable_count
+                                response_body['unsuitable_date_count'] = unsuitable_count
+
+                        except Exception as weather_err:
+                            logger.warning(f"Proactive reschedule weather check failed (non-fatal): {weather_err}")
+                            # Continue without weather indicators
+                    else:
+                        logger.warning("No location found for proactive reschedule weather check")
+
             # WEATHER-AWARE SCHEDULING: Check weather for outdoor projects when showing time slots
             if lambda_action in ['get_time_slots', 'get_available_timeslots']:
                 # Get project category from workflow state

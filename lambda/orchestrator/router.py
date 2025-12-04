@@ -349,20 +349,57 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             if not dates:
                 return "No available dates found for rescheduling this project."
 
-            # Format dates - same format as schedule flow
+            # Check for weather-enriched dates (same as get_available_dates)
+            dates_with_weather = response_body.get('dates_with_weather', [])
+            has_weather_concerns = response_body.get('has_weather_concerns', False)
+
+            # Format dates - same format as schedule flow with weather support
             formatted_dates = []
-            for date_str in dates:
-                try:
-                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-                    formatted_dates.append({
-                        "date": date_str,
-                        "dayShort": date_obj.strftime("%a"),
-                        "monthDay": date_obj.strftime("%b %d"),
-                        "dayName": date_obj.strftime("%A"),
-                        "formatted": date_obj.strftime("%A, %B %d, %Y")
-                    })
-                except:
-                    formatted_dates.append({"date": date_str, "monthDay": date_str})
+
+            if dates_with_weather:
+                # Use enriched dates with weather indicators
+                for enriched_date in dates_with_weather:
+                    date_str = enriched_date.get('date', '')
+                    try:
+                        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                        formatted_dates.append({
+                            "date": date_str,
+                            "dayShort": date_obj.strftime("%a"),
+                            "monthDay": date_obj.strftime("%b %d"),
+                            "dayName": date_obj.strftime("%A"),
+                            "formatted": date_obj.strftime("%A, %B %d, %Y"),
+                            # Weather info
+                            "weatherIndicator": enriched_date.get('indicator', ''),
+                            "weatherSuitable": enriched_date.get('suitable', True),
+                            "weatherSeverity": enriched_date.get('severity', 'low'),
+                            "weatherCondition": enriched_date.get('condition', ''),
+                            "weatherWarnings": enriched_date.get('warnings', []),
+                            "highTemp": enriched_date.get('high_temp'),
+                            "lowTemp": enriched_date.get('low_temp')
+                        })
+                    except:
+                        formatted_dates.append({
+                            "date": date_str,
+                            "monthDay": date_str,
+                            "weatherIndicator": enriched_date.get('indicator', ''),
+                            "weatherSuitable": enriched_date.get('suitable', True)
+                        })
+
+                logger.info(f"[WEATHER] Formatted {len(formatted_dates)} reschedule dates with weather indicators")
+            else:
+                # No weather data - use basic date formatting
+                for date_str in dates:
+                    try:
+                        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                        formatted_dates.append({
+                            "date": date_str,
+                            "dayShort": date_obj.strftime("%a"),
+                            "monthDay": date_obj.strftime("%b %d"),
+                            "dayName": date_obj.strftime("%A"),
+                            "formatted": date_obj.strftime("%A, %B %d, %Y")
+                        })
+                    except:
+                        formatted_dates.append({"date": date_str, "monthDay": date_str})
 
             # Sort dates chronologically
             formatted_dates.sort(key=lambda x: x.get('date', ''))
@@ -371,7 +408,8 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 "message": "Available dates for rescheduling:",
                 "dates": formatted_dates,
                 "dateCount": len(formatted_dates),
-                "isReschedule": True
+                "isReschedule": True,
+                "hasWeatherConcerns": has_weather_concerns
             }
 
             # Generate conversational response
