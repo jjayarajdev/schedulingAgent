@@ -312,7 +312,7 @@ delete_iam_role_if_exists() {
 
 ensure_aws_default_encryption() {
     local FUNCTION_NAME=$1
-    local KMS_MAX_WAIT=30  # 30 seconds max wait
+    local KMS_MAX_WAIT=30
     local KMS_POLL_INTERVAL=3
     local KMS_ELAPSED=0
 
@@ -325,18 +325,31 @@ ensure_aws_default_encryption() {
     fi
 
     # Check if Lambda has a customer-managed KMS key
-    local CURRENT_KMS=$(aws_cmd lambda get-function-configuration         --function-name "$FUNCTION_NAME"         --region "$REGION"         --query 'KMSKeyArn'         --output text 2>/dev/null)
+    local CURRENT_KMS
+    CURRENT_KMS=$(aws_cmd lambda get-function-configuration \
+        --function-name "$FUNCTION_NAME" \
+        --region "$REGION" \
+        --query 'KMSKeyArn' \
+        --output text 2>/dev/null)
 
     if [[ "$CURRENT_KMS" != "None" ]] && [[ "$CURRENT_KMS" != "null" ]] && [[ -n "$CURRENT_KMS" ]]; then
         echo "    [WARN] Found customer KMS key: $CURRENT_KMS"
         echo "    -> Removing KMS key, switching to AWS default encryption..."
 
         # Remove KMS key by setting it to empty string (forces AWS managed encryption)
-        aws_cmd lambda update-function-configuration             --function-name "$FUNCTION_NAME"             --kms-key-arn ""             --region "$REGION" &>/dev/null
+        aws_cmd lambda update-function-configuration \
+            --function-name "$FUNCTION_NAME" \
+            --kms-key-arn "" \
+            --region "$REGION" &>/dev/null
 
-        # Wait for update with polling loop (max KMS_MAX_WAIT seconds)
+        # Wait for update with polling loop
         while [[ $KMS_ELAPSED -lt $KMS_MAX_WAIT ]]; do
-            local STATE=$(aws_cmd lambda get-function-configuration                 --function-name "$FUNCTION_NAME"                 --region "$REGION"                 --query 'LastUpdateStatus'                 --output text 2>/dev/null)
+            local STATE
+            STATE=$(aws_cmd lambda get-function-configuration \
+                --function-name "$FUNCTION_NAME" \
+                --region "$REGION" \
+                --query 'LastUpdateStatus' \
+                --output text 2>/dev/null)
 
             if [[ "$STATE" == "Successful" ]]; then
                 echo -e "    ${GREEN}[OK] Now using AWS default encryption (${KMS_ELAPSED}s)${NC}"
