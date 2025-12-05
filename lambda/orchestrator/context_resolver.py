@@ -96,11 +96,17 @@ def _extract_project_ids_from_content(content: str) -> List[str]:
     """
     Enhanced project ID extraction from conversation content
 
+    IMPORTANT: Only extracts IDs from structured JSON data to avoid LLM hallucination issues.
+    The LLM sometimes incorrectly writes project IDs in conversational text (e.g., using parts
+    of projectNumber instead of the actual id field). By only extracting from JSON, we ensure
+    we get the correct IDs.
+
     Handles:
     - Direct JSON: {"projects": [{"id": "123"}]}
     - Nested JSON strings: {"response": "{\"projects\":[...]}"}
     - Multiple levels of nesting
-    - Regex fallback for plain text
+    - JSON code blocks: ```json ... ```
+    - Explicit #7751741 format (hash prefix indicates intentional ID reference)
 
     Returns:
         List of project IDs found (in order of appearance)
@@ -128,15 +134,32 @@ def _extract_project_ids_from_content(content: str) -> List[str]:
         except Exception as e:
             logger.debug(f"Failed to parse nested JSON: {e}")
 
-    # Strategy 3: Find all JSON-like structures with regex
-    # Look for {"id":"7751741"} patterns
-    id_pattern = r'"id":\s*"(\d{7})"'
+    # Strategy 3: Extract JSON from markdown code blocks
+    json_block_pattern = r'```json\s*([\s\S]*?)```'
+    json_blocks = re.findall(json_block_pattern, content)
+    for json_block in json_blocks:
+        try:
+            block_data = json.loads(json_block.strip())
+            project_ids.extend(_extract_ids_from_data(block_data))
+        except Exception as e:
+            logger.debug(f"Failed to parse JSON block: {e}")
+
+    # Strategy 4: Find all JSON-like structures with regex (in non-code-block content)
+    # Look for {"id":"7751741"} or {"id": "7751741"} patterns
+    id_pattern = r'"id":\s*"?(\d{7})"?'
     regex_ids = re.findall(id_pattern, content)
     project_ids.extend(regex_ids)
 
-    # Strategy 4: Find standalone 7-digit numbers (project IDs)
-    standalone_ids = re.findall(r'\b(\d{7})\b', content)
-    project_ids.extend(standalone_ids)
+    # Strategy 5: ONLY extract IDs that have explicit # prefix (intentional references)
+    # This avoids picking up random 7-digit numbers that LLM may have hallucinated
+    # Pattern: #7751741 or Project #7751741 or (Project #7751741)
+    hash_prefixed_ids = re.findall(r'#(\d{7})\b', content)
+    project_ids.extend(hash_prefixed_ids)
+
+    # REMOVED: Strategy that extracted standalone 7-digit numbers
+    # This was causing issues where LLM-hallucinated IDs from projectNumber field
+    # (e.g., "9000407" from projectNumber "21083_09PF05VD_1762166550719") were extracted
+    # standalone_ids = re.findall(r'\b(\d{7})\b', content)  # REMOVED - too aggressive
 
     # Remove duplicates while preserving order
     seen = set()
@@ -147,9 +170,49 @@ def _extract_project_ids_from_content(content: str) -> List[str]:
             unique_ids.append(pid)
 
     if unique_ids:
-        logger.debug(f"Extracted {len(unique_ids)} project ID(s) from content")
+        logger.debug(f"Extracted {len(unique_ids)} project ID(s) from content (JSON-only mode)")
 
     return unique_ids
+
+
+def validate_project_ids(extracted_ids: List[str], known_valid_ids: Optional[List[str]] = None) -> List[str]:
+    """
+    Validate extracted project IDs against a list of known valid IDs.
+
+    This helps prevent LLM hallucination issues where incorrect IDs may have been
+    picked up from conversational text.
+
+    Args:
+        extracted_ids: List of project IDs extracted from content
+        known_valid_ids: Optional list of known valid project IDs (from workflow state)
+
+    Returns:
+        List of validated project IDs (only those that exist in known_valid_ids)
+        If known_valid_ids is None or empty, returns original extracted_ids
+    """
+    if not known_valid_ids or not extracted_ids:
+        return extracted_ids
+
+    # Convert to set for O(1) lookup
+    valid_set = set(known_valid_ids)
+
+    validated = []
+    rejected = []
+
+    for pid in extracted_ids:
+        if pid in valid_set:
+            validated.append(pid)
+        else:
+            rejected.append(pid)
+
+    if rejected:
+        logger.warning(f"[VALIDATE] Rejected {len(rejected)} invalid project ID(s): {rejected}")
+        logger.info(f"[VALIDATE] Valid IDs were: {known_valid_ids}")
+
+    if validated:
+        logger.debug(f"[VALIDATE] Validated {len(validated)} project ID(s): {validated}")
+
+    return validated
 
 
 def _extract_ids_from_data(data: Any) -> List[str]:

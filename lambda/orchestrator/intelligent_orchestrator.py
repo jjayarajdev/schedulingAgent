@@ -2885,15 +2885,15 @@ def orchestrate_intelligent_workflow(
                         decision['update_workflow_state']['context'] = {}
                     decision['update_workflow_state']['context']['available_dates'] = response_body['available_dates']
 
-            # VOICE-SPECIFIC: Save project_ids to workflow state when listing projects
-            # Chat uses context_resolver.py to extract from conversation history (JSON responses)
-            # Voice stores natural language in history, so we need workflow_state
-            if channel == 'voice' and 'projects' in response_body and isinstance(response_body['projects'], list):
+            # SAVE PROJECT_IDS: Save project_ids to workflow state when listing projects
+            # This enables ordinal references like "last project", "first project", "2nd project"
+            # to be resolved correctly for BOTH voice and chat channels
+            if 'projects' in response_body and isinstance(response_body['projects'], list):
                 projects_list = response_body['projects']
                 project_ids = [str(p.get('id', '')) for p in projects_list if p.get('id')]
 
                 if project_ids:
-                    logger.info(f"[VOICE] Saving {len(project_ids)} project_ids to workflow state: {project_ids[:5]}...")
+                    logger.info(f"[PROJECTS] Saving {len(project_ids)} project_ids to workflow state: {project_ids[:5]}... (channel={channel})")
 
                     if decision.get('update_workflow_state'):
                         if 'context' not in decision['update_workflow_state']:
@@ -2906,7 +2906,7 @@ def orchestrate_intelligent_workflow(
                             'current_stage': 'listing_projects',
                             'context': {'project_ids': project_ids}
                         }
-                        logger.info(f"[VOICE] Created workflow state with project_ids")
+                        logger.info(f"[PROJECTS] Created workflow state with project_ids")
 
             # BATCH SCHEDULING: Auto-advance to next project after confirm_appointment
             if lambda_action == 'confirm_appointment':

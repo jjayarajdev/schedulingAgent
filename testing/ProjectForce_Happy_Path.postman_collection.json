@@ -1,0 +1,811 @@
+{
+	"info": {
+		"_postman_id": "pf-happy-path-v1",
+		"name": "ProjectForce Scheduling Agent - Happy Path Flows",
+		"description": "Complete happy path test collection for ProjectForce Scheduling Agent.\n\nThis collection covers all major user flows in sequence:\n1. Authentication\n2. Chitchat (Greetings)\n3. Project List & Details\n4. Schedule Appointment (full flow)\n5. Reschedule Appointment (two-step flow)\n6. Cancel Appointment\n7. Weather Queries\n8. Project Notes\n\n**IMPORTANT**: Run requests in order within each folder to maintain session context.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "0. Setup & Authentication",
+			"item": [
+				{
+					"name": "0.1 Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Proxy is healthy', function() {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{proxy_url}}/health",
+							"host": ["{{proxy_url}}"],
+							"path": ["health"]
+						},
+						"description": "Verify the proxy server is running before starting tests"
+					}
+				},
+				{
+					"name": "0.2 Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Login successful', function() {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    // Proxy returns: {accesstoken, user: {customer_id, client_id}}",
+									"    const token = jsonData.accesstoken || jsonData.access_token || (jsonData.data && jsonData.data.access_token);",
+									"    const user = jsonData.user || jsonData.data || {};",
+									"    const userId = user.customer_id || user.user_id || jsonData.user_id;",
+									"    const clientId = user.client_id || jsonData.client_id;",
+									"    ",
+									"    if (token) {",
+									"        pm.environment.set('access_token', token);",
+									"        console.log('Access token saved (length: ' + token.length + ')');",
+									"    }",
+									"    if (userId) {",
+									"        pm.environment.set('user_id', userId);",
+									"        console.log('User ID saved: ' + userId);",
+									"    }",
+									"    if (clientId) {",
+									"        pm.environment.set('client_id', clientId);",
+									"        console.log('Client ID saved: ' + clientId);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"{{login_email}}\",\n    \"password\": \"{{login_password}}\"\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/login",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "login"]
+						},
+						"description": "Authenticate and get access token. Proxy returns {accesstoken, user: {customer_id, client_id}}"
+					}
+				}
+			],
+			"description": "Setup and authentication - Run these first"
+		},
+		{
+			"name": "1. Chitchat Flow",
+			"item": [
+				{
+					"name": "1.1 Greeting - Hello",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Response is successful', function() {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response contains greeting', function() {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.response || jsonData.message).to.be.a('string');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Hello!\",\n    \"session_id\": \"happy-path-chitchat-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Simple greeting - should get friendly response"
+					}
+				},
+				{
+					"name": "1.2 Help Request",
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"What can you help me with?\",\n    \"session_id\": \"happy-path-chitchat-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Ask for help - should list capabilities"
+					}
+				}
+			],
+			"description": "Test chitchat/greeting functionality"
+		},
+		{
+			"name": "2. Project Discovery Flow",
+			"item": [
+				{
+					"name": "2.1 List My Projects",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Response is successful', function() {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"// Try to extract a project ID for subsequent tests",
+									"try {",
+									"    const jsonData = pm.response.json();",
+									"    const responseText = JSON.stringify(jsonData);",
+									"    // Look for project ID patterns (7-8 digit numbers)",
+									"    const projectMatch = responseText.match(/\\b(\\d{7,8})\\b/);",
+									"    if (projectMatch) {",
+									"        pm.environment.set('test_project_id', projectMatch[1]);",
+									"        console.log('Saved project ID:', projectMatch[1]);",
+									"    }",
+									"} catch(e) { console.log('Could not extract project ID'); }"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Show my projects\",\n    \"session_id\": \"happy-path-projects-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "List all projects for the customer"
+					}
+				},
+				{
+					"name": "2.2 Get Project Details",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Response is successful', function() {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response contains project details', function() {",
+									"    const jsonData = pm.response.json();",
+									"    const responseText = JSON.stringify(jsonData).toLowerCase();",
+									"    // Should contain address or project info",
+									"    pm.expect(responseText).to.satisfy(function(text) {",
+									"        return text.includes('address') || text.includes('project') || text.includes('status');",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Give me details for project {{test_project_id}}\",\n    \"session_id\": \"happy-path-projects-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Get detailed information about a specific project"
+					}
+				}
+			],
+			"description": "Discover and view project information"
+		},
+		{
+			"name": "3. Schedule Appointment Flow",
+			"item": [
+				{
+					"name": "3.1 Request to Schedule (Get Dates)",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Generate a unique session ID for this scheduling flow",
+									"pm.environment.set('schedule_session_id', 'schedule-flow-' + Date.now());"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Response is successful', function() {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response contains available dates', function() {",
+									"    const jsonData = pm.response.json();",
+									"    const responseText = JSON.stringify(jsonData);",
+									"    // Should contain dates or scheduling info",
+									"    pm.expect(responseText).to.satisfy(function(text) {",
+									"        return text.includes('date') || text.includes('available') || text.includes('schedule');",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"I want to schedule an appointment for project {{test_project_id}}\",\n    \"session_id\": \"{{schedule_session_id}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Start scheduling flow - system should return available dates"
+					}
+				},
+				{
+					"name": "3.2 Select Date (Get Time Slots)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Response is successful', function() {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response contains time slots', function() {",
+									"    const jsonData = pm.response.json();",
+									"    const responseText = JSON.stringify(jsonData).toLowerCase();",
+									"    pm.expect(responseText).to.satisfy(function(text) {",
+									"        return text.includes('time') || text.includes('slot') || text.includes('am') || text.includes('pm');",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"I'll take the first available date\",\n    \"session_id\": \"{{schedule_session_id}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Select a date - system should return available time slots"
+					}
+				},
+				{
+					"name": "3.3 Select Time Slot (Confirm)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Response is successful', function() {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Appointment confirmed or pending', function() {",
+									"    const jsonData = pm.response.json();",
+									"    const responseText = JSON.stringify(jsonData).toLowerCase();",
+									"    pm.expect(responseText).to.satisfy(function(text) {",
+									"        return text.includes('confirm') || text.includes('scheduled') || text.includes('appointment') || text.includes('booked');",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"The morning slot works for me\",\n    \"session_id\": \"{{schedule_session_id}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Select time slot - system should confirm the appointment"
+					}
+				}
+			],
+			"description": "Complete scheduling flow: Request → Select Date → Select Time → Confirm"
+		},
+		{
+			"name": "4. Reschedule Appointment Flow (Two-Step)",
+			"item": [
+				{
+					"name": "4.1 Request Reschedule (Step 1: Cancel)",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Generate a unique session ID for this reschedule flow",
+									"pm.environment.set('reschedule_session_id', 'reschedule-flow-' + Date.now());"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Response is successful', function() {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Appointment cancelled awaiting new dates', function() {",
+									"    const jsonData = pm.response.json();",
+									"    const responseText = JSON.stringify(jsonData).toLowerCase();",
+									"    pm.expect(responseText).to.satisfy(function(text) {",
+									"        return text.includes('cancel') || text.includes('reschedule') || text.includes('new date');",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"I need to reschedule project {{test_project_id}}\",\n    \"session_id\": \"{{reschedule_session_id}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Step 1: Request reschedule - cancels existing appointment and prompts for new date selection"
+					}
+				},
+				{
+					"name": "4.2 Continue Reschedule (Step 2: Get New Dates)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Response is successful', function() {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response contains available dates', function() {",
+									"    const jsonData = pm.response.json();",
+									"    const responseText = JSON.stringify(jsonData);",
+									"    pm.expect(responseText).to.satisfy(function(text) {",
+									"        return text.includes('date') || text.includes('available');",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Yes, show me available dates\",\n    \"session_id\": \"{{reschedule_session_id}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Step 2: Confirm and fetch available dates for rescheduling"
+					}
+				},
+				{
+					"name": "4.3 Select New Date",
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"I'll take the second date option\",\n    \"session_id\": \"{{reschedule_session_id}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Select a new date for rescheduled appointment"
+					}
+				},
+				{
+					"name": "4.4 Select New Time Slot",
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"The afternoon slot please\",\n    \"session_id\": \"{{reschedule_session_id}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Select time slot to complete rescheduling"
+					}
+				}
+			],
+			"description": "Two-step reschedule flow: Cancel existing → Fetch new dates → Select → Confirm"
+		},
+		{
+			"name": "5. Cancel Appointment Flow",
+			"item": [
+				{
+					"name": "5.1 Request Cancellation",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"pm.environment.set('cancel_session_id', 'cancel-flow-' + Date.now());"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Response is successful', function() {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Cancellation processed', function() {",
+									"    const jsonData = pm.response.json();",
+									"    const responseText = JSON.stringify(jsonData).toLowerCase();",
+									"    pm.expect(responseText).to.satisfy(function(text) {",
+									"        return text.includes('cancel') || text.includes('confirm');",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Cancel the appointment for project {{test_project_id}}\",\n    \"session_id\": \"{{cancel_session_id}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Cancel an existing appointment"
+					}
+				}
+			],
+			"description": "Cancel existing appointment"
+		},
+		{
+			"name": "6. Weather Queries",
+			"item": [
+				{
+					"name": "6.1 Weather by City Name",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Response is successful', function() {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response contains weather info', function() {",
+									"    const jsonData = pm.response.json();",
+									"    const responseText = JSON.stringify(jsonData).toLowerCase();",
+									"    pm.expect(responseText).to.satisfy(function(text) {",
+									"        return text.includes('temperature') || text.includes('weather') || text.includes('°');",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"What's the weather in Tampa?\",\n    \"session_id\": \"weather-test-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Weather query by city name"
+					}
+				},
+				{
+					"name": "6.2 Weather by Zip Code",
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"What's the weather in 33601?\",\n    \"session_id\": \"weather-test-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Weather query by zip code"
+					}
+				},
+				{
+					"name": "6.3 Weather Forecast Question",
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Will it rain in Miami tomorrow?\",\n    \"session_id\": \"weather-test-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Weather forecast question"
+					}
+				}
+			],
+			"description": "Weather-related queries"
+		},
+		{
+			"name": "7. Project Notes",
+			"item": [
+				{
+					"name": "7.1 Add Note to Project",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"pm.environment.set('notes_session_id', 'notes-flow-' + Date.now());"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Response is successful', function() {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Note added successfully', function() {",
+									"    const jsonData = pm.response.json();",
+									"    const responseText = JSON.stringify(jsonData).toLowerCase();",
+									"    pm.expect(responseText).to.satisfy(function(text) {",
+									"        return text.includes('note') || text.includes('added') || text.includes('saved');",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Add a note to project {{test_project_id}}: Customer prefers afternoon appointments\",\n    \"session_id\": \"{{notes_session_id}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Add a note to a project"
+					}
+				},
+				{
+					"name": "7.2 List Project Notes",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Response is successful', function() {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Notes retrieved', function() {",
+									"    const jsonData = pm.response.json();",
+									"    const responseText = JSON.stringify(jsonData).toLowerCase();",
+									"    pm.expect(responseText).to.satisfy(function(text) {",
+									"        return text.includes('note') || text.includes('afternoon') || text.includes('no notes');",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Show me notes for project {{test_project_id}}\",\n    \"session_id\": \"{{notes_session_id}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "List all notes for a project"
+					}
+				}
+			],
+			"description": "Project notes management"
+		},
+		{
+			"name": "8. Direct Scheduling (One-Shot)",
+			"item": [
+				{
+					"name": "8.1 Schedule with Date and Time",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Calculate a date 7 days from now",
+									"const futureDate = new Date();",
+									"futureDate.setDate(futureDate.getDate() + 7);",
+									"const dateStr = futureDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });",
+									"pm.environment.set('future_date', dateStr);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"message\": \"Schedule project {{test_project_id}} for {{future_date}} at 2 PM\",\n    \"session_id\": \"direct-schedule-{{$timestamp}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+						},
+						"url": {
+							"raw": "{{proxy_url}}/api/invoke-agent",
+							"host": ["{{proxy_url}}"],
+							"path": ["api", "invoke-agent"]
+						},
+						"description": "Direct scheduling with specific date and time in one message"
+					}
+				}
+			],
+			"description": "One-shot scheduling with date and time in single request"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [""]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [""]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "proxy_url",
+			"value": "http://localhost:5003",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "1646085",
+			"type": "string"
+		},
+		{
+			"key": "client_id",
+			"value": "09PF05VD",
+			"type": "string"
+		},
+		{
+			"key": "test_project_id",
+			"value": "7751743",
+			"type": "string"
+		},
+		{
+			"key": "login_email",
+			"value": "jay@mailinator.com",
+			"type": "string"
+		},
+		{
+			"key": "login_password",
+			"value": "U2FsdGVkX197AQMdkqthasfRGWLh41rhHVaw9Q9Q8cE=",
+			"type": "string"
+		}
+	]
+}

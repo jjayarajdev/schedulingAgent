@@ -134,6 +134,9 @@ fi
 echo "🔌 Starting CORS proxy server on port 5003..."
 # Set UTF-8 encoding for Windows to handle emojis in Python output
 export PYTHONIOENCODING=utf-8
+# Set AWS profile for pf-aws account (772634497954) - required for Lambda/Bedrock/Secrets Manager
+export AWS_PROFILE="${AWS_PROFILE:-pf-aws}"
+echo "  • Using AWS Profile: $AWS_PROFILE"
 $PYTHON pf_proxy.py > "$LOG_DIR/pf_proxy.log" 2>&1 &
 PROXY_PID=$!
 
