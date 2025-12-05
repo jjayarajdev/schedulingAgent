@@ -1922,7 +1922,7 @@ Weather forecast for your appointment day: Partly cloudy. Expected high of 72 de
 
 ### Ordinal Reference Path - Direct Voice Formatting
 
-**Location:** `lambda/orchestrator/intelligent_orchestrator.py` - Lines 1535-1547
+**Location:** `lambda/orchestrator/intelligent_orchestrator.py` - Lines 1577-1589
 
 **Problem Solved:** Router strips JSON before `format_for_voice()`, causing:
 - `_format_project_details_for_voice()` was NEVER called
@@ -1952,6 +1952,27 @@ else:
 - Project details response
 - Project list response
 - All JSON-based responses
+
+---
+
+### Ordinal Action Detection (All Channels)
+
+**Location:** `lambda/orchestrator/intelligent_orchestrator.py` - Lines 1475-1512
+
+**Note:** Originally voice-only, now works for ALL channels (chat, voice, SMS).
+
+**Actions Detected:**
+| Action | Keywords |
+|--------|----------|
+| SCHEDULE | schedule, book, set up, make an appointment, available dates |
+| RESCHEDULE | reschedule, move, change the date, different date, another date |
+| CANCEL | cancel, remove, delete, dont want |
+
+**How it works:**
+1. Ordinal detected (first, second, last project)
+2. Action word detected → saves `resolved_project_id` to workflow state
+3. Falls through to classification with project context
+4. Classification routes to appropriate action (schedule/reschedule/cancel)
 
 ---
 
