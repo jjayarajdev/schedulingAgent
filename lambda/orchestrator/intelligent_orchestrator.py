@@ -115,8 +115,8 @@ def extract_ordinal_project_reference(message: str) -> Optional[int]:
     """
     msg = message.lower().strip()
 
-    # Check if message is about project details/info (not scheduling a date)
-    project_keywords = ['project', 'one', 'details', 'show', 'info', 'about']
+    # Check if message is about project (details, info, or scheduling actions)
+    project_keywords = ['project', 'one', 'details', 'show', 'info', 'about', 'schedule', 'book', 'reschedule', 'cancel']
     has_project_context = any(kw in msg for kw in project_keywords)
 
     if not has_project_context:
@@ -1469,42 +1469,45 @@ def orchestrate_intelligent_workflow(
                 resolved_project_id = str(project_ids[ordinal_index])
                 logger.info(f"[ORDINAL] Resolved index {ordinal_index} to project_id={resolved_project_id} from list of {len(project_ids)} projects")
 
-                # VOICE-ONLY: Detect action words in message (reschedule, cancel, schedule)
-                # If user says "reschedule the first one", route to reschedule flow, NOT get_project_details
+                # ALL CHANNELS: Detect action words in message (schedule, reschedule, cancel)
+                # If user says "schedule the first project", route to scheduling flow, NOT get_project_details
+                # Works for voice, chat, and sms channels
                 message_lower = message.lower()
-                if channel == 'voice':
-                    # Check for reschedule action
-                    if any(word in message_lower for word in ['reschedule', 'move', 'change the date', 'different date', 'another date', 'change my appointment']):
-                        logger.info(f"[ORDINAL-VOICE] Detected RESCHEDULE action in ordinal reference")
-                        # Don't return project details - fall through to normal classification
-                        # with resolved project_id added to context
-                        workflow_state['context'] = workflow_state.get('context', {})
-                        workflow_state['context']['resolved_project_id'] = resolved_project_id
-                        workflow_state['context']['ordinal_action'] = 'reschedule'
-                        state_manager.save_state(session_id, workflow_state)
-                        logger.info(f"[ORDINAL-VOICE] Saved resolved_project_id={resolved_project_id} for reschedule, falling through to classification")
-                        # Fall through to normal classification below (don't return here)
-                        pass
-                    # Check for cancel action
-                    elif any(word in message_lower for word in ['cancel', 'remove', 'delete', 'dont want', "don't want"]):
-                        logger.info(f"[ORDINAL-VOICE] Detected CANCEL action in ordinal reference")
-                        workflow_state['context'] = workflow_state.get('context', {})
-                        workflow_state['context']['resolved_project_id'] = resolved_project_id
-                        workflow_state['context']['ordinal_action'] = 'cancel'
-                        state_manager.save_state(session_id, workflow_state)
-                        logger.info(f"[ORDINAL-VOICE] Saved resolved_project_id={resolved_project_id} for cancel, falling through to classification")
-                        # Fall through to normal classification below
-                        pass
-                    else:
-                        # No action word detected - proceed with get_project_details (original behavior)
-                        pass
+                detected_action = None
+
+                # Check for SCHEDULE action (book, schedule an appointment)
+                if any(word in message_lower for word in ['schedule', 'book', 'set up', 'make an appointment', 'available dates']):
+                    detected_action = 'schedule'
+                    logger.info(f"[ORDINAL] Detected SCHEDULE action in ordinal reference (channel={channel})")
+                # Check for reschedule action
+                elif any(word in message_lower for word in ['reschedule', 'move', 'change the date', 'different date', 'another date', 'change my appointment']):
+                    detected_action = 'reschedule'
+                    logger.info(f"[ORDINAL] Detected RESCHEDULE action in ordinal reference (channel={channel})")
+                # Check for cancel action
+                elif any(word in message_lower for word in ['cancel', 'remove', 'delete', 'dont want', "don't want"]):
+                    detected_action = 'cancel'
+                    logger.info(f"[ORDINAL] Detected CANCEL action in ordinal reference (channel={channel})")
+
+                # If action word detected, save context and fall through to classification
+                # This routes to get_available_dates instead of get_project_details
+                if detected_action:
+                    # Initialize workflow_state if None
+                    if workflow_state is None:
+                        workflow_state = {'context': {}}
+                    elif 'context' not in workflow_state:
+                        workflow_state['context'] = {}
+                    workflow_state['context']['resolved_project_id'] = resolved_project_id
+                    workflow_state['context']['ordinal_action'] = detected_action
+                    state_manager.save_state(session_id, workflow_state)
+                    logger.info(f"[ORDINAL] Saved resolved_project_id={resolved_project_id} for {detected_action}, falling through to classification")
+                # No action word detected - proceed with get_project_details (original behavior)
 
                 # Check if we should skip get_project_details due to action word detection
-                ordinal_action = workflow_state.get('context', {}).get('ordinal_action')
+                ordinal_action = (workflow_state or {}).get('context', {}).get('ordinal_action')
                 if ordinal_action:
                     # Clear the action flag and fall through to classification
                     workflow_state['context'].pop('ordinal_action', None)
-                    logger.info(f"[ORDINAL-VOICE] Skipping get_project_details, routing to {ordinal_action} with project_id={resolved_project_id}")
+                    logger.info(f"[ORDINAL] Skipping get_project_details, routing to {ordinal_action} with project_id={resolved_project_id} (channel={channel})")
                     # Raise to break out of try block and fall through to classification
                     raise Exception(f"ORDINAL_ACTION_DETECTED:{ordinal_action}")
 
@@ -1605,7 +1608,7 @@ def orchestrate_intelligent_workflow(
                 # Check if this is our intentional action detection (not an error)
                 if "ORDINAL_ACTION_DETECTED:" in str(ordinal_err):
                     action_type = str(ordinal_err).split(":")[-1]
-                    logger.info(f"[ORDINAL-VOICE] Falling through to classification for {action_type} action")
+                    logger.info(f"[ORDINAL] Falling through to classification for {action_type} action (channel={channel})")
                     # Fall through to normal classification (this is expected behavior)
                 else:
                     logger.error(f"[ORDINAL] Error handling ordinal reference: {ordinal_err}")
