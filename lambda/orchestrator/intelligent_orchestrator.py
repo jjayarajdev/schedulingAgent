@@ -23,6 +23,7 @@ from botocore.config import Config as BotoConfig
 from config import get_config
 from workflow_state import get_state_manager
 from router import call_lambda_directly, format_lambda_response
+from voice_formatter import _format_project_details_for_voice, _add_voice_opener, _add_voice_followup
 from weather_aware_scheduling import (
     is_outdoor_project,
     find_forecast_for_date,
@@ -1381,6 +1382,75 @@ def orchestrate_intelligent_workflow(
             # Fall through to normal classification on error
 
     # ========================================================================
+    # STEP 0.4: VOICE-SPECIFIC - Force list_projects for "how many jobs" queries
+    # This bypasses Sonnet classification which sometimes misclassifies as context_query
+    # Voice-only: Chat has conversation history context, voice often starts fresh
+    # ========================================================================
+    if channel == 'voice':
+        msg_lower = message.lower().strip()
+        # Patterns that should ALWAYS trigger list_projects for voice
+        list_project_patterns = [
+            'how many job', 'how many project', 'how many work',
+            'list my job', 'list my project', 'list my work',
+            'show my job', 'show my project', 'show my work',
+            'what job', 'what project', 'what work do i have',
+            'any job', 'any project', 'do i have any',
+            'tell me about my job', 'tell me about my project',
+            'my jobs', 'my projects', 'my work'
+        ]
+        if any(pattern in msg_lower for pattern in list_project_patterns):
+            logger.info(f"[VOICE-PRECHECK] Detected project list query, forcing list_projects action")
+            try:
+                # Directly call list_projects Lambda
+                list_response = call_lambda_directly('list_projects', {
+                    'customer_id': customer_id,
+                    'client_id': client_id,
+                    'pf_bearer_token': pf_bearer_token
+                })
+
+                # Parse response
+                list_data = list_response.get('response', {})
+                list_func = list_data.get('functionResponse', {})
+                list_body_wrapper = list_func.get('responseBody', {})
+                list_text = list_body_wrapper.get('TEXT', {})
+                list_body_str = list_text.get('body', '{}')
+
+                if isinstance(list_body_str, str):
+                    response_body = json.loads(list_body_str)
+                else:
+                    response_body = list_body_str
+
+                # Format response for voice
+                response_text = format_lambda_response('list_projects', response_body, message)
+
+                # Save project_ids to workflow state for ordinal references
+                if 'projects' in response_body:
+                    project_ids = [str(p.get('id', '')) for p in response_body['projects'] if p.get('id')]
+                    if project_ids:
+                        logger.info(f"[VOICE-PRECHECK] Saving {len(project_ids)} project_ids to workflow state")
+                        state_manager.save_state(session_id, {
+                            'workflow_type': 'view_projects',
+                            'current_stage': 'showing_projects',
+                            'context': {
+                                'project_ids': project_ids,
+                                'customer_id': customer_id
+                            }
+                        })
+
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': response_text,
+                    'intent': 'scheduling',
+                    'action': 'list_projects',
+                    'agent_name': 'Intelligent Orchestrator (Voice Pre-check)',
+                    'direct_call': True,
+                    'timing': timing
+                }
+            except Exception as voice_err:
+                logger.warning(f"[VOICE-PRECHECK] Error in voice pre-check: {voice_err}, falling through to normal flow")
+                # Fall through to normal classification
+
+    # ========================================================================
     # STEP 0.5: Check for ORDINAL PROJECT REFERENCE (before classification)
     # This handles "last project", "first project", "2nd project" etc.
     # by directly resolving the ordinal to a project_id from the stored list
@@ -1399,7 +1469,46 @@ def orchestrate_intelligent_workflow(
                 resolved_project_id = str(project_ids[ordinal_index])
                 logger.info(f"[ORDINAL] Resolved index {ordinal_index} to project_id={resolved_project_id} from list of {len(project_ids)} projects")
 
-                # Call get_project_details directly
+                # VOICE-ONLY: Detect action words in message (reschedule, cancel, schedule)
+                # If user says "reschedule the first one", route to reschedule flow, NOT get_project_details
+                message_lower = message.lower()
+                if channel == 'voice':
+                    # Check for reschedule action
+                    if any(word in message_lower for word in ['reschedule', 'move', 'change the date', 'different date', 'another date', 'change my appointment']):
+                        logger.info(f"[ORDINAL-VOICE] Detected RESCHEDULE action in ordinal reference")
+                        # Don't return project details - fall through to normal classification
+                        # with resolved project_id added to context
+                        workflow_state['context'] = workflow_state.get('context', {})
+                        workflow_state['context']['resolved_project_id'] = resolved_project_id
+                        workflow_state['context']['ordinal_action'] = 'reschedule'
+                        state_manager.save_state(session_id, workflow_state)
+                        logger.info(f"[ORDINAL-VOICE] Saved resolved_project_id={resolved_project_id} for reschedule, falling through to classification")
+                        # Fall through to normal classification below (don't return here)
+                        pass
+                    # Check for cancel action
+                    elif any(word in message_lower for word in ['cancel', 'remove', 'delete', 'dont want', "don't want"]):
+                        logger.info(f"[ORDINAL-VOICE] Detected CANCEL action in ordinal reference")
+                        workflow_state['context'] = workflow_state.get('context', {})
+                        workflow_state['context']['resolved_project_id'] = resolved_project_id
+                        workflow_state['context']['ordinal_action'] = 'cancel'
+                        state_manager.save_state(session_id, workflow_state)
+                        logger.info(f"[ORDINAL-VOICE] Saved resolved_project_id={resolved_project_id} for cancel, falling through to classification")
+                        # Fall through to normal classification below
+                        pass
+                    else:
+                        # No action word detected - proceed with get_project_details (original behavior)
+                        pass
+
+                # Check if we should skip get_project_details due to action word detection
+                ordinal_action = workflow_state.get('context', {}).get('ordinal_action')
+                if ordinal_action:
+                    # Clear the action flag and fall through to classification
+                    workflow_state['context'].pop('ordinal_action', None)
+                    logger.info(f"[ORDINAL-VOICE] Skipping get_project_details, routing to {ordinal_action} with project_id={resolved_project_id}")
+                    # Raise to break out of try block and fall through to classification
+                    raise Exception(f"ORDINAL_ACTION_DETECTED:{ordinal_action}")
+
+                # Call get_project_details directly (original behavior - no action word detected)
                 ordinal_start = time.time()
                 details_response = call_lambda_directly('get_project_details', {
                     'project_id': resolved_project_id,
@@ -1421,17 +1530,61 @@ def orchestrate_intelligent_workflow(
                 else:
                     response_body = body_str
 
-                # Generate response using Sonnet for natural language
+                # Generate response using format_lambda_response (same pattern as rest of codebase)
                 project_data = response_body.get('project', response_body)
 
+                # VOICE-ONLY: Fetch weather for scheduled projects
+                if channel == 'voice' and project_data.get('scheduledDate'):
+                    try:
+                        # Get city from project address
+                        address_info = project_data.get('address', {})
+                        city = address_info.get('city', '')
+                        state = address_info.get('state', '')
+                        scheduled_date = project_data.get('scheduledDate', '')
+
+                        if city and scheduled_date:
+                            location = f"{city}, {state}" if state else city
+                            logger.info(f"[VOICE-WEATHER] Fetching weather for {location} on {scheduled_date}")
+
+                            weather_response = call_lambda_directly('get_weather', {
+                                'location': location,
+                                'date': scheduled_date,
+                                'customer_id': customer_id,
+                                'client_id': client_id,
+                                'pf_bearer_token': pf_bearer_token
+                            })
+
+                            # Extract weather data
+                            weather_data = weather_response.get('response', {}).get('functionResponse', {}).get('responseBody', {}).get('TEXT', {}).get('body', '{}')
+                            if isinstance(weather_data, str):
+                                weather_data = json.loads(weather_data)
+
+                            # Add weather to project data for voice formatting
+                            if weather_data.get('weather'):
+                                project_data['weather'] = weather_data.get('weather', {})
+                                project_data['weather_location'] = location
+                                response_body['project'] = project_data
+                                logger.info(f"[VOICE-WEATHER] Added weather data: {weather_data.get('weather', {}).get('condition', 'N/A')}")
+                    except Exception as weather_err:
+                        logger.warning(f"[VOICE-WEATHER] Failed to fetch weather (non-critical): {weather_err}")
+                        # Continue without weather - don't fail the request
+
                 response_gen_start = time.time()
-                response_text = generate_response_with_sonnet(
-                    intent='information',
-                    action='get_project_details',
-                    lambda_response=response_body,
-                    original_message=message,
-                    conversation_history=conversation_history
-                )
+
+                # VOICE-SPECIFIC: Use voice formatter directly for comprehensive details
+                # (Router strips JSON before format_for_voice, causing truncation)
+                if channel == 'voice':
+                    # Direct voice formatting - includes all details (status, technician, address, weather)
+                    voice_text = _format_project_details_for_voice(response_body)
+                    # Add voice engagement (opener and follow-up question)
+                    voice_text = _add_voice_opener(voice_text, 'information')
+                    voice_text = _add_voice_followup(voice_text, 'information')
+                    response_text = voice_text
+                    logger.info(f"[ORDINAL-VOICE] Used direct voice formatting ({len(response_text)} chars)")
+                else:
+                    # Chat/SMS: Use standard formatting with JSON
+                    response_text = format_lambda_response('get_project_details', response_body, message)
+
                 timing['response_generation'] = time.time() - response_gen_start
 
                 timing['total'] = time.time() - start_time
@@ -1441,14 +1594,21 @@ def orchestrate_intelligent_workflow(
                     'action': 'get_project_details',
                     'agent_name': 'Intelligent Orchestrator (Ordinal Reference)',
                     'direct_call': True,
-                    'timing': timing
+                    'timing': timing,
+                    'channel': channel
                 }
 
             except IndexError:
                 logger.warning(f"[ORDINAL] Index {ordinal_index} out of range for {len(project_ids)} projects")
                 # Fall through to normal classification
             except Exception as ordinal_err:
-                logger.error(f"[ORDINAL] Error handling ordinal reference: {ordinal_err}")
+                # Check if this is our intentional action detection (not an error)
+                if "ORDINAL_ACTION_DETECTED:" in str(ordinal_err):
+                    action_type = str(ordinal_err).split(":")[-1]
+                    logger.info(f"[ORDINAL-VOICE] Falling through to classification for {action_type} action")
+                    # Fall through to normal classification (this is expected behavior)
+                else:
+                    logger.error(f"[ORDINAL] Error handling ordinal reference: {ordinal_err}")
                 # Fall through to normal classification
         else:
             logger.info("[ORDINAL] No project_ids in workflow state, falling through to classification")

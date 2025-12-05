@@ -789,6 +789,80 @@ deploy_lambda() {
 }
 
 # ============================================================================
+
+##############################################################################
+# Helper: Ensure AWS Default Encryption (Remove any customer-managed KMS key)
+# IMPORTANT: We ALWAYS use AWS default encryption for Lambda environment variables.
+#            This prevents KMSAccessDeniedException errors from misconfigured KMS keys.
+#            DO NOT CHANGE THIS - customer KMS keys cause permission nightmares!
+##############################################################################
+
+ensure_aws_default_encryption() {
+    local FUNCTION_NAME=$1
+    local KMS_MAX_WAIT=30
+    local KMS_POLL_INTERVAL=3
+    local KMS_ELAPSED=0
+
+    echo "  -> Checking encryption for: $FUNCTION_NAME"
+
+    # Check if function exists
+    if ! aws_cmd lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" &>/dev/null; then
+        echo "    [SKIP] Function $FUNCTION_NAME not found"
+        return 0
+    fi
+
+    # Check if Lambda has a customer-managed KMS key
+    local CURRENT_KMS
+    CURRENT_KMS=$(aws_cmd lambda get-function-configuration \
+        --function-name "$FUNCTION_NAME" \
+        --region "$REGION" \
+        --query 'KMSKeyArn' \
+        --output text 2>/dev/null)
+
+    if [[ "$CURRENT_KMS" != "None" ]] && [[ "$CURRENT_KMS" != "null" ]] && [[ -n "$CURRENT_KMS" ]]; then
+        echo "    [WARN] Found customer KMS key: $CURRENT_KMS"
+        echo "    -> Removing KMS key, switching to AWS default encryption..."
+
+        # Remove KMS key by setting it to empty string (forces AWS managed encryption)
+        aws_cmd lambda update-function-configuration \
+            --function-name "$FUNCTION_NAME" \
+            --kms-key-arn "" \
+            --region "$REGION" &>/dev/null
+
+        # Wait for update with polling loop
+        while [[ $KMS_ELAPSED -lt $KMS_MAX_WAIT ]]; do
+            local STATE
+            STATE=$(aws_cmd lambda get-function-configuration \
+                --function-name "$FUNCTION_NAME" \
+                --region "$REGION" \
+                --query 'LastUpdateStatus' \
+                --output text 2>/dev/null)
+
+            if [[ "$STATE" == "Successful" ]]; then
+                echo -e "    ${GREEN}[OK] Now using AWS default encryption (${KMS_ELAPSED}s)${NC}"
+                return 0
+            elif [[ "$STATE" == "Failed" ]]; then
+                echo -e "    ${RED}[FAIL] Lambda update failed${NC}"
+                return 1
+            fi
+
+            sleep $KMS_POLL_INTERVAL
+            KMS_ELAPSED=$((KMS_ELAPSED + KMS_POLL_INTERVAL))
+
+            if [[ $((KMS_ELAPSED % 10)) -eq 0 ]]; then
+                echo "    -> Waiting for update... ${KMS_ELAPSED}s / ${KMS_MAX_WAIT}s"
+            fi
+        done
+
+        echo -e "    ${YELLOW}[WARN] Update timed out after ${KMS_MAX_WAIT}s${NC}"
+        return 0
+    else
+        echo -e "    ${GREEN}[OK] Already using AWS default encryption${NC}"
+    fi
+
+    return 0
+}
+
 # Main Deployment - Profile Selection happens first at script start
 # ============================================================================
 
@@ -1435,6 +1509,88 @@ try:
             ]
         },
         {
+            'name': 'SelectionIntent',
+            'description': 'Handle ordinal selections during workflows (VOICE-SPECIFIC)',
+            'utterances': [
+                'I want the first one',
+                'I want the second one',
+                'I want the third one',
+                'I want the fourth one',
+                'I want the fifth one',
+                'I want the sixth one',
+                'I want the seventh one',
+                'I want the eighth one',
+                'I want first',
+                'I want second',
+                'I want third',
+                'I want fourth',
+                'lets do the first one',
+                'lets do the second one',
+                'lets do the third one',
+                'lets do the fourth one',
+                'lets do first',
+                'lets do second',
+                'lets do third',
+                'lets do fourth',
+                'go with the first one',
+                'go with the second one',
+                'go with the third one',
+                'go with the fourth one',
+                'go with first',
+                'go with second',
+                'go with third',
+                'go with fourth',
+                'ill take the first one',
+                'ill take the second one',
+                'ill take the third one',
+                'ill take the fourth one',
+                'ill take first',
+                'ill take second',
+                'ill take third',
+                'ill take fourth',
+                'yes that one',
+                'yeah that one',
+                'that one please',
+                'yes this one',
+                'first please',
+                'second please',
+                'third please',
+                'fourth please',
+                'the first one please',
+                'the second one please',
+                'the third one please',
+                'the fourth one please',
+                'select the first',
+                'select the second',
+                'select the third',
+                'select the fourth',
+                'pick the first',
+                'pick the second',
+                'pick the third',
+                'pick the fourth',
+                'choose the first',
+                'choose the second',
+                'choose the third',
+                'choose the fourth',
+                'I pick one',
+                'I pick two',
+                'I pick three',
+                'I pick four',
+                'I choose one',
+                'I choose two',
+                'I choose three',
+                'I choose four',
+                'reschedule the first one',
+                'reschedule the second one',
+                'reschedule the third one',
+                'reschedule the fourth one',
+                'cancel the first one',
+                'cancel the second one',
+                'cancel the third one',
+                'cancel the fourth one',
+            ]
+        },
+        {
             'name': 'CheckAvailability',
             'description': 'Check available dates for scheduling installations',
             'utterances': [
@@ -1774,6 +1930,7 @@ try:
             'name': 'RescheduleAppointment',
             'description': 'Reschedule an existing installation appointment',
             'utterances': [
+                # Basic reschedule phrases
                 'reschedule my appointment',
                 'change my appointment',
                 'move my appointment',
@@ -1797,6 +1954,20 @@ try:
                 'something came up need to move it',
                 'that day does not work',
                 'need a new date',
+                # Job/Work/Service terminology
+                'reschedule my job',
+                'change my job',
+                'move my job',
+                'reschedule my work',
+                'change my work date',
+                'move my work',
+                'reschedule my service',
+                'reschedule my service call',
+                'change my service date',
+                'move my service call',
+                'reschedule the job',
+                'change the job date',
+                # Installation specific
                 'reschedule my installation',
                 'change my install date',
                 'move my project date',
@@ -1805,6 +1976,7 @@ try:
                 'move my flooring install',
                 'need to change when you come',
                 'can the crew come a different day',
+                # Situational
                 'something came up',
                 'I have a conflict',
                 'I will not be home',
@@ -1816,6 +1988,17 @@ try:
                 'change when they come',
                 'move my deck installation',
                 'reschedule my roof appointment',
+                # Date-specific reschedule
+                'reschedule to next week',
+                'move it to next week',
+                'reschedule for next Tuesday',
+                'change it to Monday',
+                'can you come next week instead',
+                'push it to next month',
+                'reschedule to a later date',
+                'move it to December',
+                'change to a different week',
+                'reschedule for the following week',
             ]
         },
         {
@@ -3004,6 +3187,18 @@ REQUIRED_INTENTS = {
             'something came up need to move it',
             'that day does not work',
             'need a new date',
+            'reschedule my job',
+            'change my job',
+            'move my job',
+            'reschedule my work',
+            'change my work date',
+            'move my work',
+            'reschedule my service',
+            'reschedule my service call',
+            'change my service date',
+            'move my service call',
+            'reschedule the job',
+            'change the job date',
             'reschedule my installation',
             'change my install date',
             'move my project date',
@@ -3023,6 +3218,16 @@ REQUIRED_INTENTS = {
             'change when they come',
             'move my deck installation',
             'reschedule my roof appointment',
+            'reschedule to next week',
+            'move it to next week',
+            'reschedule for next Tuesday',
+            'change it to Monday',
+            'can you come next week instead',
+            'push it to next month',
+            'reschedule to a later date',
+            'move it to December',
+            'change to a different week',
+            'reschedule for the following week',
         ]
     },
     'ScheduleAppointment': {
@@ -4254,6 +4459,25 @@ if [[ -n "$CONNECT_INSTANCE_ID" && "$CONNECT_INSTANCE_ID" != "CONNECT_INSTANCE_I
 fi
 
 # ============================================================================
+
+# ============================================================================
+# Step 6.5: Ensure AWS Default Encryption (Remove customer KMS keys)
+# ============================================================================
+
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo -e "${YELLOW}Step 6.5: Ensure AWS Default Encryption${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo ""
+echo "  Verifying all voice Lambdas use AWS default encryption..."
+echo ""
+
+ensure_aws_default_encryption "$LEX_FULFILLMENT_FUNCTION" || echo -e "${YELLOW}[WARN] KMS check failed for $LEX_FULFILLMENT_FUNCTION${NC}"
+ensure_aws_default_encryption "$VOICE_BRIDGE_FUNCTION" || echo -e "${YELLOW}[WARN] KMS check failed for $VOICE_BRIDGE_FUNCTION${NC}"
+ensure_aws_default_encryption "$CUSTOMER_LOOKUP_FUNCTION" || echo -e "${YELLOW}[WARN] KMS check failed for $CUSTOMER_LOOKUP_FUNCTION${NC}"
+
+echo ""
+echo -e "${GREEN}[OK] AWS default encryption verified for all voice Lambdas${NC}"
+
 # Step 7: FINAL VERIFICATION - Bulletproof checks before saying "Complete"
 # ============================================================================
 

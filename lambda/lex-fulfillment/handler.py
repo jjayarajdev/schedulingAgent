@@ -179,6 +179,20 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             session_attributes.get('customer_phone', 'unknown')
         )
 
+        # VOICE-SPECIFIC: If no customer_id in session, get from Secrets Manager
+        # This is voice-only (lex-fulfillment is only called by voice/Connect)
+        if not customer_id:
+            try:
+                credentials = get_credentials_from_secrets()
+                customer_id = credentials.get('user_id')
+                if customer_id:
+                    # Store in session for subsequent calls
+                    session_attributes['customer_id'] = customer_id
+                    event['sessionState']['sessionAttributes'] = session_attributes
+                    logger.info(f"[VOICE] Set customer_id from Secrets Manager: {customer_id}")
+            except Exception as cred_err:
+                logger.warning(f"[VOICE] Failed to get customer_id from Secrets Manager: {cred_err}")
+
         # Check for sentiment analysis (if enabled on bot alias)
         sentiment_response = event.get('sentimentResponse', {})
         if sentiment_response:
@@ -226,7 +240,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "ProjectInquiry", "ProjectStatusInquiry", "AppointmentInquiry",
             "CheckAvailability", "WeatherInquiry", "RescheduleAppointment",
             "CancelAppointment", "BusinessHours", "ScheduleAppointment",
-            "UrgentRequest", "FallbackIntent"
+            "UrgentRequest", "FallbackIntent", "SelectionIntent"  # SelectionIntent: VOICE-SPECIFIC ordinal selections
         ]:
             try:
                 logger.info(f"Routing {intent_name} through orchestrator (primary path)")
@@ -1119,6 +1133,7 @@ def hand_off_to_bedrock(
         Lex response with orchestrator's response
     """
     logger.info(f"Routing complex query through orchestrator for session {session_id}")
+    logger.info(f"[DEBUG] input_text='{input_text}', len={len(input_text) if input_text else 0}")
 
     # FIX: Handle empty input_text (can happen with FallbackIntent)
     if not input_text or not input_text.strip():
@@ -1140,11 +1155,13 @@ def hand_off_to_bedrock(
         logger.info(f"Recovered input_text from alternate source: {input_text[:50]}...")
 
     try:
+        logger.info(f"[DEBUG] Getting credentials, USE_ORCHESTRATOR_FOR_VOICE={USE_ORCHESTRATOR_FOR_VOICE}")
         # Get all credentials from Secrets Manager
         credentials = get_credentials_from_secrets()
         pf_client_id = credentials['client_id']
         pf_token = credentials['bearer_token']
         pf_user_id = credentials['user_id']  # Get user_id from Secrets Manager
+        logger.info(f"[DEBUG] Got credentials, client_id={pf_client_id}, user_id={pf_user_id}")
 
         # Get session attributes for context (e.g., last_project_ids)
         session_attributes = event.get('sessionState', {}).get('sessionAttributes', {}) or {}

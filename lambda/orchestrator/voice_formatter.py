@@ -10,6 +10,56 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger()
 
 
+def _add_voice_opener(text: str, intent: str) -> str:
+    """
+    Add engaging opener to voice response (VOICE ONLY).
+    Makes responses feel more conversational from the start.
+
+    Examples:
+    - "You have 8 projects" -> "Great! You have 8 projects"
+    - "Your appointment is scheduled" -> "Good news! Your appointment is scheduled"
+    """
+    text_stripped = text.strip()
+    text_lower = text_stripped.lower()
+
+    # Don't add opener if response already has one
+    engaging_starters = [
+        'great', 'good news', 'perfect', 'wonderful', 'excellent',
+        'sure', 'absolutely', 'of course', 'certainly', 'happy to help',
+        'let me', 'i found', 'i see', 'looking at', 'checking'
+    ]
+    for starter in engaging_starters:
+        if text_lower.startswith(starter):
+            return text_stripped
+
+    # Don't add opener to error/apology messages
+    error_indicators = ['sorry', 'unfortunately', 'error', 'problem', 'issue', 'unable', 'cannot']
+    for indicator in error_indicators:
+        if indicator in text_lower[:50]:
+            return text_stripped
+
+    # Don't add opener to goodbye/thankyou
+    if intent.lower() in ['goodbye', 'thankyou', 'thank_you', 'chitchat', 'welcome']:
+        return text_stripped
+
+    # Add appropriate opener based on content
+    if 'you have' in text_lower and ('project' in text_lower or 'job' in text_lower):
+        return "Great! " + text_stripped
+    elif 'scheduled' in text_lower or 'confirmed' in text_lower or 'booked' in text_lower:
+        return "Good news! " + text_stripped
+    elif 'available date' in text_lower or 'here are' in text_lower:
+        return "Perfect! " + text_stripped
+    elif 'reschedul' in text_lower:
+        return "Sure thing! " + text_stripped
+    elif 'cancel' in text_lower:
+        return "Understood. " + text_stripped
+    elif 'weather' in text_lower:
+        return "Let me tell you about the weather. " + text_stripped
+
+    # Default: don't add opener for unknown content
+    return text_stripped
+
+
 def _add_voice_followup(text: str, intent: str) -> str:
     """
     Add follow-up question to voice response for engagement.
@@ -100,22 +150,36 @@ def format_for_voice(response_text: str, intent: str = 'unknown') -> str:
 
             # Handle different JSON structures
             if 'projects' in parsed:
-                return _format_projects_for_voice(parsed)
+                voice_text = _format_projects_for_voice(parsed)
             elif 'project' in parsed:
-                return _format_project_details_for_voice(parsed)
+                voice_text = _format_project_details_for_voice(parsed)
             elif 'available_dates' in parsed:
-                return _format_dates_for_voice(parsed)
+                voice_text = _format_dates_for_voice(parsed)
             elif 'time_slots' in parsed:
-                return _format_time_slots_for_voice(parsed)
+                voice_text = _format_time_slots_for_voice(parsed)
             else:
                 # Generic JSON - convert to text
-                return _generic_json_to_voice(parsed)
+                voice_text = _generic_json_to_voice(parsed)
+
+            # Apply voice engagement to JSON responses too
+            voice_text = _add_voice_opener(voice_text, intent)
+            voice_text = _add_voice_followup(voice_text, intent)
+            return voice_text
 
         # Step 2: Clean up text responses for voice
         voice_text = response_text
 
         # Remove markdown formatting first
         voice_text = _remove_markdown(voice_text)
+
+        # VOICE-SPECIFIC PHRASE REPLACEMENTS (chat uses "show", voice uses "give/find")
+        # These make responses more natural for phone conversations
+        voice_text = re.sub(r"show you the available dates", "give you the available dates", voice_text, flags=re.IGNORECASE)
+        voice_text = re.sub(r"show you available dates", "give you available dates", voice_text, flags=re.IGNORECASE)
+        voice_text = re.sub(r"show the available dates", "give you the available dates", voice_text, flags=re.IGNORECASE)
+        voice_text = re.sub(r"Just say 'yes' or 'show dates' to continue\.", "", voice_text, flags=re.IGNORECASE)
+        voice_text = re.sub(r"say 'yes' or 'show dates'", "say yes", voice_text, flags=re.IGNORECASE)
+        voice_text = re.sub(r"Here are the available dates:", "Here are some available dates.", voice_text, flags=re.IGNORECASE)
 
         # VOICE OPTIMIZATION: Remove project IDs - they're hard to hear
         # "project #7751742" -> "your project"
@@ -159,6 +223,9 @@ def format_for_voice(response_text: str, intent: str = 'unknown') -> str:
             break_point = voice_text.rfind('.', 0, 280)
             if break_point > 100:
                 voice_text = voice_text[:break_point + 1]
+
+        # VOICE ENGAGEMENT: Add engaging opener (e.g., "Great! You have 8 projects...")
+        voice_text = _add_voice_opener(voice_text, intent)
 
         # VOICE ENGAGEMENT: Add follow-up question if response doesn't already have one
         voice_text = _add_voice_followup(voice_text, intent)
@@ -230,25 +297,86 @@ def _format_projects_for_voice(data: Dict) -> str:
 
 
 def _format_project_details_for_voice(data: Dict) -> str:
-    """Format single project details for voice"""
+    """Format single project details for voice - FULL DETAILS like chat"""
     project = data.get('project', {})
 
     project_id = project.get('id', 'unknown')
     project_name = project.get('name', 'Unnamed project')
+    project_number = project.get('projectNumber', '')
     status = project.get('status', 'unknown')
     category = project.get('category', 'unspecified')
+    project_type = project.get('projectType', '')
     scheduled_date = project.get('scheduledDate')
+    scheduled_end = project.get('scheduledEndDate')
 
-    id_spoken = _spell_digits(str(project_id))
+    # Technician info
+    installer_info = project.get('installer', {})
+    technician = project.get('technician', {})
+    technician_name = technician.get('name') or installer_info.get('name', '')
 
-    result = f"Project {project_name}, ID {id_spoken}. "
-    result += f"Status: {status}. "
-    result += f"Category: {category}. "
+    # Address info
+    address_info = project.get('address', {})
+    full_address = address_info.get('fullAddress', '')
+    if not full_address:
+        addr1 = address_info.get('address1', '')
+        city = address_info.get('city', '')
+        state = address_info.get('state', '')
+        full_address = f"{addr1}, {city}, {state}".strip(', ') if addr1 or city else ''
 
+    # Store info
+    store_info = project.get('store', {})
+    store_name = store_info.get('storeName', '')
+
+    # Build comprehensive response (NO project ID/number - user already knows which one)
+    result = f"Here are the details for your {category} project. "
+
+    # Status
+    result += f"The status is {status}. "
+
+    # Project type if available
+    if project_type and project_type != category:
+        result += f"This is a {project_type} project. "
+
+    # Scheduling info
     if scheduled_date:
-        result += f"Scheduled for {_format_date_naturally(scheduled_date)}. "
+        result += f"It's scheduled for {_format_date_naturally(scheduled_date)}. "
+        if scheduled_end and scheduled_end != scheduled_date:
+            result += f"The work is expected to finish by {_format_date_naturally(scheduled_end)}. "
     else:
-        result += "Not yet scheduled. "
+        result += "It's not yet scheduled. "
+
+    # Technician
+    if technician_name:
+        result += f"Your technician is {technician_name}. "
+    else:
+        result += "A technician hasn't been assigned yet. "
+
+    # Address
+    if full_address:
+        result += f"The work address is {full_address}. "
+
+    # Store
+    if store_name:
+        result += f"This project is from {store_name}. "
+
+    # Weather info (VOICE-ONLY - added by orchestrator for scheduled projects)
+    weather = project.get('weather', {})
+    if weather and scheduled_date:
+        condition = weather.get('condition', '')
+        high_temp = weather.get('high_temp') or weather.get('temperature', {}).get('high')
+        low_temp = weather.get('low_temp') or weather.get('temperature', {}).get('low')
+
+        if condition:
+            result += f"Weather forecast for your appointment day: {condition}. "
+            if high_temp and low_temp:
+                result += f"Expected high of {high_temp} degrees and low of {low_temp} degrees. "
+            elif high_temp:
+                result += f"Expected high of {high_temp} degrees. "
+
+            # Weather warnings
+            warnings = weather.get('warnings', [])
+            if warnings:
+                result += f"Please note: {warnings[0]}. "
 
     return result
 

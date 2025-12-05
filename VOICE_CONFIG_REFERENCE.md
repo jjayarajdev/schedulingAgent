@@ -48,7 +48,7 @@ aws lexv2-models describe-bot --bot-id MCMSOW2OXJ --region us-east-1
 | Locale ID | `en_US` |
 | Locale Name | English (US) |
 | NLU Confidence Threshold | `0.3` |
-| Intents Count | `16` |
+| Intents Count | `17` |
 | Slot Types Count | `0` |
 | Bot Locale Status | `Built` |
 | Speech Detection Sensitivity | `MaximumNoiseTolerance` |
@@ -605,9 +605,9 @@ All intents are configured with:
 
 ## All Intents with Utterances
 
-## Intents Summary (Updated 2025-12-02)
+## Intents Summary (Updated 2025-12-05)
 
-**Total Utterances: 676**
+**Total Utterances: 752** (was 676, added SelectionIntent with 76 utterances)
 
 | Intent | Count | Description |
 |--------|-------|-------------|
@@ -623,6 +623,7 @@ All intents are configured with:
 | ProjectStatusInquiry | 111 | Get project details - includes "job" position refs, installer queries |
 | RescheduleAppointment | 42 | Reschedule an existing installation appointment |
 | ScheduleAppointment | 76 | Schedule a new appointment - single or multiple pr... |
+| **SelectionIntent** | **76** | **NEW (2025-12-05)** Handle ordinal selections during workflows |
 | ThankYou | 30 | Express gratitude |
 | UrgentRequest | 32 | Handle urgent requests and emergencies |
 | WeatherInquiry | 58 | Check weather |
@@ -1283,6 +1284,94 @@ All intents are configured with:
 
 ---
 
+### SelectionIntent (76 utterances) - NEW 2025-12-05
+
+**ID:** `I0RK8IU57Z`
+
+**Description:** Handle ordinal selections during workflows (VOICE-SPECIFIC). Used when user needs to select a project during reschedule/cancel flows. Utterances are unique and don't conflict with ProjectStatusInquiry.
+
+**Purpose:** Prevents FallbackIntent when user says things like "the fourth one", "I want the first one" during a workflow.
+
+**Utterances:**
+- I want the first one
+- I want the second one
+- I want the third one
+- I want the fourth one
+- I want the fifth one
+- I want the sixth one
+- I want the seventh one
+- I want the eighth one
+- I want first
+- I want second
+- I want third
+- I want fourth
+- let's do the first one
+- let's do the second one
+- let's do the third one
+- let's do the fourth one
+- lets do first
+- lets do second
+- lets do third
+- lets do fourth
+- go with the first one
+- go with the second one
+- go with the third one
+- go with the fourth one
+- go with first
+- go with second
+- go with third
+- go with fourth
+- I'll take the first one
+- I'll take the second one
+- I'll take the third one
+- I'll take the fourth one
+- ill take first
+- ill take second
+- ill take third
+- ill take fourth
+- yes that one
+- yeah that one
+- that one please
+- yes this one
+- first please
+- second please
+- third please
+- fourth please
+- the first one please
+- the second one please
+- the third one please
+- the fourth one please
+- select the first
+- select the second
+- select the third
+- select the fourth
+- pick the first
+- pick the second
+- pick the third
+- pick the fourth
+- choose the first
+- choose the second
+- choose the third
+- choose the fourth
+- I pick one
+- I pick two
+- I pick three
+- I pick four
+- I choose one
+- I choose two
+- I choose three
+- I choose four
+- reschedule the first one
+- reschedule the second one
+- reschedule the third one
+- reschedule the fourth one
+- cancel the first one
+- cancel the second one
+- cancel the third one
+- cancel the fourth one
+
+---
+
 ### ThankYou (30 utterances)
 
 **ID:** `ZXU2R1QSAL`
@@ -1807,4 +1896,63 @@ aws connect associate-phone-number-contact-flow \
 
 ---
 
-*Last verified: 2025-11-30*
+## Voice Response Formatting (Updated 2025-12-05)
+
+### Project Details - Voice-Specific Formatting
+
+**Location:** `lambda/orchestrator/voice_formatter.py` - `_format_project_details_for_voice()`
+
+**Key Changes:**
+1. **No project ID/number narration** - User already knows which project (they asked "tell me about the first one")
+2. **Comprehensive details included:** Status, technician, address, store, weather
+3. **Natural language** - No technical IDs or numbers
+
+**Before (BAD for voice):**
+```
+"Project number 7-7-5-1-7-4-2. The status is scheduled..."
+```
+
+**After (GOOD for voice):**
+```
+"Here are the details for your flooring project. The status is scheduled.
+It's scheduled for Tuesday, December 10th. Your technician is John Smith.
+The work address is 123 Main Street, Dallas, Texas.
+Weather forecast for your appointment day: Partly cloudy. Expected high of 72 degrees."
+```
+
+### Ordinal Reference Path - Direct Voice Formatting
+
+**Location:** `lambda/orchestrator/intelligent_orchestrator.py` - Lines 1535-1547
+
+**Problem Solved:** Router strips JSON before `format_for_voice()`, causing:
+- `_format_project_details_for_voice()` was NEVER called
+- Text truncated to 3 sentences + 300 chars
+
+**Solution:** For voice channel, call `_format_project_details_for_voice()` directly:
+```python
+if channel == 'voice':
+    # Direct voice formatting - includes all details
+    voice_text = _format_project_details_for_voice(response_body)
+    voice_text = _add_voice_opener(voice_text, 'information')
+    voice_text = _add_voice_followup(voice_text, 'information')
+    response_text = voice_text
+else:
+    # Chat/SMS: Use standard formatting with JSON
+    response_text = format_lambda_response('get_project_details', response_body, message)
+```
+
+### Voice Engagement Elements
+
+| Element | Purpose | Example |
+|---------|---------|---------|
+| Voice Opener | Engaging start | "Great! Here are the details..." |
+| Voice Follow-up | Continue conversation | "Is there anything else I can help you with?" |
+
+**Applied to:**
+- Project details response
+- Project list response
+- All JSON-based responses
+
+---
+
+*Last verified: 2025-12-05*
