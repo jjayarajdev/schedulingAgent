@@ -83,6 +83,33 @@ MAX_RESPONSE_LENGTH = int(os.environ.get('MAX_VOICE_RESPONSE_LENGTH', '500'))
 # DynamoDB table
 table = dynamodb.Table(DYNAMODB_TABLE)
 
+# Voice speech rate (90% = slightly slower for clarity)
+VOICE_SPEECH_RATE = os.environ.get('VOICE_SPEECH_RATE', '90%')
+
+
+def wrap_with_ssml_prosody(text: str, rate: str = None) -> str:
+    """
+    Wrap text with SSML prosody tags for slower, clearer speech.
+
+    Args:
+        text: Plain text message
+        rate: Speech rate (e.g., "90%", "slow", "medium"). Default from env.
+
+    Returns:
+        SSML-wrapped message with prosody rate
+    """
+    if rate is None:
+        rate = VOICE_SPEECH_RATE
+
+    # Don't double-wrap if already SSML
+    if text.strip().startswith('<speak>'):
+        return text
+
+    # Escape any XML special characters in the text
+    text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+    return f'<speak><prosody rate="{rate}">{text}</prosody></speak>'
+
 
 class LexResponseBuilder:
     """Builds properly formatted Lex V2 responses"""
@@ -95,7 +122,7 @@ class LexResponseBuilder:
         session_attributes: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """
-        Build a Lex V2 response
+        Build a Lex V2 response with barge-in support
 
         Args:
             event: Original Lex event
@@ -104,10 +131,17 @@ class LexResponseBuilder:
             session_attributes: Session attributes to maintain
 
         Returns:
-            Properly formatted Lex V2 response dictionary
+            Properly formatted Lex V2 response dictionary with barge-in enabled
         """
         if session_attributes is None:
-            session_attributes = event.get('sessionState', {}).get('sessionAttributes', {})
+            session_attributes = event.get('sessionState', {}).get('sessionAttributes', {}).copy()
+        else:
+            session_attributes = session_attributes.copy()
+
+        # BARGE-IN SUPPORT: Enable user to interrupt bot mid-speech
+        # When user speaks, bot stops talking and listens
+        # This makes conversations more natural and human-like
+        session_attributes['x-amz-lex:allow-interrupt:*:*'] = 'true'
 
         # Truncate message if too long
         if len(message) > MAX_RESPONSE_LENGTH:
@@ -115,6 +149,20 @@ class LexResponseBuilder:
 
         intent = event['sessionState']['intent'].copy()
         intent['state'] = 'Fulfilled' if should_end_session else 'InProgress'
+
+        # VOICE: Wrap with SSML prosody for slower, clearer speech (90% rate)
+        # This makes the bot sound less rushed and more natural
+        # Check if this is a voice channel (Connect/voice mode)
+        channel = session_attributes.get('channel', '').lower()
+        is_voice = channel in ['voice', 'connect'] or 'connect_contact_id' in session_attributes or session_attributes.get('voice_mode') == 'true'
+
+        if is_voice:
+            message = wrap_with_ssml_prosody(message)
+
+        # Detect if message contains SSML tags and set content type accordingly
+        # SSML tags like <speak>, <break>, <prosody> need contentType: 'SSML'
+        is_ssml = message.strip().startswith('<speak>') and message.strip().endswith('</speak>')
+        content_type = 'SSML' if is_ssml else 'PlainText'
 
         response = {
             'sessionState': {
@@ -126,19 +174,19 @@ class LexResponseBuilder:
             },
             'messages': [
                 {
-                    'contentType': 'PlainText',
+                    'contentType': content_type,
                     'content': message
                 }
             ]
         }
 
-        logger.debug(f"Built response: {json.dumps(response, default=str)}")
+        logger.debug(f"Built response (contentType={content_type}): {json.dumps(response, default=str)[:200]}")
         return response
 
     @staticmethod
     def build_error_response(
         event: Dict[str, Any],
-        error_message: str = "I'm experiencing technical difficulties. Please try again.",
+        error_message: str = "Something went wrong. Try again?",
         transfer_to_agent: bool = False
     ) -> Dict[str, Any]:
         """Build an error response with optional agent transfer"""
@@ -268,14 +316,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     # ScheduleAppointment, UrgentRequest, FallbackIntent - no local fallback
                     response = LexResponseBuilder.build_error_response(
                         event,
-                        "I'm having trouble processing your request. Please try again in a moment."
+                        "Can't process that right now. Try again?"
                     )
 
         else:
             logger.warning(f"Unknown intent: {intent_name}")
             response = LexResponseBuilder.build_response(
                 event,
-                "I'm not sure how to help with that. Let me transfer you to my advanced assistant."
+                "Didn't catch that. What do you need?"
             )
 
         logger.info(f"Request {request_id}: Successfully processed intent {intent_name}")
@@ -285,8 +333,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.exception(f"Request {request_id}: Error processing Lex event")
         return LexResponseBuilder.build_error_response(
             event,
-            "I apologize, but I'm having trouble processing your request.",
-            transfer_to_agent=True
+            "Something went wrong. Press 0 for an agent.",
+            transfer_to_agent=False  # Message already mentions agent
         )
 
 
@@ -325,17 +373,9 @@ def handle_welcome(
             logger.info(f"Customer found: {customer_id}")
 
     if customer_id:
-        message = (
-            "Hello! Welcome to ProjectForce. I'm your AI scheduling assistant. "
-            "I can help you check your projects, schedule appointments, or answer questions. "
-            "What would you like to do today?"
-        )
+        message = "Hi! What can I help you with?"
     else:
-        message = (
-            "Hello! Welcome to ProjectForce. I'm your AI scheduling assistant. "
-            "To get started, I'll need your customer ID. You can say it, "
-            "or it might be on your recent invoice. What's your customer ID?"
-        )
+        message = "Hi! What's your customer ID?"
 
     return LexResponseBuilder.build_response(event, message)
 
@@ -1012,12 +1052,7 @@ def handle_business_hours(
     """
     logger.info(f"[HOURS] Handling business hours inquiry")
 
-    response_text = (
-        "Our scheduling team is available Monday through Friday, "
-        "from 8 in the morning until 5 in the evening. "
-        "We're closed on weekends and major holidays. "
-        "Is there anything else I can help you with?"
-    )
+    response_text = "We're open Monday to Friday, 8 AM to 5 PM. Anything else?"
 
     return LexResponseBuilder.build_response(event, response_text)
 
@@ -1033,10 +1068,9 @@ def handle_thank_you(
 
     import random
     responses = [
-        "You're very welcome! Is there anything else I can help you with?",
-        "My pleasure! Let me know if you need anything else.",
-        "Happy to help! Is there anything else you'd like to know?",
-        "Absolutely! Feel free to ask if you have more questions."
+        "You're welcome. Anything else?",
+        "No problem. What else?",
+        "Sure thing. Need anything else?"
     ]
 
     return LexResponseBuilder.build_response(event, random.choice(responses))
@@ -1053,9 +1087,9 @@ def handle_how_are_you(
 
     import random
     responses = [
-        "I'm doing great, thank you for asking! How can I help you today with your projects or scheduling?",
-        "I'm wonderful, thanks! Ready to help you with your projects. What would you like to do?",
-        "I'm here and happy to assist! Would you like to check on your projects or schedule an appointment?"
+        "Good! What do you need?",
+        "Great! How can I help?",
+        "Doing well. What's up?"
     ]
 
     return LexResponseBuilder.build_response(event, random.choice(responses))
@@ -1075,9 +1109,9 @@ def handle_goodbye(
 
     import random
     responses = [
-        "Goodbye! Thank you for calling. Have a wonderful day!",
-        "Take care! Feel free to call back anytime you need help.",
-        "Goodbye! It was a pleasure helping you. Have a great day!"
+        "Bye! Have a good one.",
+        "Take care!",
+        "Bye!"
     ]
 
     # Get current session attributes
@@ -1149,7 +1183,7 @@ def hand_off_to_bedrock(
             logger.warning("Empty input_text, asking user to repeat")
             return LexResponseBuilder.build_response(
                 event,
-                "I'm sorry, I didn't catch that. Could you please repeat your question?",
+                "Didn't catch that. Say again?",
                 should_end_session=False
             )
         logger.info(f"Recovered input_text from alternate source: {input_text[:50]}...")
@@ -1242,7 +1276,7 @@ def hand_off_to_bedrock(
                 logger.error(f"Orchestrator returned error: {result}")
                 return LexResponseBuilder.build_error_response(
                     event,
-                    "I'm experiencing technical difficulties. Please try again."
+                    "Something went wrong. Try again?"
                 )
 
         else:
@@ -1276,14 +1310,14 @@ def hand_off_to_bedrock(
                 logger.error(f"Voice bridge returned error: {result}")
                 return LexResponseBuilder.build_error_response(
                     event,
-                    "I'm experiencing technical difficulties. Please try again."
+                    "Something went wrong. Try again?"
                 )
 
     except Exception as e:
         logger.exception("Error in complex query routing")
         return LexResponseBuilder.build_error_response(
             event,
-            "I'm experiencing technical difficulties. Please try again in a moment."
+            "Something went wrong. Try again?"
         )
 
 

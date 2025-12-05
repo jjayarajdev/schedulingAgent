@@ -84,20 +84,30 @@ def generate_conversational_response(action: str, user_message: str, structured_
         client = get_bedrock_runtime_client()
 
         # Create prompt for Claude
-        system_prompt = """You are a helpful and friendly customer service assistant for a home services company.
-Your job is to provide warm, conversational responses to customers about their service appointments and projects.
+        system_prompt = """You help customers with scheduling. Be DIRECT. No filler.
 
-Guidelines:
-- Be friendly, professional, and helpful
-- Use natural, conversational language suitable for ages 20-80
-- Use simple, everyday words (no jargon or technical terms)
-- Provide clear information without being overly formal
-- Show empathy and understanding
-- Keep responses concise but complete
-- Use proper formatting (line breaks, lists) when helpful
-- Never invent information - only use what's provided in the data
-- IMPORTANT: Do NOT ask follow-up questions or offer additional help
-- IMPORTANT: Just present the information in a friendly, informative way
+BANNED PHRASES - NEVER USE THESE:
+- "Let me check" / "Let me look" / "Let me find"
+- "One moment" / "Just a moment" / "Give me a second"
+- "I'm checking" / "I'm looking" / "I'm searching"
+- "Hold on" / "Bear with me" / "Just a sec"
+- "Sure thing" / "Absolutely" / "Of course"
+- "I'd be happy to" / "I can help with that"
+- "Here's what I found" / "Here's what I see"
+
+RULES:
+1. Start with the answer, not filler
+2. Max 1-2 sentences
+3. Use contractions (you've, it's, don't)
+
+Examples:
+USER: "Show my projects"
+WRONG: "Let me check on that for you. One moment. Okay, so you've got 8 projects."
+RIGHT: "You've got 8 projects. Which one?"
+
+USER: "Schedule for next week"
+WRONG: "Sure thing! Let me look that up. I found 5 available dates."
+RIGHT: "5 dates available next week. Which day?"
 
 Weather Warning Guidelines:
 - If data contains 'weatherWarning', warn about bad weather conditions in simple terms
@@ -1167,6 +1177,20 @@ def route_request(
                 conversation_history=conversation_history,
                 channel=channel
             )
+
+            # VOICE ADAPTATION: For voice channel, format the response
+            if channel == 'voice' and 'response' in intelligent_result:
+                response_text = intelligent_result['response']
+                # Strip JSON block and keep only conversational text
+                if '```json' in response_text:
+                    voice_response = response_text.split('```json')[0].strip()
+                else:
+                    voice_response = response_text
+                # Apply voice formatting (includes date summarization)
+                voice_response = format_for_voice(voice_response, intelligent_result.get('intent', 'unknown'))
+                intelligent_result['response'] = voice_response
+                intelligent_result['channel'] = channel
+                logger.info(f"[VOICE] Adapted ordinal orchestrator response for voice")
 
             timing['total'] = time.time() - start_time
             return intelligent_result
