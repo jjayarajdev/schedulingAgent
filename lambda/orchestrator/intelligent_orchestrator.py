@@ -23,7 +23,7 @@ from botocore.config import Config as BotoConfig
 from config import get_config
 from workflow_state import get_state_manager
 from router import call_lambda_directly, format_lambda_response
-from voice_formatter import _format_project_details_for_voice, _add_voice_opener, _add_voice_followup
+from voice_formatter import _format_project_details_for_voice, _add_voice_followup
 from weather_aware_scheduling import (
     is_outdoor_project,
     find_forecast_for_date,
@@ -812,6 +812,58 @@ IMPORTANT RULES:
    - "projects 1 and 3" -> extract specific positions [0, 2]
    - Return entities.project_ids as ARRAY when multiple projects detected
 
+10. CRITICAL - Project matching by LOCATION, CATEGORY, or TYPE:
+   When user refers to a project by description (not ordinal like "first" or ID like "7751741"),
+   you MUST search the conversation history and match using SEMANTIC/FUZZY matching:
+
+   PRIORITY ORDER (most specific wins):
+   1. ADDRESS/LOCATION match (highest priority) - street names, neighborhoods, areas, partial matches
+   2. CATEGORY match - project type/category with synonyms and variations
+   3. STATUS match - project status
+
+   USE SEMANTIC MATCHING (not exact words):
+
+   LOCATION variations - match ANY partial address component:
+   - "north loop" / "the north" / "loop area" -> matches "123 North Loop Blvd"
+   - "Chicago" / "Chicago place" / "on Chicago" -> matches "456 Chicago Avenue"
+   - "downtown" / "city center" -> matches addresses in downtown area
+   - "Main Street" / "main" / "the main one" -> matches "789 Main St"
+
+   CATEGORY variations - match synonyms and related terms:
+   - "windows" / "window" / "the window job" / "window replacement" -> category "Windows"
+   - "deck" / "decking" / "deck project" / "the deck" -> category "Decking"
+   - "siding" / "side" / "siding work" -> category "Siding"
+   - "roof" / "roofing" / "roof job" / "the roof one" -> category "Roofing"
+   - "door" / "doors" / "door replacement" -> category "Doors"
+   - "gutter" / "gutters" / "gutter work" -> category "Gutters"
+
+   STATUS variations:
+   - "scheduled" / "the scheduled one" / "already scheduled" -> status "Scheduled"
+   - "new" / "the new one" / "new project" -> status "New"
+   - "pending" / "waiting" -> status "Pending"
+
+   MATCHING RULES:
+   - Use substring/partial matching for addresses (case-insensitive)
+   - Use semantic similarity for categories (deck = decking, window = windows, etc.)
+   - When user says "the X one" or "X project" or "X job" - X is the key identifier
+
+   WHEN BOTH LOCATION AND CATEGORY ARE MENTIONED:
+   - "deck project at north loop" -> Match by LOCATION first ("north loop"), verify category
+   - Location is MORE SPECIFIC than category - prefer location match
+   - If location matches but category doesn't, USE the location-matched project
+   - Explain in reasoning: "Found project at North Loop - it's actually Windows, not Decking"
+
+   AMBIGUITY HANDLING:
+   - Multiple matches -> ask for clarification with the options
+   - No matches -> return search criteria for error message
+   - NEVER hallucinate project IDs - only use IDs from conversation history
+
+   SEARCH CONVERSATION HISTORY for project data containing:
+   - Project IDs (7-digit numbers like 7751741)
+   - Addresses (street names, cities, neighborhoods)
+   - Categories (Windows, Decking, Siding, Roofing, etc.)
+   - Status (Scheduled, New, In Progress, etc.)
+
 Examples:
 
 Scheduling:
@@ -870,6 +922,58 @@ Batch scheduling (multiple projects):
     "entities": {{"project_ids": ["7751741", "7751742"]}},
     "workflow_type": "batch_schedule_appointment",
     "reasoning": "User wants to schedule 'first two projects'. Looking at conversation, projects #7751741 and #7751742 are first and second in the list."
+}}
+
+Location-based project reference (PRIORITY: location over category):
+{{
+    "intent": "scheduling",
+    "action": "get_available_dates",
+    "entities": {{"project_id": "7751741"}},
+    "workflow_type": "schedule_appointment",
+    "reasoning": "User said 'the deck one at north'. Semantic match: 'north' matches project #7751741 at '123 North Loop Blvd'. User said 'deck' but project is actually Windows - using location match (more specific). Location takes priority."
+}}
+
+Category-based with synonym (deck = decking):
+{{
+    "intent": "scheduling",
+    "action": "get_available_dates",
+    "entities": {{"project_id": "7751748"}},
+    "workflow_type": "schedule_appointment",
+    "reasoning": "User said 'schedule the deck job'. Semantic match: 'deck' = 'Decking' category. Found project #7751748 with category 'Decking'."
+}}
+
+Partial location match:
+{{
+    "intent": "scheduling",
+    "action": "get_available_dates",
+    "entities": {{"project_id": "7751741"}},
+    "workflow_type": "schedule_appointment",
+    "reasoning": "User said 'the one on Chicago'. Partial address match: 'Chicago' found in '456 Chicago Ave' for project #7751741."
+}}
+
+Informal reference with 'the X one' pattern:
+{{
+    "intent": "scheduling",
+    "action": "get_available_dates",
+    "entities": {{"project_id": "7751748"}},
+    "workflow_type": "schedule_appointment",
+    "reasoning": "User said 'the roof one'. Semantic match: 'roof' = 'Roofing' category. Found project #7751748 with category 'Roofing'."
+}}
+
+Status-based reference:
+{{
+    "intent": "scheduling",
+    "action": "get_project_details",
+    "entities": {{"project_id": "7751742"}},
+    "reasoning": "User said 'the scheduled one'. Status match: Found project #7751742 with status 'Scheduled'."
+}}
+
+Ambiguous - multiple category matches:
+{{
+    "intent": "scheduling",
+    "action": "clarify_project",
+    "entities": {{"search_criteria": {{"category": "Windows"}}, "matching_projects": ["7751741", "7751743"]}},
+    "reasoning": "User said 'the window job'. Found 2 Windows projects: #7751741 at North Loop and #7751743 at Main St. Need clarification."
 }}
 
 Context query (technician info):
