@@ -1,7 +1,7 @@
 # Voice Configuration Reference - AWS Lex V2
 
-**Generated:** 2025-11-30
-**Status:** Stable Production Configuration
+**Generated:** 2025-12-06 (Updated)
+**Status:** Synced with AWS Production
 **Purpose:** Reference for deployment script validation
 
 ---
@@ -156,9 +156,9 @@ aws lexv2-models describe-bot-alias \
 
 | Parameter | Value |
 |-----------|-------|
-| Detect Sentiment | `true` |
+| Detect Sentiment | `false` (null in AWS) |
 
-**Note:** When enabled, Lex sends sentiment data to Lambda:
+**Note:** Sentiment analysis is NOT enabled in AWS production. When enabled, Lex sends sentiment data to Lambda:
 ```python
 sentiment = event.get('sentimentResponse', {})
 # sentiment = {'sentiment': 'POSITIVE|NEGATIVE|NEUTRAL|MIXED', 'sentimentScore': {...}}
@@ -1797,11 +1797,31 @@ aws iam attach-role-policy \
 
 ## Lambda Function Configuration
 
-The Lex fulfillment Lambda must have specific settings.
+Voice infrastructure Lambda functions (AWS Production values as of 2025-12-06):
 
+### pf-lex-fulfillment-dev (Lex Fulfillment)
 | Parameter | Value |
 |-----------|-------|
 | Function Name | `pf-lex-fulfillment-dev` |
+| Runtime | `python3.11` |
+| Memory | `256` MB |
+| Timeout | `90` seconds |
+| Handler | `handler.lambda_handler` |
+| Environment | `ENVIRONMENT=dev`, `VOICE_SPEECH_RATE=90%` |
+
+### pf-voice-bedrock-bridge-dev (Bedrock Bridge)
+| Parameter | Value |
+|-----------|-------|
+| Function Name | `pf-voice-bedrock-bridge-dev` |
+| Runtime | `python3.11` |
+| Memory | `256` MB |
+| Timeout | `60` seconds |
+| Handler | `handler.lambda_handler` |
+
+### pf-customer-lookup-dev (Customer Lookup)
+| Parameter | Value |
+|-----------|-------|
+| Function Name | `pf-customer-lookup-dev` |
 | Runtime | `python3.11` |
 | Memory | `512` MB |
 | Timeout | `60` seconds |
@@ -1976,4 +1996,301 @@ else:
 
 ---
 
-*Last verified: 2025-12-05*
+---
+
+## Customer Feedback Changes (2025-12-06)
+
+### Summary of Changes from PF360 AI Project Progress Meeting
+
+Based on customer feedback (Chad), the following improvements were made:
+
+---
+
+### 1. Semantic/Fuzzy Project Matching (intelligent_orchestrator.py)
+
+**Problem:** Bot was matching "decking project at north loop" to the wrong project (matched "Decking" category instead of "North Loop" location).
+
+**Solution:** Added Rule #10 to Sonnet classification prompt.
+
+| Feature | Description |
+|---------|-------------|
+| **Priority Order** | Location > Category > Status (most specific wins) |
+| **Location Fuzzy Matching** | "north loop" / "the north" / "loop area" → matches "123 North Loop Blvd" |
+| **Category Synonyms** | "deck" / "the deck one" = "Decking"; "window" / "windows" = "Windows" |
+| **Pattern Recognition** | Recognizes "the X one", "X project", "X job" phrases |
+| **Conflict Resolution** | When both location and category mentioned, location takes priority |
+
+**Location:** `lambda/orchestrator/intelligent_orchestrator.py` - Sonnet classification prompt
+
+---
+
+### 2. Direct Voice Responses (voice_formatter.py)
+
+**Problem:** Voice responses were too verbose with filler words ("um", "hmm", "let me check").
+
+**Solution:** Simplified per Chad's feedback.
+
+| Before | After |
+|--------|-------|
+| SSML with pauses, pitch variation | Plain text only |
+| Filler words ("um", "hmm") | Direct answers |
+| "Great!", "Good news!" openers | No fluff |
+| Long explanations | 1-2 sentences max |
+| Formal language | Contractions ("I'm", "you've", "don't") |
+
+**Location:** `lambda/orchestrator/voice_formatter.py`
+
+**Key Changes:**
+- Removed all SSML tags from voice responses
+- Removed filler words and excitement phrases
+- Shortened responses to essential information only
+- Added date summarization for long date lists (22 dates → "I found 22 dates from Dec 6-31. 17 have good weather. Pick this week, next week, or later?")
+
+---
+
+### 3. Simplified Conversation Prompt (router.py)
+
+**Problem:** Claude was generating verbose, corporate-speak responses.
+
+**Solution:** Updated system prompt to generate more direct, casual responses.
+
+**Location:** `lambda/orchestrator/router.py`
+
+---
+
+### 4. Barge-In Support (lex-fulfillment/handler.py)
+
+**Problem:** Users couldn't interrupt the bot during long responses.
+
+**Solution:** Added session attribute for interrupt support.
+
+**Session Attribute:** `x-amz-lex:allow-interrupt:*:*`
+
+**Location:** `lambda/lex-fulfillment/handler.py`
+
+**Note:** This enables user interruption during bot speech, making conversations feel more natural.
+
+---
+
+### 5. Voice Speech Rate Configuration
+
+**Problem:** Voice responses were too fast for phone calls, causing comprehension issues.
+
+**Solution:** Added `VOICE_SPEECH_RATE` Lambda environment variable for SSML prosody control.
+
+| Parameter | Value | Purpose |
+|-----------|-------|---------|
+| **Environment Variable** | `VOICE_SPEECH_RATE` | Controls SSML prosody rate |
+| **Default Value** | `90%` | Slightly slower than normal (100%) |
+| **Location** | Lambda: `pf-lex-fulfillment-dev` | Set via deploy script |
+
+**Code Usage (lex-fulfillment/handler.py:87):**
+```python
+VOICE_SPEECH_RATE = os.environ.get('VOICE_SPEECH_RATE', '90%')
+
+def wrap_with_ssml_prosody(text: str, rate: str = None) -> str:
+    if rate is None:
+        rate = VOICE_SPEECH_RATE
+    # Wraps text in SSML prosody tags for slower speech
+    return f'<speak><prosody rate="{rate}">{text}</prosody></speak>'
+```
+
+**Deploy Script Configuration (DEPLOY_VOICE_ADVANCED.sh):**
+- Variable defined at line 243: `VOICE_SPEECH_RATE="90%"`
+- Set via Step 2.5 using `aws lambda update-function-configuration`
+
+**Valid Rate Values:**
+- `x-slow` - Very slow
+- `slow` - Slow
+- `medium` or `100%` - Normal
+- `90%` - Slightly slower (recommended for phone)
+- `80%` - Noticeably slower
+- `fast` or `110%` - Fast
+- `x-fast` - Very fast
+
+---
+
+### 6. Contact Flow v2 Structure
+
+**Problem:** Old contact flow structure was complex with alternating GetCustomerInput blocks.
+
+**Solution:** New simplified contact flow with loop structure.
+
+| Feature | Old Value | New Value |
+|---------|-----------|-----------|
+| **Voice Engine** | Not specified | Joanna (Neural) |
+| **Greeting** | "Thank you for calling ProjectForce. How can I help you today?" | "Thank you for calling. How can I help you today?" |
+| **Exit Conditions** | Goodbye only | Goodbye, "nothing much", "all done", "Thanks" |
+| **Flow Structure** | Two alternating GetCustomerInput | Single GetCustomerInput with Loop (20 iterations) |
+| **FallbackIntent** | Disconnect | Loop back for retry |
+
+**Template Location:** `infrastructure/voice/contact-flow.template.json`
+
+**Template Variables:**
+- `${REGION}` - AWS region (e.g., us-east-1)
+- `${ACCOUNT_ID}` - AWS account ID
+- `${BOT_ID}` - Lex bot ID
+- `${ALIAS_ID}` - Lex bot alias ID
+
+**Deploy Script:** `scripts/DEPLOY_VOICE_ADVANCED.sh` processes the template and creates `contact-flow.generated.json`
+
+---
+
+### Contact Flow Actions Summary
+
+| Action ID | Type | Purpose |
+|-----------|------|---------|
+| `entry-action` | Trigger | Entry point |
+| `set-voice-action` | UpdateContactTextToSpeechVoice | Set Joanna Neural voice |
+| `play-prompt-action` | MessageParticipant | Play greeting |
+| `get-customer-input-1` | ConnectParticipantWithLexBot | Connect to Lex bot |
+| `loop-action` | Loop | Allow up to 20 conversation turns |
+| `disconnect-action` | DisconnectParticipant | End call |
+
+---
+
+### Exit Intent Conditions
+
+The contact flow disconnects when Lex returns any of these:
+- `Goodbye` (intent)
+- `nothing much` (response text)
+- `all done` (response text)
+- `Thanks` (response text)
+
+**FallbackIntent** → Loops back for retry (instead of disconnecting)
+
+---
+
+---
+
+## IAM Role Policies (Voice Infrastructure)
+
+### pf-lex-fulfillment-role-dev
+
+**Attached Managed Policies:**
+- `AWSLambdaBasicExecutionRole`
+
+**Inline Policy: LexFulfillmentPolicy**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DynamoDBAccess",
+      "Effect": "Allow",
+      "Action": ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Query", "dynamodb:Scan"],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:ACCOUNT_ID:table/pf-sessions-dev",
+        "arn:aws:dynamodb:us-east-1:ACCOUNT_ID:table/pf-notes-dev",
+        "arn:aws:dynamodb:us-east-1:ACCOUNT_ID:table/pf-workflow-states-dev",
+        "arn:aws:dynamodb:us-east-1:ACCOUNT_ID:table/pf-async-operations-dev",
+        "arn:aws:dynamodb:us-east-1:ACCOUNT_ID:table/pf-async-operations-dev/index/*"
+      ]
+    },
+    {
+      "Sid": "LambdaInvoke",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": [
+        "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:pf-voice-bedrock-bridge-dev",
+        "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:pf-customer-lookup-dev",
+        "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:pf-scheduling-actions",
+        "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:pf-orchestrator",
+        "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:pf-information-actions",
+        "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:pf-async-processor-dev"
+      ]
+    },
+    {
+      "Sid": "SecretsManagerAccess",
+      "Effect": "Allow",
+      "Action": ["secretsmanager:GetSecretValue"],
+      "Resource": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:projectforce/api/credentials*"
+    }
+  ]
+}
+```
+
+### pf-voice-bedrock-bridge-role-dev
+
+**Attached Managed Policies:**
+- `AWSLambdaBasicExecutionRole`
+
+**Inline Policy: VoiceBridgePolicy**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockAgentInvoke",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeAgent", "bedrock:InvokeModel"],
+      "Resource": [
+        "arn:aws:bedrock:us-east-1:ACCOUNT_ID:agent/*",
+        "arn:aws:bedrock:us-east-1:ACCOUNT_ID:agent-alias/*/*"
+      ]
+    },
+    {
+      "Sid": "DynamoDBAccess",
+      "Effect": "Allow",
+      "Action": ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Query"],
+      "Resource": ["arn:aws:dynamodb:us-east-1:ACCOUNT_ID:table/pf-sessions-dev"]
+    }
+  ]
+}
+```
+
+### pf-customer-lookup-role-dev
+
+**Attached Managed Policies:**
+- `AWSLambdaBasicExecutionRole`
+
+**Inline Policy: CustomerLookupPolicy**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DynamoDBAccess",
+      "Effect": "Allow",
+      "Action": ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Query", "dynamodb:Scan"],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:ACCOUNT_ID:table/pf-customers-dev",
+        "arn:aws:dynamodb:us-east-1:ACCOUNT_ID:table/pf-customers-dev/index/*"
+      ]
+    }
+  ]
+}
+```
+
+---
+
+## Quick Reference - AWS Resource IDs
+
+| Resource | ID / ARN |
+|----------|----------|
+| **AWS Account** | `772634497954` |
+| **Region** | `us-east-1` |
+| **Lex Bot ID** | `MCMSOW2OXJ` |
+| **Lex Bot Alias ID** | `TSTALIASID` |
+| **Connect Instance ID** | `3edd99db-14e2-4628-836e-478b574e4b90` |
+| **Connect Phone** | `+14702832382` |
+| **Contact Flow (main)** | `6b9d1980-82df-4ca8-a448-398050cc2b57` |
+| **Contact Flow (scheduling)** | `b830c12f-988b-4c62-8a06-3abc6b6c28c9` |
+
+---
+
+## DEPLOY_VOICE_ADVANCED.sh Sync Status (2025-12-06)
+
+Changes made to ensure deploy script matches AWS:
+
+| Item | Previous | Updated | Status |
+|------|----------|---------|--------|
+| Lambda Memory/Timeout | Hardcoded 512MB/60s | Per-function values | Fixed |
+| NLU Threshold | 0.4 (hardcoded) | 0.3 (matches AWS) | Fixed |
+| DynamoDB Tables (LexFulfillmentPolicy) | Missing async tables | Added pf-async-operations-dev | Fixed |
+| Lambda Invoke (LexFulfillmentPolicy) | Missing async processor | Added pf-async-processor-dev | Fixed |
+| Environment Variables | Would replace all | Now merges ENVIRONMENT + VOICE_SPEECH_RATE | Fixed |
+
+---
+
+*Last verified: 2025-12-06*

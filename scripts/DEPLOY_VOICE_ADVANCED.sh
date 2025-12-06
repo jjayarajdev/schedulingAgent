@@ -239,6 +239,9 @@ LEX_WAIT_DELAY_SECONDS="1"              # Seconds before first wait message play
 LEX_UPDATE_FREQUENCY_SECONDS="5"        # Seconds between update messages (reduced from 8 for better UX)
 LEX_FULFILLMENT_TIMEOUT="90"            # Max seconds to wait for Lambda response
 
+# Voice speech rate (for SSML prosody - slower = clearer for phone calls)
+VOICE_SPEECH_RATE="90%"                 # 90% = slightly slower for voice clarity
+
 # ============================================================================
 # Platform Detection & Python Command
 # ============================================================================
@@ -638,6 +641,8 @@ deploy_lambda() {
     local HANDLER=$4
     local RUNTIME=$5
     local DESCRIPTION=$6
+    local MEMORY_SIZE=${7:-256}    # Default 256 MB (matches AWS)
+    local TIMEOUT=${8:-60}         # Default 60 seconds
 
     echo ""
     echo "Deploying: $FUNCTION_NAME"
@@ -687,8 +692,8 @@ deploy_lambda() {
                 --handler "$HANDLER" \
                 --zip-file "fileb://${ZIP_PATH}" \
                 --description "$DESCRIPTION" \
-                --timeout 60 \
-                --memory-size 512 \
+                --timeout "$TIMEOUT" \
+                --memory-size "$MEMORY_SIZE" \
                 --region "$REGION" 2>&1)
             local CREATE_EXIT_CODE=$?
 
@@ -934,7 +939,9 @@ LEX_FULFILLMENT_POLICY=$(cat <<EOF
       "Resource": [
         "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/pf-sessions-${ENVIRONMENT}",
         "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/pf-notes-${ENVIRONMENT}",
-        "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/pf-workflow-states-${ENVIRONMENT}"
+        "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/pf-workflow-states-${ENVIRONMENT}",
+        "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/pf-async-operations-${ENVIRONMENT}",
+        "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/pf-async-operations-${ENVIRONMENT}/index/*"
       ]
     },
     {
@@ -946,7 +953,8 @@ LEX_FULFILLMENT_POLICY=$(cat <<EOF
         "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-customer-lookup-${ENVIRONMENT}",
         "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-scheduling-actions",
         "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-orchestrator",
-        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-information-actions"
+        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-information-actions",
+        "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:pf-async-processor-${ENVIRONMENT}"
       ]
     },
     {
@@ -1067,32 +1075,97 @@ echo -e "${YELLOW}--------------------------------------------------------------
 echo -e "${YELLOW}Step 2: Deploying Lambda Functions${NC}"
 echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
 
-# Deploy Lex Fulfillment Lambda
+# Deploy Lex Fulfillment Lambda (256MB, 90s - matches AWS production)
 deploy_lambda \
     "$LEX_FULFILLMENT_FUNCTION" \
     "$LEX_FULFILLMENT_ROLE" \
     "$LEX_FULFILLMENT_DIR" \
     "handler.lambda_handler" \
     "python3.11" \
-    "Lex fulfillment handler for voice integration"
+    "Lex fulfillment handler for voice integration" \
+    256 \
+    90
 
-# Deploy Voice Bedrock Bridge Lambda
+# Deploy Voice Bedrock Bridge Lambda (256MB, 60s - matches AWS production)
 deploy_lambda \
     "$VOICE_BRIDGE_FUNCTION" \
     "$VOICE_BRIDGE_ROLE" \
     "$VOICE_BRIDGE_DIR" \
     "handler.lambda_handler" \
     "python3.11" \
-    "Voice to Bedrock agent bridge for voice integration"
+    "Voice to Bedrock agent bridge for voice integration" \
+    256 \
+    60
 
-# Deploy Customer Lookup Lambda
+# Deploy Customer Lookup Lambda (512MB, 60s - matches AWS production)
 deploy_lambda \
     "$CUSTOMER_LOOKUP_FUNCTION" \
     "$CUSTOMER_LOOKUP_ROLE" \
     "$CUSTOMER_LOOKUP_DIR" \
     "handler.lambda_handler" \
     "python3.11" \
-    "Customer lookup service for voice integration"
+    "Customer lookup service for voice integration" \
+    512 \
+    60
+
+echo ""
+
+# ============================================================================
+# Step 2.5: Configure Lambda Environment Variables (Voice-specific settings)
+# ============================================================================
+
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo -e "${YELLOW}Step 2.5: Configuring Lambda Environment Variables${NC}"
+echo -e "${YELLOW}----------------------------------------------------------------------------${NC}"
+echo ""
+
+# Set VOICE_SPEECH_RATE for Lex Fulfillment Lambda (controls SSML prosody rate)
+echo "  -> Setting VOICE_SPEECH_RATE=$VOICE_SPEECH_RATE for $LEX_FULFILLMENT_FUNCTION..."
+
+# Wait for Lambda to be ready for configuration update
+echo "  -> Waiting for Lambda to be ready for configuration update..."
+for i in $(seq 1 10); do
+    LAMBDA_STATE=$(aws_cmd lambda get-function \
+        --function-name "$LEX_FULFILLMENT_FUNCTION" \
+        --region "$REGION" \
+        --query 'Configuration.LastUpdateStatus' \
+        --output text 2>/dev/null || echo "Unknown")
+
+    if [[ "$LAMBDA_STATE" == "Successful" || "$LAMBDA_STATE" == "null" || -z "$LAMBDA_STATE" ]]; then
+        break
+    fi
+    echo "  -> Waiting for Lambda... (Status: $LAMBDA_STATE)"
+    sleep 3
+done
+
+# Update Lambda environment variables (MERGE with existing ENVIRONMENT variable)
+if aws_cmd lambda update-function-configuration \
+    --function-name "$LEX_FULFILLMENT_FUNCTION" \
+    --environment "Variables={ENVIRONMENT=${ENVIRONMENT},VOICE_SPEECH_RATE=${VOICE_SPEECH_RATE}}" \
+    --region "$REGION" 2>&1 | tee "./lambda-env-$LEX_FULFILLMENT_FUNCTION.log"; then
+    echo -e "  ${GREEN}[OK] Environment variables configured${NC}"
+
+    # Wait for update to complete
+    echo "  -> Waiting for configuration update to complete..."
+    for i in $(seq 1 10); do
+        UPDATE_STATUS=$(aws_cmd lambda get-function-configuration \
+            --function-name "$LEX_FULFILLMENT_FUNCTION" \
+            --region "$REGION" \
+            --query 'LastUpdateStatus' \
+            --output text 2>/dev/null || echo "Unknown")
+
+        if [[ "$UPDATE_STATUS" == "Successful" ]]; then
+            echo -e "  ${GREEN}[OK] Configuration update complete${NC}"
+            break
+        elif [[ "$UPDATE_STATUS" == "Failed" ]]; then
+            echo -e "  ${RED}[FAIL] Configuration update failed${NC}"
+            break
+        fi
+        sleep 2
+    done
+else
+    echo -e "  ${YELLOW}[WARN] Failed to set environment variables${NC}"
+fi
 
 echo ""
 
@@ -2441,7 +2514,7 @@ try:
             botId=bot_id,
             botVersion='DRAFT',
             localeId='en_US',
-            nluIntentConfidenceThreshold=0.4,
+            nluIntentConfidenceThreshold=0.3,  # Match AWS production (was 0.4)
             generativeAISettings={
                 'runtimeSettings': {
                     'nluImprovement': {
@@ -3728,7 +3801,7 @@ try:
         botId=BOT_ID,
         botVersion='DRAFT',
         localeId='en_US',
-        nluIntentConfidenceThreshold=0.4,
+        nluIntentConfidenceThreshold=0.3,  # Match AWS production (was 0.4)
         voiceSettings={
             'voiceId': 'Joanna',  # Clear American English voice - CRITICAL for speech recognition
             'engine': 'neural'    # Neural engine for better quality
