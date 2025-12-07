@@ -2284,53 +2284,24 @@ try:
 
     created_intents = {}
 
-    # Fulfillment updates config - FAST "please wait" (1 second delay)
+    # Fulfillment updates config - Natural SSML-enhanced wait messages
+    # Uses prosody rate="slow" for more natural pacing, longer delays so most responses don't need wait messages
     fulfillment_updates_spec = {
         'active': True,
         'startResponse': {
-            'delayInSeconds': 1,  # Play wait message after just 1 second
+            'delayInSeconds': 5,  # Wait 5 seconds before playing (most responses are faster)
             'messageGroups': [
-                {
-                    'message': {
-                        'plainTextMessage': {
-                            'value': 'Let me look that up for you.'
-                        }
-                    }
-                },
-                {
-                    'message': {
-                        'plainTextMessage': {
-                            'value': 'One moment please.'
-                        }
-                    }
-                },
-                {
-                    'message': {
-                        'plainTextMessage': {
-                            'value': 'Just a second while I check.'
-                        }
-                    }
-                }
+                {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">One moment</prosody></speak>'}}},
+                {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">Just a sec</prosody></speak>'}}},
+                {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">Checking on that</prosody></speak>'}}},
             ],
             'allowInterrupt': False
         },
         'updateResponse': {
-            'frequencyInSeconds': 5,  # Play update every 5 sec if still waiting
+            'frequencyInSeconds': 10,  # Play update every 10 sec if still waiting
             'messageGroups': [
-                {
-                    'message': {
-                        'plainTextMessage': {
-                            'value': 'Still working on that, almost there.'
-                        }
-                    }
-                },
-                {
-                    'message': {
-                        'plainTextMessage': {
-                            'value': 'Thank you for your patience.'
-                        }
-                    }
-                }
+                {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">Still working on it</prosody></speak>'}}},
+                {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">Almost done</prosody></speak>'}}},
             ],
             'allowInterrupt': False
         },
@@ -3483,24 +3454,23 @@ REQUIRED_INTENTS = {
 }
 
 # Fulfillment config with SSML-enhanced messages - natural sounding wait prompts
+# Uses prosody rate="slow" for more natural pacing, longer delays so most responses don't need wait messages
 fulfillment_updates_spec = {
     'active': True,
     'startResponse': {
-        'delayInSeconds': 1,  # Play wait message after just 1 second
+        'delayInSeconds': 5,  # Wait 5 seconds before playing (most responses are faster)
         'messageGroups': [
-            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="medium" pitch="medium">Let me look that up for you.</prosody><break time="300ms"/></speak>'}}},
-            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="medium">One moment please.</prosody><break time="200ms"/></speak>'}}},
-            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="medium" pitch="medium">Just a second while I check.</prosody></speak>'}}},
-            {'message': {'ssmlMessage': {'value': '<speak><amazon:emotion name="excited" intensity="low">Sure, let me find that for you!</amazon:emotion></speak>'}}}
+            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">One moment</prosody></speak>'}}},
+            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">Just a sec</prosody></speak>'}}},
+            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">Checking on that</prosody></speak>'}}},
         ],
         'allowInterrupt': False  # Don't let user interrupt wait message
     },
     'updateResponse': {
-        'frequencyInSeconds': 5,  # Play update every 5 seconds if still waiting
+        'frequencyInSeconds': 10,  # Play update every 10 seconds if still waiting
         'messageGroups': [
-            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="medium">Still working on that<break time="200ms"/>almost there.</prosody></speak>'}}},
-            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="medium" pitch="low">Thank you for your patience.</prosody></speak>'}}},
-            {'message': {'ssmlMessage': {'value': '<speak>Just a few more seconds<break time="300ms"/>I appreciate you waiting.</speak>'}}}
+            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">Still working on it</prosody></speak>'}}},
+            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">Almost done</prosody></speak>'}}},
         ],
         'allowInterrupt': False
     },

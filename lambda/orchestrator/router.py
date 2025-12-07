@@ -18,6 +18,49 @@ from voice_formatter import format_for_voice
 
 logger = logging.getLogger()
 
+# ============================================================================
+# NEXT ACTION SUGGESTIONS - Added for proactive UX
+# Append helpful follow-up suggestions after completing actions
+# ============================================================================
+NEXT_ACTION_SUGGESTIONS = {
+    'confirm_appointment': "\n\nNeed to make changes later? Just say 'reschedule' or 'cancel'.",
+    'cancel_appointment': "\n\nWant to reschedule instead? Say 'schedule' to pick new dates.",
+    'list_projects': "\n\nSay a project number or 'first', 'second' to see details.",
+    'get_project_details': "\n\nWant to schedule this one? Say 'schedule it'.",
+    'reschedule_appointment': "\n\nNeed to make more changes? Just let me know.",
+}
+
+# ============================================================================
+# ERROR RESPONSES - Better messages with recovery paths
+# ============================================================================
+ERROR_RESPONSES = {
+    'invalid_project': "I couldn't find that project. Say 'list projects' to see your options.",
+    'no_dates': "No dates available right now. Try 'check next week' or 'show different project'.",
+    'api_error': "Something went wrong on my end. Try again, or say 'help' for other options.",
+    'unknown_input': "I didn't catch that. You can say 'help' to see what I can do.",
+    'timeout': "The system is taking a while to respond. Please try again in a moment.",
+}
+
+
+def add_next_action_suggestion(response: str, action: str, is_voice: bool = False) -> str:
+    """Add helpful next-action suggestion to response."""
+    if is_voice:
+        # For voice, suggestions are handled separately
+        return response
+
+    suggestion = NEXT_ACTION_SUGGESTIONS.get(action, "")
+    if suggestion and not response.endswith('?'):
+        return response + suggestion
+    return response
+
+
+def get_error_response(error_type: str, details: str = None) -> str:
+    """Get user-friendly error message with recovery suggestion."""
+    base_message = ERROR_RESPONSES.get(error_type, ERROR_RESPONSES['unknown_input'])
+    if details:
+        return f"{base_message}\n\n(Details: {details})"
+    return base_message
+
 # Boto3 clients (reused across Lambda invocations)
 _lambda_client = None
 _bedrock_agent_client = None
@@ -903,10 +946,20 @@ def handle_welcome_request(
         projects = response_body.get('projects', [])
         logger.info(f"[INFO] Found {len(projects)} projects for user")
 
-        # STORE project_ids in workflow_state for ordinal reference resolution
-        # This enables "first project", "last project", "3rd project" to work correctly
+        # STORE project_ids AND project_mapping in workflow_state
+        # This enables ordinal refs ("first project") AND category refs ("kitchen sink project")
         if projects:
             project_ids = [str(p.get('id', '')) for p in projects if p.get('id')]
+            # Build project_mapping for category-based lookups
+            project_mapping = {}
+            for p in projects:
+                pid = str(p.get('id', ''))
+                if pid:
+                    project_mapping[pid] = {
+                        'category': p.get('category', ''),
+                        'address': p.get('address', ''),
+                        'status': p.get('status', '')
+                    }
             if project_ids:
                 try:
                     from workflow_state import get_state_manager
@@ -916,10 +969,11 @@ def handle_welcome_request(
                         'current_stage': 'projects_displayed',
                         'context': {
                             'project_ids': project_ids,
+                            'project_mapping': project_mapping,
                             'project_count': len(project_ids)
                         }
                     })
-                    logger.info(f"[WORKFLOW] Stored {len(project_ids)} project_ids in workflow state for ordinal refs")
+                    logger.info(f"[WORKFLOW] Stored {len(project_ids)} project_ids and project_mapping in workflow state")
                 except Exception as e:
                     logger.warning(f"[WORKFLOW] Failed to store project_ids in workflow state: {e}")
 
@@ -1353,8 +1407,12 @@ def route_request(
         except Exception as e:
             logger.error(f"Direct Lambda call failed: {e}")
             timing['total'] = time.time() - start_time
+            # Use improved error response
+            error_response = get_error_response('api_error', str(e) if 'timeout' not in str(e).lower() else None)
+            if 'timeout' in str(e).lower():
+                error_response = get_error_response('timeout')
             return {
-                'response': f"I encountered an error processing your request: {str(e)}. Please try again.",
+                'response': error_response,
                 'intent': intent,
                 'action': action,
                 'agent_name': 'Direct Lambda',
@@ -1367,7 +1425,7 @@ def route_request(
 
     timing['total'] = time.time() - start_time
     return {
-        'response': "I'm not sure how to help with that. Please try rephrasing your request or ask for help to see what I can do.",
+        'response': get_error_response('unknown_input'),
         'intent': intent,
         'action': action or 'unknown',
         'agent_name': 'Orchestrator',
