@@ -511,12 +511,13 @@ def run_comprehensive_test(environment: str, phone: str, message: str, verbose: 
     print("="*80 + "\n")
 
     # Test messages to send - realistic scheduling queries
+    # First call must be "list of projects", then any order
     test_messages = [
-        "List out all projects",
-        "please schedule the availability of project2",
-        "What projects are available?",
-        "Show me my schedule",
-        "What's the weather today?"
+        "list of projects",  # MUST be first to initialize session
+        "show me details of 7751742",
+        "how is the weather today?",
+        "please re-schedule the time for 7751743",
+        "show me the schedule time of project4"
     ]
 
     tests = [
@@ -617,13 +618,13 @@ Examples:
   python test-sms-integration.py --environment dev --quick
 
   # Comprehensive test (includes Lambda execution)
-  python test-sms-integration.py --environment dev --phone +15555551234
+  python test-sms-integration.py --environment dev --phone +1555555123412
 
   # Comprehensive test with verbose logs
-  python test-sms-integration.py --environment dev --phone +15555551234 --verbose
+  python test-sms-integration.py --environment dev --phone +1555555123412 --verbose
 
   # Custom test message
-  python test-sms-integration.py --environment dev --phone +15555551234 --message "Test appointment"
+  python test-sms-integration.py --environment dev --phone +1555555123412 --message "Test appointment"
         """
     )
 
@@ -632,8 +633,8 @@ Examples:
                         help='Environment to test (default: dev)')
     parser.add_argument('--quick', '-q', action='store_true',
                         help='Run quick test (configuration only, no Lambda execution)')
-    parser.add_argument('--phone', '-p', default='+15555551234',
-                        help='Test phone number (default: +15555551234)')
+    parser.add_argument('--phone', '-p', default='+1555555123412',
+                        help='Test phone number (default: +1555555123412)')
     parser.add_argument('--message', '-m',
                         default='Test message for SMS integration',
                         help='Test message content')

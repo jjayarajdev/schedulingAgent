@@ -22,7 +22,7 @@ locals {
   project_name = "scheduling-agent"
   environment  = var.environment
   # Phone number for development (matches the provisioned number)
-  phone_number = "+14255556160"
+  phone_number = "+18786789053"
   tags = merge(
     var.additional_tags,
     {

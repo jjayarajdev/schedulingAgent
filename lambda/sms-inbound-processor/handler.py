@@ -55,20 +55,21 @@ sessions_table = dynamodb.Table(SESSIONS_TABLE)
 def get_pf_credentials() -> Dict[str, str]:
     """
     Get ProjectForce API credentials from AWS Secrets Manager
-    Uses in-memory caching to avoid repeated Secrets Manager calls
+    ALWAYS fetches fresh credentials from Secrets Manager (no caching)
 
     Returns:
         Dictionary with bearer_token, client_id, and user_id
     """
     global _pf_credentials_cache
 
-    # Return cached credentials if available
-    if _pf_credentials_cache:
-        logger.debug("Using cached PF credentials")
-        return _pf_credentials_cache
+    # DISABLED: Return cached credentials if available
+    # Caching causes issues when token is refreshed in Secrets Manager
+    # if _pf_credentials_cache:
+    #     logger.debug("Using cached PF credentials")
+    #     return _pf_credentials_cache
 
     try:
-        logger.info(f"Fetching PF credentials from Secrets Manager")
+        logger.info(f"Fetching FRESH PF credentials from Secrets Manager (no cache)")
         response = secrets_client.get_secret_value(SecretId=PF_SECRET_NAME)
         secret = json.loads(response['SecretString'])
 
@@ -84,10 +85,10 @@ def get_pf_credentials() -> Dict[str, str]:
             logger.error("Invalid PF credentials in Secrets Manager")
             raise ValueError("Missing bearer_token or client_id in secret")
 
-        # Cache for Lambda container reuse
-        _pf_credentials_cache = credentials
+        # DISABLED: Cache for Lambda container reuse
+        # _pf_credentials_cache = credentials
 
-        logger.info(f"PF credentials loaded successfully")
+        logger.info(f"PF credentials loaded successfully (token length: {len(credentials['bearer_token'])})")
         return credentials
 
     except Exception as e:
@@ -137,10 +138,13 @@ def process_sms_record(record: Dict[str, Any]) -> None:
         # Parse SNS message
         sns_message = json.loads(record['Sns']['Message'])
 
-        phone_number = sns_message['originationNumber']
-        destination_number = sns_message['destinationNumber']
-        message_body = sns_message['messageBody']
-        message_id = sns_message['inboundMessageId']
+        # Support both AWS End User Messaging format and test format
+        # AWS End User Messaging: originationNumber, destinationNumber, messageBody, inboundMessageId
+        # Test format: phone_number, message, message_id
+        phone_number = sns_message.get('originationNumber') or sns_message.get('phone_number', '+15555551234')
+        destination_number = sns_message.get('destinationNumber', ORIGINATION_NUMBER)
+        message_body = sns_message.get('messageBody') or sns_message.get('message', '')
+        message_id = sns_message.get('inboundMessageId') or sns_message.get('message_id', f'test-{int(datetime.utcnow().timestamp())}')
 
         logger.info(f"Processing SMS from {phone_number}: {message_body[:50]}")
 
@@ -461,8 +465,17 @@ def invoke_orchestrator(
             body = json.loads(response_payload['body'])
             response_text = body.get('response', '')
 
+            logger.info(f"Orchestrator raw response length: {len(response_text)} chars")
+
             # Format for SMS (remove markdown, limit length)
             formatted_response = format_for_sms(response_text)
+
+            logger.info(f"Formatted SMS response length: {len(formatted_response)} chars")
+
+            # Validate response is not empty
+            if not formatted_response or len(formatted_response.strip()) == 0:
+                logger.error(f"Empty response after formatting. Raw response: {response_text[:200]}")
+                return "I received your message but don't have a response at the moment. Please try again."
 
             logger.info(f"Orchestrator responded successfully")
             return formatted_response
@@ -482,27 +495,25 @@ def invoke_orchestrator(
 
 def format_for_sms(text: str) -> str:
     """
-    Format text for SMS delivery
+    Format text for SMS delivery with simple truncation
 
     Args:
         text: Raw text response
 
     Returns:
-        SMS-formatted text
+        SMS-formatted text (max 320 chars for 2 messages)
     """
     # Remove markdown formatting
     text = text.replace('**', '').replace('*', '').replace('__', '').replace('_', '')
-
-    # Remove bullet points and numbered lists formatting
     text = text.replace('- ', '• ').replace('* ', '• ')
 
-    # Collapse multiple newlines
+    # Remove excessive newlines
     while '\n\n\n' in text:
         text = text.replace('\n\n\n', '\n\n')
 
-    # Truncate if too long (SMS has 1600 char limit for 10 segments)
-    if len(text) > 1600:
-        text = text[:1597] + "..."
+    # Truncate if needed (320 chars = 2 SMS messages)
+    if len(text) > 320:
+        text = text[:317] + "..."
 
     return text.strip()
 
