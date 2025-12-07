@@ -11,6 +11,7 @@ from typing import Dict, Any
 from config import get_config
 from conversation import get_conversation_manager
 from router import route_request, handle_welcome_request
+from sms_formatter import format_for_sms
 
 # Configure logging
 logger = logging.getLogger()
@@ -79,6 +80,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 session_id=session_id
             )
 
+            # FORMAT FOR SMS: Apply SMS-safe formatting for SMS channel
+            if channel == 'sms':
+                result['response'] = format_for_sms(result['response'])
+                logger.info(f"[SMS] Welcome response formatted for SMS delivery")
+
             # IMPORTANT: Add welcome response to conversation history
             # So subsequent messages have context about which projects were shown
             conversation_manager = get_conversation_manager()
@@ -125,6 +131,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         agent_name = result['agent_name']
         direct_call = result['direct_call']
         timing = result['timing']
+
+        # FORMAT FOR SMS: Apply SMS-safe formatting for SMS channel
+        # This strips emojis, markdown, and special unicode characters
+        if channel == 'sms':
+            response_text = format_for_sms(response_text)
+            logger.info(f"[SMS] Response formatted for SMS delivery")
 
         logger.info(f"[OK] Response: agent={agent_name}, intent={intent}, direct={direct_call}, timing={timing.get('total', 0):.2f}s")
 
