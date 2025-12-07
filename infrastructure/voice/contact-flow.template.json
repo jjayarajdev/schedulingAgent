@@ -142,7 +142,7 @@
             "ErrorType": "NoMatchingError"
           },
           {
-            "NextAction": "disconnect-action",
+            "NextAction": "loop-action",
             "ErrorType": "NoMatchingCondition"
           }
         ]
