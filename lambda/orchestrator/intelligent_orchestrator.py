@@ -211,6 +211,64 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
 
     logger.info(f"[CONTINUATION] Checking continuation: stage={current_stage}, workflow_type={workflow_type}")
 
+    # ========================================================================
+    # ABORT HANDLING: Check if user wants to go back / cancel / never mind
+    # This should be checked FIRST before any continuation logic
+    # ========================================================================
+    message_lower = message.lower().strip()
+    abort_phrases = ['never mind', 'nevermind', 'cancel', 'forget it', 'go back',
+                     'start over', 'actually no', 'no thanks', 'nope', 'stop',
+                     'dont want', "don't want", 'changed my mind', 'forget about it',
+                     'let me think', 'hold on', 'wait', 'not now']
+
+    is_abort = any(phrase in message_lower for phrase in abort_phrases)
+
+    if is_abort and current_stage not in ['start', 'complete', None]:
+        logger.info(f"[CONTINUATION] User wants to abort workflow at stage '{current_stage}'")
+        return {
+            'continue_workflow': True,
+            'action': 'abort_workflow',
+            'params': {},
+            'next_stage': 'aborted',
+            'preserve_context': {},
+            'workflow_type': workflow_type,
+            'abort_message': "No problem. What else can I help with?"
+        }
+
+    # Stage: Awaiting cancel confirmation (two-step cancel flow)
+    if current_stage == 'awaiting_cancel_confirmation':
+        # Check for confirmation or denial
+        confirm_patterns = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'confirm', 'proceed', 'go ahead', 'do it']
+        deny_patterns = ['no', 'nope', 'keep it', 'keep', 'dont cancel', "don't cancel", 'never mind', 'cancel that']
+
+        is_confirm = any(pattern in message_lower for pattern in confirm_patterns)
+        is_deny = any(pattern in message_lower for pattern in deny_patterns)
+
+        if is_confirm:
+            logger.info(f"[CONTINUATION] User confirmed cancel at stage '{current_stage}'")
+            return {
+                'continue_workflow': True,
+                'action': 'cancel_appointment_execute',
+                'params': {
+                    'project_id': context.get('project_id'),
+                    'confirmed': True
+                },
+                'next_stage': 'complete',
+                'preserve_context': {},
+                'workflow_type': workflow_type
+            }
+        elif is_deny:
+            logger.info(f"[CONTINUATION] User denied cancel at stage '{current_stage}'")
+            return {
+                'continue_workflow': True,
+                'action': 'abort_workflow',
+                'params': {},
+                'next_stage': 'aborted',
+                'preserve_context': {},
+                'workflow_type': workflow_type,
+                'abort_message': "Okay, I'll keep your appointment. Anything else I can help with?"
+            }
+
     # Stage: Cancelled, waiting for user to confirm fetching dates (two-step reschedule)
     if current_stage == 'cancelled_awaiting_dates':
         # Check if user confirms with yes/show dates/continue etc.
@@ -706,14 +764,32 @@ def intelligent_classify(
 
     workflow_context = ""
     if current_workflow_state:
+        context = current_workflow_state.get('context', {})
+        project_mapping = context.get('project_mapping', {})
+
+        # Format project_mapping for clear display
+        project_mapping_str = ""
+        if project_mapping:
+            mapping_lines = []
+            for pid, info in project_mapping.items():
+                cat = info.get('category', 'Unknown')
+                mapping_lines.append(f"  - Project #{pid}: category='{cat}'")
+            project_mapping_str = f"""
+
+AVAILABLE PROJECTS (use this for matching user references by category/type):
+{chr(10).join(mapping_lines)}
+IMPORTANT: When user says "schedule the X" where X is a category name (e.g., "storm door", "decking", "windows"),
+find the project_id that has a matching category and return that project_id in entities.
+"""
+
         workflow_context = f"""
 
 Current workflow state:
 - Type: {current_workflow_state.get('workflow_type', 'none')}
 - Stage: {current_workflow_state.get('current_stage', 'start')}
-- Context: {json.dumps(current_workflow_state.get('context', {}), indent=2)}
+- Context: {json.dumps(context, indent=2)}
 - Summary: {current_workflow_state.get('conversation_summary', 'No summary')}
-"""
+{project_mapping_str}"""
 
     prompt = f"""You are an intelligent orchestrator for a property management scheduling system.
 
@@ -731,9 +807,10 @@ Available intents:
 - chitchat: Greetings, thanks, casual conversation
 
 Available actions:
-Scheduling: list_projects, get_project_details, get_available_dates, get_time_slots, confirm_appointment, reschedule_appointment, cancel_appointment, batch_schedule, defer_workflow, abandon_workflow
+Scheduling: list_projects, get_project_details, get_available_dates, get_time_slots, confirm_appointment, reschedule_appointment, cancel_appointment, batch_schedule, defer_workflow, abandon_workflow, start_over
 Information: get_weather, context_query
-Chitchat: greet, help, general
+Chitchat: greet, general
+Help: show_capabilities (when user asks "help", "what can you do", "options", "menu")
 
 CONTEXT-BASED INFORMATION QUERIES (answer from conversation/project context):
 
@@ -1018,6 +1095,22 @@ Reschedule appointment (reschedule existing scheduled appointment):
 
 CRITICAL: For cancel_appointment and reschedule_appointment, ALWAYS extract project_id from the conversation context when user says "this", "this appointment", "this one", etc. Look for the most recently discussed project ID (format: #7751742 or Project 7751742 or id: 7751742).
 
+Help/capabilities request:
+{{
+    "intent": "help",
+    "action": "show_capabilities",
+    "entities": {{}},
+    "reasoning": "User asked 'help' or 'what can you do' - show capability list."
+}}
+
+Start over (reset conversation):
+{{
+    "intent": "scheduling",
+    "action": "start_over",
+    "entities": {{}},
+    "reasoning": "User said 'start over' or 'restart' - clear all context and start fresh."
+}}
+
 Respond ONLY with valid JSON."""
 
     response_text = call_sonnet(prompt, max_tokens=800)
@@ -1063,13 +1156,28 @@ def intelligent_decide_next_action(
 
     workflow_context = ""
     if workflow_state:
+        context = workflow_state.get('context', {})
+        project_mapping = context.get('project_mapping', {})
+
+        # Format project_mapping for clear display
+        project_mapping_str = ""
+        if project_mapping:
+            mapping_lines = []
+            for pid, info in project_mapping.items():
+                cat = info.get('category', 'Unknown')
+                mapping_lines.append(f"  #{pid} -> {cat}")
+            project_mapping_str = f"""
+
+PROJECT MAPPING (use this to resolve category references to project_id):
+{chr(10).join(mapping_lines)}"""
+
         workflow_context = f"""
 
 Active workflow:
 - Type: {workflow_state.get('workflow_type')}
 - Stage: {workflow_state.get('current_stage')}
-- Collected context: {json.dumps(workflow_state.get('context', {}), indent=2)}
-"""
+- Collected context: {json.dumps(context, indent=2)}
+{project_mapping_str}"""
 
     prompt = f"""You are an intelligent workflow orchestrator. Decide what action to take next.
 
@@ -1085,13 +1193,16 @@ User's message: "{message}"
 Determine the next step:
 
 1. Do we have everything needed to call a Lambda function?
-   - For get_available_dates: need project_id (returns dates + request_id)
+   - For get_project_details: need project_id - IF user refers to project by category (e.g., "kitchen sink project"), use project_mapping from workflow context to find the matching project_id
+   - For get_available_dates: need project_id (returns dates + request_id) - IF user refers to project by category, use project_mapping to resolve to project_id
    - For get_time_slots: need project_id + date + request_id (request_id comes from get_available_dates)
    - For confirm_appointment: need project_id + date + time + request_id
    - For cancel_appointment: need project_id - extract from conversation context if user says "cancel this appointment" after viewing project details
    - For reschedule_appointment: need project_id - extract from conversation context if user says "reschedule this" after viewing project details
    - For list_projects: just need customer_id (already available), optional: status filter if user specified (e.g., "Scheduled", "New", "Customer Scheduled", "Ready To Schedule", "Awaiting Confirmation", "Pending Signature")
    - For get_weather: need location as "City, State" format (e.g., "Minneapolis, MN") - combine city and state from entities
+
+CATEGORY-BASED PROJECT LOOKUP: When user refers to a project by category (e.g., "storm door project", "kitchen sink", "decking project"), check the project_mapping in workflow context to find the exact project_id that matches that category. Do NOT call list_projects if you already have project_mapping - just use it to resolve the project_id directly.
 
 2. If we can call Lambda:
    - Specify which action and what parameters
@@ -1319,6 +1430,33 @@ def orchestrate_intelligent_workflow(
             preserve_context = continuation.get('preserve_context', {})
             cont_workflow_type = continuation.get('workflow_type', '')
 
+            # ================================================================
+            # HANDLE ABORT: Special case - no Lambda call needed
+            # ================================================================
+            if action == 'abort_workflow':
+                logger.info("[CONTINUATION] Aborting workflow - clearing state")
+                state_manager.clear_state(session_id)
+                abort_message = continuation.get('abort_message', "No problem. What else can I help with?")
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': abort_message,
+                    'intent': 'scheduling',
+                    'action': 'abort_workflow',
+                    'agent_name': 'Intelligent Orchestrator (Abort)',
+                    'direct_call': True,
+                    'timing': timing,
+                    'channel': channel
+                }
+
+            # ================================================================
+            # HANDLE CANCEL EXECUTE: Confirmed cancel - call actual cancel API
+            # ================================================================
+            if action == 'cancel_appointment_execute':
+                logger.info("[CONTINUATION] Executing confirmed cancel")
+                # Call the actual cancel_appointment action
+                action = 'cancel_appointment'
+                params['confirmed'] = True
+
             # Determine if this is a reschedule workflow
             is_reschedule = cont_workflow_type == 'reschedule_appointment'
 
@@ -1527,16 +1665,27 @@ def orchestrate_intelligent_workflow(
                 # Format response for voice
                 response_text = format_lambda_response('list_projects', response_body, message)
 
-                # Save project_ids to workflow state for ordinal references
+                # Save project_ids AND project_mapping to workflow state for ordinal/category references
                 if 'projects' in response_body:
                     project_ids = [str(p.get('id', '')) for p in response_body['projects'] if p.get('id')]
+                    # Build project_mapping: project_id -> {category, address} for accurate matching
+                    project_mapping = {}
+                    for p in response_body['projects']:
+                        pid = str(p.get('id', ''))
+                        if pid:
+                            project_mapping[pid] = {
+                                'category': p.get('category', ''),
+                                'address': p.get('address', ''),
+                                'status': p.get('status', '')
+                            }
                     if project_ids:
-                        logger.info(f"[VOICE-PRECHECK] Saving {len(project_ids)} project_ids to workflow state")
+                        logger.info(f"[VOICE-PRECHECK] Saving {len(project_ids)} project_ids and project_mapping to workflow state")
                         state_manager.save_state(session_id, {
                             'workflow_type': 'view_projects',
                             'current_stage': 'showing_projects',
                             'context': {
                                 'project_ids': project_ids,
+                                'project_mapping': project_mapping,
                                 'customer_id': customer_id
                             }
                         })
@@ -1732,6 +1881,56 @@ def orchestrate_intelligent_workflow(
 
     timing['classification'] = time.time() - classification_start
 
+    # ========================================================================
+    # HANDLE HELP/CAPABILITIES: Show user what they can do
+    # ========================================================================
+    if classification.get('action') == 'show_capabilities':
+        logger.info("[HELP] User asked for help - showing capabilities")
+        help_response = """I can help you with:
+
+• **List your projects** - "show my projects"
+• **Check project details** - "tell me about project 7751741" or "details for the first project"
+• **Schedule appointments** - "schedule the first project"
+• **Reschedule** - "reschedule my appointment"
+• **Cancel** - "cancel my appointment"
+• **Check weather** - "what's the weather?"
+• **Check availability** - "what dates are available?"
+
+You can also say "start over" at any time to reset.
+
+What would you like to do?"""
+
+        timing['total'] = time.time() - start_time
+        return {
+            'response': help_response,
+            'intent': 'help',
+            'action': 'show_capabilities',
+            'agent_name': 'Intelligent Orchestrator (Help)',
+            'direct_call': True,
+            'timing': timing,
+            'channel': channel
+        }
+
+    # ========================================================================
+    # HANDLE START OVER: Clear all context and start fresh
+    # ========================================================================
+    if classification.get('action') == 'start_over':
+        logger.info("[START_OVER] User wants to start fresh - clearing all state")
+        state_manager.clear_state(session_id)
+
+        start_over_response = "Okay, starting fresh. What would you like to do?"
+
+        timing['total'] = time.time() - start_time
+        return {
+            'response': start_over_response,
+            'intent': 'scheduling',
+            'action': 'start_over',
+            'agent_name': 'Intelligent Orchestrator (Start Over)',
+            'direct_call': True,
+            'timing': timing,
+            'channel': channel
+        }
+
     # HANDLE CONTEXT QUERIES: Answer from conversation history
     if classification.get('action') == 'context_query':
         query_type = classification.get('entities', {}).get('query_type', '')
@@ -1834,15 +2033,28 @@ def orchestrate_intelligent_workflow(
 
                             logger.info(f"[VOICE-AUTOFETCH] Built project_data: {project_data}")
 
-                            # Save project_ids to workflow state for future queries
+                            # Save project_ids AND project_mapping to workflow state for future queries
                             fetched_ids = [str(p.get('id', '')) for p in fetched_projects if p.get('id')]
+                            # Build project_mapping for accurate category matching
+                            fetched_mapping = {}
+                            for p in fetched_projects:
+                                pid = str(p.get('id', ''))
+                                if pid:
+                                    fetched_mapping[pid] = {
+                                        'category': p.get('category', ''),
+                                        'address': p.get('address', ''),
+                                        'status': p.get('status', '')
+                                    }
                             if fetched_ids:
                                 state_manager.save_state(session_id, {
                                     'workflow_type': 'project_listing',
                                     'current_stage': 'listing_projects',
-                                    'context': {'project_ids': fetched_ids}
+                                    'context': {
+                                        'project_ids': fetched_ids,
+                                        'project_mapping': fetched_mapping
+                                    }
                                 })
-                                logger.info(f"[VOICE-AUTOFETCH] Saved {len(fetched_ids)} project_ids to workflow state")
+                                logger.info(f"[VOICE-AUTOFETCH] Saved {len(fetched_ids)} project_ids and mapping to workflow state")
 
                             timing['autofetch'] = time.time() - autofetch_start
 
@@ -2016,6 +2228,38 @@ def orchestrate_intelligent_workflow(
         project_index = entities.get('project_index')
         project_id = entities.get('project_id')
         location = entities.get('location')  # May already be extracted by Sonnet
+
+        # If no location, try to get it from workflow_state's project_mapping
+        # This handles "what's the weather" after user viewed a project
+        if not location and workflow_state:
+            context = workflow_state.get('context', {})
+            project_mapping = context.get('project_mapping', {})
+
+            # If user just viewed a project, get its location
+            current_project_id = context.get('project_id')
+            if current_project_id and current_project_id in project_mapping:
+                proj_info = project_mapping[current_project_id]
+                address = proj_info.get('address', '')
+                if address:
+                    # Parse city, state from address
+                    addr_match = re.search(r',\s*([A-Za-z\s]+),\s*([A-Z]{2})\s*\d*', address)
+                    if addr_match:
+                        location = f"{addr_match.group(1).strip()}, {addr_match.group(2)}"
+                        project_id = current_project_id
+                        logger.info(f"[WEATHER] Got location from current project #{current_project_id}: {location}")
+
+            # If still no location, try the most recently listed project
+            if not location and project_mapping:
+                # Get first project in mapping as fallback
+                first_pid = list(project_mapping.keys())[0]
+                proj_info = project_mapping[first_pid]
+                address = proj_info.get('address', '')
+                if address:
+                    addr_match = re.search(r',\s*([A-Za-z\s]+),\s*([A-Z]{2})\s*\d*', address)
+                    if addr_match:
+                        location = f"{addr_match.group(1).strip()}, {addr_match.group(2)}"
+                        project_id = first_pid
+                        logger.info(f"[WEATHER] Got location from first project #{first_pid}: {location}")
 
         # If we have a project reference but no location, extract from conversation history
         if (project_index is not None or project_id) and not location:
@@ -2221,6 +2465,54 @@ def orchestrate_intelligent_workflow(
             'direct_call': True,
             'timing': timing
         }
+
+    # ========================================================================
+    # CATEGORY-TO-PROJECT_ID RESOLVER
+    # If classification has a category-based search_criteria but no project_id,
+    # resolve it using project_mapping in workflow_state BEFORE decision function
+    # This prevents the decision function from falling back to list_projects
+    # ========================================================================
+    entities = classification.get('entities', {})
+    search_criteria = entities.get('search_criteria', {})
+    classified_action = classification.get('action', '')
+
+    # Check if we need to resolve category to project_id
+    # Category can be in entities.search_criteria.category OR entities.category (Sonnet varies)
+    category_to_resolve = search_criteria.get('category') or entities.get('category')
+
+    if (classified_action in ['get_project_details', 'get_available_dates', 'reschedule_appointment', 'cancel_appointment']
+        and not entities.get('project_id')
+        and category_to_resolve):
+
+        search_category = category_to_resolve.lower().strip()
+        logger.info(f"[CATEGORY-RESOLVE] Need to resolve category '{search_category}' to project_id")
+
+        # Get project_mapping from workflow_state
+        project_mapping = {}
+        if workflow_state:
+            project_mapping = workflow_state.get('context', {}).get('project_mapping', {})
+
+        if project_mapping:
+            # Find matching project by category (case-insensitive, partial match)
+            resolved_project_id = None
+            for pid, info in project_mapping.items():
+                cat = info.get('category', '').lower().strip()
+                # Support partial matching: "kitchen" matches "Kitchen Sink", "storm door" matches "Storm Door"
+                if search_category in cat or cat in search_category:
+                    resolved_project_id = pid
+                    logger.info(f"[CATEGORY-RESOLVE] Matched '{search_category}' to project #{pid} (category: {info.get('category')})")
+                    break
+
+            if resolved_project_id:
+                # Update classification with resolved project_id
+                if 'entities' not in classification:
+                    classification['entities'] = {}
+                classification['entities']['project_id'] = resolved_project_id
+                logger.info(f"[CATEGORY-RESOLVE] Updated classification with project_id={resolved_project_id}")
+            else:
+                logger.warning(f"[CATEGORY-RESOLVE] Could not find project matching category '{search_category}' in mapping: {list(project_mapping.keys())}")
+        else:
+            logger.warning(f"[CATEGORY-RESOLVE] No project_mapping in workflow_state - will need to fetch projects first")
 
     # Step 2: Intelligent decision using Sonnet 3.7
     logger.info("[DECISION] Step 2: Intelligent decision-making with Sonnet 3.7")
@@ -2463,10 +2755,22 @@ def orchestrate_intelligent_workflow(
                     else:
                         list_body = list_body_str
 
-                    # Extract project_ids
+                    # Extract project_ids AND project_mapping (for weather/context lookups)
                     if 'projects' in list_body and isinstance(list_body['projects'], list):
                         fetched_projects = list_body['projects']
                         fetched_ids = [str(p.get('id', '')) for p in fetched_projects if p.get('id')]
+
+                        # Build project_mapping: project_id -> {category, address, status}
+                        # This enables weather queries, category-based lookups, and other context-aware features
+                        fetched_mapping = {}
+                        for p in fetched_projects:
+                            pid = str(p.get('id', ''))
+                            if pid:
+                                fetched_mapping[pid] = {
+                                    'category': p.get('category', ''),
+                                    'address': p.get('address', ''),
+                                    'status': p.get('status', '')
+                                }
 
                         if fetched_ids:
                             logger.info(f"[ORDINAL] Auto-fetched {len(fetched_ids)} project_ids: {fetched_ids[:5]}...")
@@ -2477,12 +2781,16 @@ def orchestrate_intelligent_workflow(
                             if 'context' not in workflow_state:
                                 workflow_state['context'] = {}
                             workflow_state['context']['project_ids'] = fetched_ids
+                            workflow_state['context']['project_mapping'] = fetched_mapping
 
-                            # Save to DynamoDB
+                            # Save to DynamoDB (includes project_mapping for weather/category lookups)
                             state_manager.save_state(session_id, {
                                 'workflow_type': 'project_listing',
                                 'current_stage': 'listing_projects',
-                                'context': {'project_ids': fetched_ids}
+                                'context': {
+                                    'project_ids': fetched_ids,
+                                    'project_mapping': fetched_mapping
+                                }
                             })
 
                             # Now resolve project_index (supports negative indices)
@@ -2992,28 +3300,79 @@ def orchestrate_intelligent_workflow(
                         decision['update_workflow_state']['context'] = {}
                     decision['update_workflow_state']['context']['available_dates'] = response_body['available_dates']
 
-            # SAVE PROJECT_IDS: Save project_ids to workflow state when listing projects
+            # SAVE PROJECT_IDS AND PROJECT_MAPPING: Save to workflow state when listing projects
             # This enables ordinal references like "last project", "first project", "2nd project"
-            # to be resolved correctly for BOTH voice and chat channels
+            # AND category-based lookups AND weather queries for BOTH voice and chat channels
             if 'projects' in response_body and isinstance(response_body['projects'], list):
                 projects_list = response_body['projects']
                 project_ids = [str(p.get('id', '')) for p in projects_list if p.get('id')]
 
+                # Build project_mapping: project_id -> {category, address, status}
+                project_mapping = {}
+                for p in projects_list:
+                    pid = str(p.get('id', ''))
+                    if pid:
+                        project_mapping[pid] = {
+                            'category': p.get('category', ''),
+                            'address': p.get('address', ''),
+                            'status': p.get('status', '')
+                        }
+
                 if project_ids:
-                    logger.info(f"[PROJECTS] Saving {len(project_ids)} project_ids to workflow state: {project_ids[:5]}... (channel={channel})")
+                    logger.info(f"[PROJECTS] Saving {len(project_ids)} project_ids and project_mapping to workflow state (channel={channel})")
 
                     if decision.get('update_workflow_state'):
                         if 'context' not in decision['update_workflow_state']:
                             decision['update_workflow_state']['context'] = {}
                         decision['update_workflow_state']['context']['project_ids'] = project_ids
+                        decision['update_workflow_state']['context']['project_mapping'] = project_mapping
                     else:
                         # Create update_workflow_state if Sonnet didn't provide one
                         decision['update_workflow_state'] = {
                             'workflow_type': 'project_listing',
                             'current_stage': 'listing_projects',
-                            'context': {'project_ids': project_ids}
+                            'context': {
+                                'project_ids': project_ids,
+                                'project_mapping': project_mapping
+                            }
                         }
-                        logger.info(f"[PROJECTS] Created workflow state with project_ids")
+                        logger.info(f"[PROJECTS] Created workflow state with project_ids and project_mapping")
+
+            # SAVE CURRENT PROJECT_ID: When viewing a single project, save its ID for follow-up queries
+            # This enables "details for ovens project" -> "what's the weather" to work correctly
+            if 'project' in response_body and isinstance(response_body['project'], dict):
+                single_project = response_body['project']
+                viewed_project_id = str(single_project.get('id', ''))
+
+                if viewed_project_id:
+                    logger.info(f"[PROJECT] User viewed project #{viewed_project_id}, saving to workflow state (channel={channel})")
+
+                    # Build project info for this single project
+                    viewed_project_info = {
+                        'category': single_project.get('category', ''),
+                        'address': single_project.get('address', ''),
+                        'status': single_project.get('status', '')
+                    }
+
+                    if decision.get('update_workflow_state'):
+                        if 'context' not in decision['update_workflow_state']:
+                            decision['update_workflow_state']['context'] = {}
+                        decision['update_workflow_state']['context']['project_id'] = viewed_project_id
+                        # Also update project_mapping with this project's info
+                        existing_mapping = decision['update_workflow_state']['context'].get('project_mapping', {})
+                        existing_mapping[viewed_project_id] = viewed_project_info
+                        decision['update_workflow_state']['context']['project_mapping'] = existing_mapping
+                    else:
+                        # Create update_workflow_state if Sonnet didn't provide one
+                        decision['update_workflow_state'] = {
+                            'workflow_type': 'project_view',
+                            'current_stage': 'viewing_project',
+                            'context': {
+                                'project_id': viewed_project_id,
+                                'project_mapping': {viewed_project_id: viewed_project_info}
+                            }
+                        }
+                        logger.info(f"[PROJECT] Created workflow state with project_id={viewed_project_id}")
 
             # BATCH SCHEDULING: Auto-advance to next project after confirm_appointment
             if lambda_action == 'confirm_appointment':
