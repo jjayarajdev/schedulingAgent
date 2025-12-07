@@ -8,6 +8,7 @@ Sends SMS replies back to customers
 import json
 import os
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 import boto3
@@ -50,6 +51,100 @@ consent_table = dynamodb.Table(CONSENT_TABLE)
 opt_out_table = dynamodb.Table(OPT_OUT_TRACKING_TABLE)
 messages_table = dynamodb.Table(MESSAGES_TABLE)
 sessions_table = dynamodb.Table(SESSIONS_TABLE)
+
+
+def clean_phone_number(phone: str) -> str:
+    """
+    Clean and format phone number to E.164 format
+
+    Args:
+        phone: Raw phone number string
+
+    Returns:
+        Cleaned phone number in E.164 format (+1XXXXXXXXXX)
+    """
+    # Remove all non-digit characters except +
+    cleaned = re.sub(r'[^\d+]', '', phone)
+
+    # Add + if not present and number looks like US number
+    if not cleaned.startswith('+'):
+        if len(cleaned) == 10:
+            cleaned = '+1' + cleaned
+        elif len(cleaned) == 11 and cleaned.startswith('1'):
+            cleaned = '+' + cleaned
+
+    return cleaned
+
+
+def extract_phone_number_from_sns(sns_message: Dict[str, Any]) -> Optional[str]:
+    """
+    Extract phone number from SNS message based on AWS documentation
+    Handles multiple message formats:
+    - AWS End User Messaging inbound SMS (originationNumber)
+    - Delivery status messages (delivery.destination)
+    - Custom test formats (phone_number, phoneNumber)
+    - Pattern matching as fallback
+
+    Args:
+        sns_message: Parsed SNS message dict
+
+    Returns:
+        Cleaned phone number in E.164 format, or None if not found
+    """
+    phone_number = None
+
+    # 1. Two-Way SMS Message (Incoming) - AWS End User Messaging format
+    if 'originationNumber' in sns_message:
+        phone_number = sns_message['originationNumber']
+        logger.debug(f"Phone from originationNumber: {phone_number}")
+
+    # 2. SMS Delivery Status Message
+    elif 'delivery' in sns_message and 'destination' in sns_message['delivery']:
+        phone_number = sns_message['delivery']['destination']
+        logger.debug(f"Phone from delivery.destination: {phone_number}")
+
+    # 3. Custom test format - direct phone_number field
+    elif 'phone_number' in sns_message:
+        phone_number = sns_message['phone_number']
+        logger.debug(f"Phone from phone_number: {phone_number}")
+
+    # 4. Alternative phoneNumber field
+    elif 'phoneNumber' in sns_message:
+        phone_number = sns_message['phoneNumber']
+        logger.debug(f"Phone from phoneNumber: {phone_number}")
+
+    # 5. Nested user data
+    elif 'user' in sns_message:
+        user_data = sns_message['user']
+        phone_number = (user_data.get('phone') or
+                      user_data.get('mobile') or
+                      user_data.get('phoneNumber'))
+        logger.debug(f"Phone from user data: {phone_number}")
+
+    # 6. Nested contact data
+    elif 'contact' in sns_message:
+        contact_data = sns_message['contact']
+        phone_number = (contact_data.get('phone') or
+                      contact_data.get('mobile') or
+                      contact_data.get('phoneNumber'))
+        logger.debug(f"Phone from contact data: {phone_number}")
+
+    # 7. Fallback: Search for phone number patterns in the entire message
+    else:
+        message_str = json.dumps(sns_message)
+        phone_pattern = r'\+?1?[-.\s]?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})'
+        match = re.search(phone_pattern, message_str)
+        if match:
+            phone_number = match.group(0)
+            logger.debug(f"Phone from pattern match: {phone_number}")
+
+    # Clean and return phone number
+    if phone_number:
+        cleaned = clean_phone_number(phone_number)
+        logger.info(f"Extracted phone: {cleaned} (original: {phone_number})")
+        return cleaned
+
+    return None
 
 
 def get_pf_credentials() -> Dict[str, str]:
@@ -138,15 +233,31 @@ def process_sms_record(record: Dict[str, Any]) -> None:
         # Parse SNS message
         sns_message = json.loads(record['Sns']['Message'])
 
-        # Support both AWS End User Messaging format and test format
-        # AWS End User Messaging: originationNumber, destinationNumber, messageBody, inboundMessageId
-        # Test format: phone_number, message, message_id
-        phone_number = sns_message.get('originationNumber') or sns_message.get('phone_number', '+15555551234')
+        logger.info(f"Parsed SNS message keys: {list(sns_message.keys())}")
+
+        # Check if this is a delivery receipt - handle separately
+        event_type = sns_message.get('eventType', '')
+        if event_type:
+            logger.info(f"Received delivery receipt: {event_type}")
+            handle_delivery_receipt(sns_message)
+            return
+
+        # Extract phone number using robust AWS-documented approach
+        phone_number = extract_phone_number_from_sns(sns_message)
+
+        # Validate phone_number was extracted
+        if not phone_number:
+            logger.error(f"Could not extract phone number from SNS message")
+            logger.error(f"SNS message keys: {list(sns_message.keys())}")
+            logger.error(f"SNS message sample: {str(sns_message)[:500]}")
+            return  # Cannot process without phone number
+
+        # Extract other fields (support both AWS and test formats)
         destination_number = sns_message.get('destinationNumber', ORIGINATION_NUMBER)
         message_body = sns_message.get('messageBody') or sns_message.get('message', '')
         message_id = sns_message.get('inboundMessageId') or sns_message.get('message_id', f'test-{int(datetime.utcnow().timestamp())}')
 
-        logger.info(f"Processing SMS from {phone_number}: {message_body[:50]}")
+        logger.info(f"Processing SMS from {phone_number}: {message_body[:50] if message_body else '(empty)'}")
 
         # Check for opt-out keywords
         if is_opt_out_keyword(message_body):
@@ -341,6 +452,105 @@ def store_message(
         logger.error(f"Error storing message: {str(e)}", exc_info=True)
 
 
+def handle_delivery_receipt(delivery_receipt: Dict[str, Any]) -> None:
+    """
+    Process SMS delivery receipt and update message status in DynamoDB
+
+    Delivery receipt format from AWS End User Messaging:
+    {
+        "eventType": "TEXT_SENT" | "TEXT_DELIVERED" | "TEXT_INVALID" | "TEXT_UNREACHABLE" | etc.,
+        "eventVersion": "1.0",
+        "destinationPhoneNumber": "+1234567890",
+        "messageId": "...",
+        "isoCountryCode": "US",
+        "mcc": "...",
+        "mnc": "...",
+        "carrierName": "...",
+        "timestamp": "..."
+    }
+
+    Args:
+        delivery_receipt: Delivery receipt data from SNS
+    """
+    try:
+        event_type = delivery_receipt.get('eventType', '')
+        destination_phone = delivery_receipt.get('destinationPhoneNumber', '')
+        message_id = delivery_receipt.get('messageId', '')
+        timestamp = delivery_receipt.get('timestamp', datetime.utcnow().isoformat())
+
+        logger.info(f"Processing delivery receipt: {event_type} for {destination_phone}, messageId: {message_id}")
+
+        # Map AWS event types to our message statuses
+        status_mapping = {
+            'TEXT_QUEUED': 'queued',
+            'TEXT_SENT': 'sent',
+            'TEXT_DELIVERED': 'delivered',
+            'TEXT_INVALID': 'failed',
+            'TEXT_UNREACHABLE': 'failed',
+            'TEXT_BLOCKED': 'failed',
+            'TEXT_CARRIER_BLOCKED': 'failed',
+            'TEXT_SPAM': 'failed',
+            'TEXT_UNKNOWN': 'unknown',
+            'TEXT_CARRIER_UNREACHABLE': 'failed',
+            'TEXT_TTL_EXPIRED': 'failed',
+            'TEXT_PENDING': 'pending'
+        }
+
+        new_status = status_mapping.get(event_type, 'unknown')
+
+        # If we don't have a message_id from the delivery receipt, we can't update
+        # This should be rare, but we'll log it
+        if not message_id:
+            logger.warning(f"Delivery receipt missing messageId - cannot update status. Event: {event_type}, Phone: {destination_phone}")
+            return
+
+        # Update message status in DynamoDB
+        # The table has composite key: message_id (HASH) + timestamp (RANGE)
+        # We need to query by message_id to find the item, then update it
+        try:
+            # Query for messages with this message_id
+            response = messages_table.query(
+                KeyConditionExpression='message_id = :mid',
+                ExpressionAttributeValues={
+                    ':mid': message_id
+                },
+                Limit=1  # Should only be one message with this ID
+            )
+
+            if response.get('Items'):
+                item = response['Items'][0]
+                item_timestamp = item['timestamp']
+
+                # Update the existing message with new status
+                messages_table.update_item(
+                    Key={
+                        'message_id': message_id,
+                        'timestamp': item_timestamp
+                    },
+                    UpdateExpression='SET #status = :status, delivery_timestamp = :ts, delivery_event_type = :event',
+                    ExpressionAttributeNames={
+                        '#status': 'status'
+                    },
+                    ExpressionAttributeValues={
+                        ':status': new_status,
+                        ':ts': timestamp,
+                        ':event': event_type
+                    }
+                )
+                logger.info(f"Updated message {message_id} status to '{new_status}' (event: {event_type})")
+            else:
+                # Message not found - this might be a delivery receipt for a message we didn't store
+                # This could happen if the message was sent before our system was deployed
+                logger.warning(f"Message {message_id} not found in messages table. Delivery receipt: {event_type}")
+
+        except ClientError as e:
+            logger.error(f"DynamoDB error updating message {message_id}: {str(e)}", exc_info=True)
+
+    except Exception as e:
+        logger.error(f"Error processing delivery receipt: {str(e)}", exc_info=True)
+        # Don't raise - we don't want delivery receipt processing errors to affect inbound message processing
+
+
 def sanitize_phone_for_session(phone_number: str) -> str:
     """
     Sanitize phone number for use in session ID
@@ -450,6 +660,8 @@ def invoke_orchestrator(
             })
         }
 
+        logger.info(f"Sending to orchestrator - message: '{message[:50]}...', session: {session_id}, user: {pf_creds['user_id']}")
+
         # Invoke orchestrator lambda synchronously
         response = lambda_client.invoke(
             FunctionName=ORCHESTRATOR_LAMBDA,
@@ -459,6 +671,7 @@ def invoke_orchestrator(
 
         # Parse response
         response_payload = json.loads(response['Payload'].read())
+        logger.info(f"Orchestrator full response payload: {json.dumps(response_payload)[:500]}")
         logger.debug(f"Orchestrator response status: {response_payload.get('statusCode')}")
 
         if response_payload.get('statusCode') == 200:
