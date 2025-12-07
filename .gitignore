@@ -132,6 +132,8 @@ docs/**/*.pdf
 !README.md
 !CHANGELOG.md
 !VOICE_CONFIG_REFERENCE.md
+!REACT_INTEGRATION_GUIDE.md
+!AWS_RESOURCES_INVENTORY.md
 
 # Ignore other non-essential MD files
 backend/**/*.md
