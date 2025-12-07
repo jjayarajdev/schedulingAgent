@@ -93,7 +93,7 @@ NATURAL_FULFILLMENT_UPDATES = {
             {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">Just a sec</prosody></speak>'}}},
             {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">Checking on that</prosody></speak>'}}},
         ],
-        'allowInterrupt': False
+        'allowInterrupt': True
     },
     'updateResponse': {
         'frequencyInSeconds': 10,  # Update every 10 seconds if still waiting
@@ -101,7 +101,7 @@ NATURAL_FULFILLMENT_UPDATES = {
             {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">Still working on it</prosody></speak>'}}},
             {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">Almost done</prosody></speak>'}}},
         ],
-        'allowInterrupt': False
+        'allowInterrupt': True
     },
     'timeoutInSeconds': 90
 }
