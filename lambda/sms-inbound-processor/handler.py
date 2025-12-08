@@ -304,13 +304,17 @@ def process_sms_record(record: Dict[str, Any]) -> None:
 
 def is_opt_out_keyword(message: str) -> bool:
     """
-    Check if message contains opt-out keyword
+    Check if message is an exact opt-out keyword
+
+    Uses exact matching to avoid false positives (e.g., "cancel all slots" should NOT trigger opt-out).
+    AWS End User Messaging will also recognize these keywords and automatically add the number
+    to the Default opt-out list, but we need to detect them here to update our internal systems.
 
     Args:
         message: SMS message body
 
     Returns:
-        True if message is an opt-out request
+        True if message is an opt-out request (exact match only)
     """
     opt_out_keywords = [
         'STOP', 'QUIT', 'END', 'REVOKE',
@@ -318,7 +322,9 @@ def is_opt_out_keyword(message: str) -> bool:
     ]
 
     message_upper = message.upper().strip()
-    return any(keyword in message_upper for keyword in opt_out_keywords)
+    # Use exact match instead of substring to avoid false positives
+    # e.g., "cancel all slots on dec9" should NOT be treated as opt-out
+    return message_upper in opt_out_keywords
 
 
 def handle_opt_out(phone_number: str, message: str, message_id: str) -> None:
@@ -365,20 +371,10 @@ def handle_opt_out(phone_number: str, message: str, message_id: str) -> None:
             }
         )
 
-        # Send confirmation
-        confirmation = (
-            "You have been unsubscribed from SMS messages. "
-            "Your request will be processed within 10 business days. "
-            "Reply START to resubscribe."
-        )
-
-        send_sms_reply(
-            phone_number=phone_number,
-            message=confirmation,
-            session_id=None
-        )
-
-        logger.info(f"Opt-out processed for {phone_number}")
+        # NOTE: AWS End User Messaging automatically sends opt-out confirmation
+        # and adds the number to the Default opt-out list. We don't need to send
+        # a duplicate confirmation message here.
+        logger.info(f"Opt-out processed for {phone_number}. AWS will handle confirmation and opt-out list update.")
 
     except Exception as e:
         logger.error(f"Error handling opt-out: {str(e)}", exc_info=True)
