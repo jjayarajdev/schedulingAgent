@@ -87,11 +87,9 @@ client = session.client('lexv2-models')
 NATURAL_FULFILLMENT_UPDATES = {
     'active': True,
     'startResponse': {
-        'delayInSeconds': 5,  # Wait 5 seconds before any message (most responses are faster)
+        'delayInSeconds': 3,  # Wait 3 seconds before first message
         'messageGroups': [
-            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">One moment</prosody></speak>'}}},
-            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">Just a sec</prosody></speak>'}}},
-            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">Checking on that</prosody></speak>'}}},
+            {'message': {'ssmlMessage': {'value': '<speak><prosody rate="slow">One moment please, I am checking on your request</prosody></speak>'}}},
         ],
         'allowInterrupt': True
     },
@@ -106,14 +104,31 @@ NATURAL_FULFILLMENT_UPDATES = {
     'timeoutInSeconds': 90
 }
 
-# Get all intents
-intents_response = client.list_intents(
-    botId=bot_id,
-    botVersion=bot_version,
-    localeId=locale_id
-)
+# Get all intents (with pagination)
+intents = []
+next_token = None
+while True:
+    if next_token:
+        intents_response = client.list_intents(
+            botId=bot_id,
+            botVersion=bot_version,
+            localeId=locale_id,
+            maxResults=50,
+            nextToken=next_token
+        )
+    else:
+        intents_response = client.list_intents(
+            botId=bot_id,
+            botVersion=bot_version,
+            localeId=locale_id,
+            maxResults=50
+        )
 
-intents = [(i['intentId'], i['intentName']) for i in intents_response.get('intentSummaries', [])]
+    intents.extend([(i['intentId'], i['intentName']) for i in intents_response.get('intentSummaries', [])])
+    next_token = intents_response.get('nextToken')
+    if not next_token:
+        break
+
 print(f"  Processing {len(intents)} intents...")
 
 updated_count = 0
@@ -266,6 +281,6 @@ echo -e "${GREEN}    Done! Natural waiting messages applied.${NC}"
 echo -e "${GREEN}============================================================================${NC}"
 echo ""
 echo "Messages configured (with SSML prosody rate='slow' for natural voice):"
-echo "  Start (after 5s):  'One moment' / 'Just a sec' / 'Checking on that'"
+echo "  Start (after 3s):  'One moment please, I am checking on your request'"
 echo "  Update (every 10s): 'Still working on it' / 'Almost done'"
 echo ""
