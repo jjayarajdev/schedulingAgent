@@ -15,10 +15,9 @@
 7. [Sample React Implementation](#7-sample-react-implementation)
 8. [Response Handling](#8-response-handling)
 9. [Error Handling](#9-error-handling)
-10. [Sample Conversations](#10-sample-conversations)
-11. [Testing](#11-testing)
-12. [Deployment](#12-deployment)
-13. [Local Development (Optional)](#13-local-development-optional)
+10. [Testing](#11-testing)
+11. [Deployment](#12-deployment)
+12. [Local Development (Optional)](#13-local-development-optional)
 
 ---
 
@@ -620,122 +619,7 @@ async function sendWithRetry(chatService: ChatService, message: string, maxRetri
 
 ---
 
-## 10. Sample Conversations
-
-> These are actual responses from the scheduling agent captured during testing.
-
-### Greeting
-
-```
-User: "Hello!"
-
-Bot: "Hi there! Welcome back! I'm your ProjectForce scheduling assistant.
-I can help you view your projects, find available dates, and get
-appointments scheduled. Feel free to ask me anything!"
-```
-
-### Help Request
-
-```
-User: "What can you help me with?"
-
-Bot: "I can help you with:
-- View your projects (list my projects)
-- Get project details (details for project 7751744)
-- Check available dates (what dates are available for project 7751744)
-- View time slots (show me time slots for Nov 25)
-- Schedule appointments (schedule project 7751744)
-
-Just ask me what you'd like to do!"
-```
-
-### List Projects
-
-```
-User: "Show my projects"
-
-Bot: "I see you have several decking projects with us at your Chicago Avenue
-address in Minneapolis. You currently have 8 projects, with 4 scheduled
-appointments:
-
-• December 22, 2025 at 1:00 PM - 2:00 PM
-• December 16, 2025 at 8:00 AM - 9:00 AM
-• November 26, 2025 at 8:00 AM - 8:10 AM
-• November 25, 2025 at 8:00 AM - 8:10 AM
-
-The remaining 4 projects are ready to be scheduled at your convenience.
-One of your projects includes some documents you might want to review."
-```
-
-### Project Details
-
-```
-User: "Give me details for project 7751741"
-
-Bot: "I found your decking project details! This is project #7751741, which
-is currently ready to be scheduled. It's a callback project for your
-property at 401 Chicago Avenue in Minneapolis. The project was purchased
-through Lowe's on November 3rd, 2025, and we'll be able to get it on the
-calendar for you as soon as a date is selected."
-```
-
-### Schedule Appointment Flow
-
-```
-User: "I want to schedule an appointment for project 7751741"
-
-Bot: "I'd be happy to help you schedule project #7751741. We have several
-dates available in December 2025, but I should mention that the first week
-(Dec 6-11) has some weather concerns - including snow and cold temperatures
-around 16-37°F. However, starting December 12th through the end of the
-month, we have many good weather days available for your project, including
-weekday and weekend options."
-```
-
-```
-User: "I'll take the first available date"
-
-Bot: "I see several dates available in December 2025. Please specify which
-date you'd prefer (between December 6-31, except Sundays), and I'll show
-you the available time slots for that day."
-```
-
-```
-User: "The morning slot works for me"
-
-Bot: "Perfect! The morning slot at 8:00 AM is available for your service
-appointment. I should mention that the weather forecast shows some cold
-temperatures and light snow expected, with temperatures ranging from 8 to
-16 degrees. While our crews are prepared to work in various conditions,
-you might want to know that warmer temperatures are expected later in the
-week around December 9-10, with highs in the upper 30s."
-```
-
-### Weather Queries
-
-```
-User: "What's the weather in Tampa?"
-
-Bot: "Right now in Tampa it's a clear night at 62°F with light winds. The
-next few days will be quite wet - we're looking at drizzle and rain from
-Friday through Monday, with temperatures reaching the mid to high 70s.
-Things should dry up by Tuesday, with overcast skies and slightly cooler
-temperatures in the high 60s to low 70s for the rest of the week."
-```
-
-```
-User: "Will it rain in Miami tomorrow?"
-
-Bot: "Looking at tomorrow's forecast for Miami, there's only a small 4%
-chance of rain. It'll be mostly overcast with temperatures ranging from
-67°F to 79°F - quite pleasant overall. If you're planning any outdoor
-activities, the weather should cooperate nicely, though you might see
-some clouds overhead."
-```
-
----
-
-## 11. Testing
+## 10 Testing
 
 ### Test Credentials
 
@@ -772,7 +656,7 @@ curl https://fpheaag7c7.execute-api.us-east-1.amazonaws.com/dev/health
 
 ---
 
-## 12. Deployment
+## 11. Deployment
 
 ### Deploy API Gateway (New Environment)
 
@@ -802,7 +686,7 @@ cd scripts
 
 ---
 
-## 13. Local Development (Optional)
+## 12. Local Development (Optional)
 
 For local development without AWS credentials, use the Flask proxy:
 
