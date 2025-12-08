@@ -1,7 +1,7 @@
 # Voice Configuration Reference - AWS Lex V2
 
-**Generated:** 2025-12-06 (Updated)
-**Status:** Synced with AWS Production
+**Generated:** 2025-12-08 (Updated)
+**Status:** Synced with AWS Production - SSML Conversational Voice Added
 **Purpose:** Reference for deployment script validation
 
 ---
@@ -2293,4 +2293,100 @@ Changes made to ensure deploy script matches AWS:
 
 ---
 
-*Last verified: 2025-12-06*
+## Voice Improvements - Jay's Changes (2025-12-06)
+
+### Overview
+
+Commit `b00610f` by Jay Jayakeerthy implemented two major improvements:
+1. **Semantic/Fuzzy Project Matching** - Rule #10 in Sonnet prompt
+2. **Direct Voice Responses** - Simplified per Chad's feedback
+
+---
+
+### 1. Semantic/Fuzzy Project Matching
+
+**Location:** `lambda/orchestrator/intelligent_orchestrator.py` (lines 815-960)
+
+**Rule #10 Priority Order (most specific wins):**
+1. **Location** (highest priority) - "north loop", "the north", "loop area"
+2. **Category** - "deck", "roofing", "solar"
+3. **Status** - "in progress", "scheduled"
+
+**Matching Capabilities:**
+
+| Type | Example Input | Matches |
+|------|---------------|---------|
+| Fuzzy Location | "the north", "north loop area" | "123 North Loop Blvd" |
+| Category Synonyms | "deck", "decking" | Decking projects |
+| Category Synonyms | "roof", "roofing" | Roofing projects |
+| Pattern Recognition | "the deck one", "deck project", "deck job" | Deck-related projects |
+
+**Location Over Category:**
+- "deck project at north loop" → Matches by LOCATION first ("north loop")
+- If location matches but category doesn't, USE the location-matched project
+- Location is MORE SPECIFIC than category
+
+**Example Reasoning:**
+```json
+{
+  "reasoning": "User said 'the deck one at north'. Semantic match: 'north' matches project #7751741 at '123 North Loop Blvd'. User said 'deck' but project is actually Windows - using location match (more specific). Location takes priority."
+}
+```
+
+---
+
+### 2. Direct Voice Responses (Chad's Feedback)
+
+**Location:** `lambda/orchestrator/voice_formatter.py`
+
+**Design Principle:** Be DIRECT like ChatGPT - no filler, no fluff.
+
+| Removed | Added |
+|---------|-------|
+| SSML tags | Plain text only |
+| Filler words ("um", "hmm", "let me check") | Direct answers |
+| "Great!", "Good news!" openers | No openers |
+| Long explanations | 1-2 sentences max |
+| Formal language | Contractions ("I'm", "you've", "don't") |
+
+**Casual Replacements:**
+```python
+"I am" → "I'm"
+"you have" → "you've"
+"I would be happy to" → "I can"
+"Unfortunately" → "Sorry,"
+```
+
+**Response Formatting:**
+- Max 300 characters
+- Max 2-3 sentences
+- Remove project IDs (hard to hear on phone)
+- Simple follow-up: "Anything else?"
+
+---
+
+### 3. Simplified Conversation Prompt
+
+**Location:** `lambda/orchestrator/router.py`
+
+Simplified the conversation prompt for more efficient routing.
+
+---
+
+### 4. Barge-In Support
+
+**Location:** `lambda/lex-fulfillment/handler.py`
+
+Fixed handler to properly support barge-in (user interruption during bot speech).
+
+---
+
+### Related Commit
+
+| Commit | Author | Description |
+|--------|--------|-------------|
+| `b00610f` | Jay Jayakeerthy | Add semantic/fuzzy project matching and voice response improvements |
+
+---
+
+*Last verified: 2025-12-08*
