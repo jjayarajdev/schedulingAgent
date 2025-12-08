@@ -8,6 +8,12 @@ DESIGN PRINCIPLE (from Chad's feedback):
 - NO "um", "hmm", "let me check" - just answer
 - NO "Great!", "Good news!" - just answer
 - Sound natural but EFFICIENT
+
+SSML FEATURES:
+- <speak>...</speak> wrapper for all voice output
+- <break time="..."/> for natural pauses
+- <prosody rate="slow"> for critical info (dates, times, addresses)
+- <prosody pitch="high"> for questions
 """
 import json
 import re
@@ -15,6 +21,41 @@ import logging
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger()
+
+
+# ============================================================================
+# SSML HELPER FUNCTIONS
+# ============================================================================
+
+def _ssml_break(ms: int = 300) -> str:
+    """Insert a pause. Default 300ms."""
+    return f'<break time="{ms}ms"/>'
+
+
+def _ssml_slow(text: str) -> str:
+    """Slow down speech for important info (dates, addresses, numbers)."""
+    return f'<prosody rate="slow">{text}</prosody>'
+
+
+def _ssml_question(text: str) -> str:
+    """Add slight pitch rise for questions."""
+    return f'<prosody pitch="+5%">{text}</prosody>'
+
+
+def _wrap_ssml(text: str) -> str:
+    """Wrap text in <speak> tags for SSML output."""
+    # Clean up any existing speak tags
+    text = re.sub(r'</?speak>', '', text)
+    # Escape special characters that could break SSML
+    text = text.replace('&', '&amp;')
+    # Don't double-escape already escaped entities
+    text = re.sub(r'&amp;(amp|lt|gt|quot|apos);', r'&\1;', text)
+    return f'<speak>{text}</speak>'
+
+
+def _is_ssml(text: str) -> bool:
+    """Check if text is already SSML formatted."""
+    return text.strip().startswith('<speak>')
 
 
 # ============================================================================
@@ -54,9 +95,9 @@ def _casualize_language(text: str) -> str:
     return text
 
 
-def format_for_voice(response_text: str, intent: str = 'unknown') -> str:
+def format_for_voice(response_text: str, intent: str = 'unknown', use_ssml: bool = True) -> str:
     """
-    Convert response to natural, DIRECT speech.
+    Convert response to natural, DIRECT speech with SSML support.
 
     Design: Be like ChatGPT - direct, efficient, no filler.
     - No "um", "hmm", "let me check"
@@ -64,12 +105,19 @@ def format_for_voice(response_text: str, intent: str = 'unknown') -> str:
     - Short responses (1-2 sentences)
     - Just answer the question
 
+    SSML Features:
+    - <speak>...</speak> wrapper for all voice output
+    - <break time="..."/> for natural pauses
+    - <prosody rate="slow"> for critical info (dates, times, addresses)
+    - <prosody pitch="+5%"> for questions
+
     Args:
         response_text: Raw response from agent or Lambda
         intent: Intent type (scheduling, information, chitchat)
+        use_ssml: Whether to wrap output in SSML tags (default True)
 
     Returns:
-        Voice-friendly text (plain text, no SSML)
+        Voice-friendly text wrapped in SSML <speak> tags
     """
     try:
         # Step 1: Try to detect and parse JSON
@@ -93,6 +141,10 @@ def format_for_voice(response_text: str, intent: str = 'unknown') -> str:
 
             # Add follow-up if appropriate
             voice_text = _add_voice_followup(voice_text, intent)
+
+            # Wrap in SSML if enabled
+            if use_ssml and not _is_ssml(voice_text):
+                voice_text = _wrap_ssml(voice_text)
 
             return voice_text
 
@@ -144,11 +196,16 @@ def format_for_voice(response_text: str, intent: str = 'unknown') -> str:
         # Final cleanup
         voice_text = re.sub(r'\s+', ' ', voice_text).strip()
 
+        # Wrap in SSML if enabled
+        if use_ssml and not _is_ssml(voice_text):
+            voice_text = _wrap_ssml(voice_text)
+
         return voice_text
 
     except Exception as e:
         logger.error(f"Error formatting for voice: {e}")
-        return "Sorry, let me try that again."
+        error_msg = "Sorry, let me try that again."
+        return _wrap_ssml(error_msg) if use_ssml else error_msg
 
 
 def _add_voice_followup(text: str, intent: str) -> str:
@@ -251,7 +308,7 @@ def _is_json(text: str) -> bool:
 
 
 def _format_projects_for_voice(data: Dict) -> str:
-    """Format project list - short and direct."""
+    """Format project list - short and direct with SSML breaks."""
     projects = data.get('projects', [])
     count = len(projects)
 
@@ -262,10 +319,10 @@ def _format_projects_for_voice(data: Dict) -> str:
         p = projects[0]
         category = p.get('category', 'project')
         status = p.get('status', '')
-        return f"You've got one {category} project, {status.lower()}."
+        return f"You've got one {category} project,{_ssml_break(200)} {status.lower()}."
 
-    # Multiple - be brief
-    result = f"You've got {count} projects. "
+    # Multiple - be brief with pauses between categories
+    result = f"You've got {count} projects.{_ssml_break(300)} "
 
     # Group by category
     categories = {}
@@ -278,14 +335,14 @@ def _format_projects_for_voice(data: Dict) -> str:
         cat_parts.append(f"{num} {cat}" if num > 1 else f"one {cat}")
 
     if cat_parts:
-        result += ", ".join(cat_parts) + ". "
+        result += f"{_ssml_break(200)}".join(cat_parts) + f".{_ssml_break(300)} "
 
-    result += "Which one?"
+    result += _ssml_question("Which one?")
     return result
 
 
 def _format_project_details_for_voice(data: Dict) -> str:
-    """Format project details - direct, no fluff."""
+    """Format project details - direct, no fluff, with SSML prosody for dates."""
     project = data.get('project', {})
 
     status = project.get('status', 'unknown')
@@ -297,24 +354,26 @@ def _format_project_details_for_voice(data: Dict) -> str:
     technician = project.get('technician', {})
     tech_name = technician.get('name') or installer_info.get('name', '')
 
-    # Build brief response
+    # Build brief response with SSML
     parts = []
 
     parts.append(f"Your {category} project is {status}.")
 
     if scheduled_date:
-        parts.append(f"Scheduled for {_format_date_naturally(scheduled_date)}.")
+        # Slow down for the date - critical info
+        date_str = _format_date_naturally(scheduled_date)
+        parts.append(f"Scheduled for {_ssml_slow(date_str)}.")
     else:
         parts.append("Not scheduled yet.")
 
     if tech_name:
-        parts.append(f"Technician: {tech_name}.")
+        parts.append(f"{_ssml_break(200)}Technician: {tech_name}.")
 
-    return " ".join(parts[:3])  # Max 3 sentences
+    return f"{_ssml_break(200)}".join(parts[:3])  # Max 3 sentences with pauses
 
 
 def _format_dates_for_voice(data: Dict) -> str:
-    """Format available dates - brief summary."""
+    """Format available dates - brief summary with SSML prosody for dates."""
     dates = data.get('available_dates', [])
     count = len(dates)
 
@@ -322,27 +381,29 @@ def _format_dates_for_voice(data: Dict) -> str:
         return "No dates available right now."
 
     if count <= 3:
-        # List them all
-        date_strs = [_format_date_naturally(d) for d in dates]
-        return "Available: " + ", ".join(date_strs) + ". Which works?"
+        # List them all with slow prosody for each date
+        date_strs = [_ssml_slow(_format_date_naturally(d)) for d in dates]
+        dates_text = f",{_ssml_break(200)} ".join(date_strs)
+        return f"Available:{_ssml_break(200)} {dates_text}.{_ssml_break(300)} {_ssml_question('Which works?')}"
 
-    # Many dates - summarize
-    first = _format_date_naturally(dates[0])
-    last = _format_date_naturally(dates[-1])
-    return f"{count} dates from {first} to {last}. Which week works?"
+    # Many dates - summarize with slow prosody for range
+    first = _ssml_slow(_format_date_naturally(dates[0]))
+    last = _ssml_slow(_format_date_naturally(dates[-1]))
+    return f"{count} dates from {first} to {last}.{_ssml_break(300)} {_ssml_question('Which week works?')}"
 
 
 def _format_time_slots_for_voice(data: Dict) -> str:
-    """Format time slots."""
+    """Format time slots with SSML prosody."""
     slots = data.get('time_slots', [])
     count = len(slots)
 
     if count == 0:
         return "No time slots available."
 
-    # List them
-    times = [_format_time_naturally(s) for s in slots[:4]]
-    return "Available: " + ", ".join(times) + ". Which time?"
+    # List them with slow prosody for times
+    times = [_ssml_slow(_format_time_naturally(s)) for s in slots[:4]]
+    times_text = f",{_ssml_break(200)} ".join(times)
+    return f"Available:{_ssml_break(200)} {times_text}.{_ssml_break(300)} {_ssml_question('Which time?')}"
 
 
 def _generic_json_to_voice(data: Any) -> str:
@@ -454,12 +515,30 @@ def is_voice_mode_enabled(session_attributes: Optional[Dict] = None) -> bool:
 def format_response_for_channel(
     response_text: str,
     intent: str,
-    session_attributes: Optional[Dict] = None
+    session_attributes: Optional[Dict] = None,
+    use_ssml: bool = True
 ) -> str:
-    """Format response based on channel."""
+    """
+    Format response based on channel (voice vs text).
+
+    For voice channels, applies SSML formatting with:
+    - <speak> wrapper
+    - <break> pauses for natural rhythm
+    - <prosody rate="slow"> for dates, times, addresses
+    - <prosody pitch="+5%"> for questions
+
+    Args:
+        response_text: Raw response text
+        intent: Intent type for contextual formatting
+        session_attributes: Session context (voice_mode, channel, etc.)
+        use_ssml: Whether to include SSML tags (default True for voice)
+
+    Returns:
+        Formatted response (SSML for voice, plain text for chat)
+    """
     if is_voice_mode_enabled(session_attributes):
-        logger.info("Voice mode - formatting for voice")
-        return format_for_voice(response_text, intent)
+        logger.info("Voice mode - formatting for voice with SSML")
+        return format_for_voice(response_text, intent, use_ssml=use_ssml)
     else:
         logger.info("Text mode - keeping original")
         return response_text
