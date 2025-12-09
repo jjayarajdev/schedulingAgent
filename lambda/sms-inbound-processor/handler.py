@@ -7,12 +7,21 @@ Sends SMS replies back to customers
 
 import json
 import os
+import sys
 import logging
 import re
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 import boto3
 from botocore.exceptions import ClientError
+
+# Add shared module to path for phone_auth import
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
+try:
+    from phone_auth import get_or_authenticate, AuthenticationError
+    PHONE_AUTH_AVAILABLE = True
+except ImportError:
+    PHONE_AUTH_AVAILABLE = False
 
 # Configure logging with structured output
 logger = logging.getLogger()
@@ -258,6 +267,27 @@ def process_sms_record(record: Dict[str, Any]) -> None:
         message_id = sns_message.get('inboundMessageId') or sns_message.get('message_id', f'test-{int(datetime.utcnow().timestamp())}')
 
         logger.info(f"Processing SMS from {phone_number}: {message_body[:50] if message_body else '(empty)'}")
+
+        # PHONE-BASED AUTHENTICATION: Authenticate sender via phone numbers
+        # This calls phone-call-login API and stores credentials in Secrets Manager
+        pf_user_id = None
+        if PHONE_AUTH_AVAILABLE and phone_number and destination_number:
+            try:
+                logger.info(f"[PHONE_AUTH] Authenticating SMS sender {phone_number[-4:]} via {destination_number[-4:]}")
+                credentials = get_or_authenticate(phone_number, destination_number)
+                pf_user_id = credentials.get('user_id')
+                logger.info(f"[PHONE_AUTH] Authenticated user {pf_user_id} ({credentials.get('user_name', 'unknown')})")
+            except AuthenticationError as auth_err:
+                logger.error(f"[PHONE_AUTH] Authentication failed: {auth_err}")
+                # For SMS, we fail closed - send error message and stop processing
+                send_sms_reply(
+                    phone_number=phone_number,
+                    message="Sorry, I couldn't verify your phone number. Please contact us for assistance.",
+                    session_id=None
+                )
+                return
+            except Exception as auth_ex:
+                logger.warning(f"[PHONE_AUTH] Unexpected error: {auth_ex}, falling back to Secrets Manager")
 
         # Check for opt-out keywords
         if is_opt_out_keyword(message_body):

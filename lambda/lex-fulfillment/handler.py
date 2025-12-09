@@ -18,10 +18,24 @@ Environment Variables:
 import json
 import boto3
 import os
+import sys
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import logging
 from decimal import Decimal
+
+# Import phone_auth - try direct import first (Lambda flat structure), then shared path
+try:
+    from phone_auth import get_or_authenticate, AuthenticationError
+    PHONE_AUTH_AVAILABLE = True
+except ImportError:
+    # Try shared module path (local development)
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
+    try:
+        from phone_auth import get_or_authenticate, AuthenticationError
+        PHONE_AUTH_AVAILABLE = True
+    except ImportError:
+        PHONE_AUTH_AVAILABLE = False
 
 # Simple credentials helper - read from Secrets Manager with env fallback
 def get_credentials_from_secrets():
@@ -222,24 +236,56 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         session_attributes = event.get('sessionState', {}).get('sessionAttributes', {})
         customer_id = session_attributes.get('customer_id')
         request_attributes = event.get('requestAttributes', {})
+
+        # Get phone numbers from session attributes (set by Connect flow via LexSessionAttributes)
         customer_phone = (
+            session_attributes.get('CustomerNumber') or
             request_attributes.get('CustomerNumber') or
             session_attributes.get('customer_phone', 'unknown')
         )
+        system_phone = (
+            session_attributes.get('SystemNumber') or
+            request_attributes.get('SystemNumber') or
+            ''
+        )
 
-        # VOICE-SPECIFIC: If no customer_id in session, get from Secrets Manager
-        # This is voice-only (lex-fulfillment is only called by voice/Connect)
+        # Debug logging for phone numbers
+        logger.info(f"[PHONE_DEBUG] sessionAttributes keys: {list(session_attributes.keys())}")
+        logger.info(f"[PHONE_DEBUG] CustomerNumber value: '{customer_phone}'")
+        logger.info(f"[PHONE_DEBUG] SystemNumber value: '{system_phone}'")
+        logger.info(f"[PHONE_DEBUG] PHONE_AUTH_AVAILABLE={PHONE_AUTH_AVAILABLE}")
+
+        # VOICE-SPECIFIC: Phone-based authentication
+        # Authenticate caller using phone numbers and store credentials in Secrets Manager
         if not customer_id:
-            try:
-                credentials = get_credentials_from_secrets()
-                customer_id = credentials.get('user_id')
-                if customer_id:
-                    # Store in session for subsequent calls
-                    session_attributes['customer_id'] = customer_id
-                    event['sessionState']['sessionAttributes'] = session_attributes
-                    logger.info(f"[VOICE] Set customer_id from Secrets Manager: {customer_id}")
-            except Exception as cred_err:
-                logger.warning(f"[VOICE] Failed to get customer_id from Secrets Manager: {cred_err}")
+            # Try phone authentication first
+            if PHONE_AUTH_AVAILABLE and customer_phone and customer_phone != 'unknown' and system_phone:
+                try:
+                    logger.info(f"[PHONE_AUTH] Authenticating caller ***{customer_phone[-4:]} via ***{system_phone[-4:]}")
+                    credentials = get_or_authenticate(customer_phone, system_phone)
+                    customer_id = credentials.get('user_id')
+                    if customer_id:
+                        session_attributes['customer_id'] = customer_id
+                        session_attributes['client_id'] = credentials.get('client_id', '')
+                        session_attributes['user_name'] = credentials.get('user_name', '')
+                        event['sessionState']['sessionAttributes'] = session_attributes
+                        logger.info(f"[PHONE_AUTH] Authenticated user {customer_id} ({credentials.get('user_name', 'unknown')})")
+                except AuthenticationError as auth_err:
+                    logger.error(f"[PHONE_AUTH] Authentication failed: {auth_err}")
+                except Exception as auth_ex:
+                    logger.warning(f"[PHONE_AUTH] Unexpected error: {auth_ex}, falling back to Secrets Manager")
+
+            # Fallback to Secrets Manager if phone auth didn't work
+            if not customer_id:
+                try:
+                    credentials = get_credentials_from_secrets()
+                    customer_id = credentials.get('user_id')
+                    if customer_id:
+                        session_attributes['customer_id'] = customer_id
+                        event['sessionState']['sessionAttributes'] = session_attributes
+                        logger.info(f"[VOICE] Set customer_id from Secrets Manager: {customer_id}")
+                except Exception as cred_err:
+                    logger.warning(f"[VOICE] Failed to get customer_id from Secrets Manager: {cred_err}")
 
         # Check for sentiment analysis (if enabled on bot alias)
         sentiment_response = event.get('sentimentResponse', {})
