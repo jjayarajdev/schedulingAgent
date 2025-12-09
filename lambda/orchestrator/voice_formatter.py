@@ -130,7 +130,7 @@ def format_for_voice(response_text: str, intent: str = 'unknown', use_ssml: bool
     Design: Sound like a friendly, helpful assistant.
     - Use conversational openers: "I found...", "Here's what I see..."
     - Use natural connectors: "...and it's scheduled for..."
-    - Keep responses short (1-3 sentences) but warm
+    - Keep responses ultra-short (1-2 sentences, ~200 chars max)
     - Sound human, not robotic
 
     SSML Features:
@@ -200,10 +200,10 @@ def format_for_voice(response_text: str, intent: str = 'unknown', use_ssml: bool
         voice_text = re.sub(r'\([^)]*ID[^)]*\)', '', voice_text)
         voice_text = re.sub(r'\([^)]*#\d+[^)]*\)', '', voice_text)
 
-        # Shorten to 2-3 sentences max
+        # Shorten to 2 sentences max for voice
         sentences = re.split(r'(?<=[.!?])\s+', voice_text)
-        if len(sentences) > 3:
-            voice_text = ' '.join(sentences[:3])
+        if len(sentences) > 2:
+            voice_text = ' '.join(sentences[:2])
             if not voice_text.endswith(('.', '!', '?')):
                 voice_text += '.'
 
@@ -216,10 +216,10 @@ def format_for_voice(response_text: str, intent: str = 'unknown', use_ssml: bool
         voice_text = re.sub(r'\s+', ' ', voice_text).strip()
         voice_text = re.sub(r'\s+([.,!?])', r'\1', voice_text)
 
-        # Cap length (~300 chars)
-        if len(voice_text) > 300:
-            break_point = voice_text.rfind('.', 0, 280)
-            if break_point > 100:
+        # Cap length (~200 chars for voice brevity)
+        if len(voice_text) > 200:
+            break_point = voice_text.rfind('.', 0, 180)
+            if break_point > 80:
                 voice_text = voice_text[:break_point + 1]
 
         # Add follow-up if appropriate

@@ -216,12 +216,43 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
     # This should be checked FIRST before any continuation logic
     # ========================================================================
     message_lower = message.lower().strip()
-    abort_phrases = ['never mind', 'nevermind', 'cancel', 'forget it', 'go back',
+
+    # Check if "cancel" or "reschedule" is part of a cancel/reschedule_appointment action (not an abort)
+    # e.g., "cancel the storm door", "cancel my appointment", "cancel the 2nd project"
+    # e.g., "reschedule the decking", "reschedule my appointment"
+    appointment_action_indicators = [
+        # Generic terms
+        'appointment', 'project', 'booking', 'installation',
+        # Project categories (from actual data)
+        'storm', 'door', 'decking', 'dishwasher', 'sink', 'oven', 'washer', 'dryer',
+        'cooktop', 'exterior', 'electric', 'kitchen', 'windows', 'doors',
+        # Ordinals (1st through 10th, plus 'last')
+        '1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th',
+        'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'last',
+        # Demonstratives and possessives
+        'the', 'my', 'this', 'that', 'one', 'it'
+    ]
+    is_cancel_appointment_request = ('cancel' in message_lower and
+                                      any(ind in message_lower for ind in appointment_action_indicators))
+    is_reschedule_request = ('reschedule' in message_lower and
+                              any(ind in message_lower for ind in appointment_action_indicators))
+
+    # Only use 'cancel' as abort when it's standalone, not part of cancel/reschedule_appointment action
+    abort_phrases = ['never mind', 'nevermind', 'forget it', 'go back',
                      'start over', 'actually no', 'no thanks', 'nope', 'stop',
                      'dont want', "don't want", 'changed my mind', 'forget about it',
                      'let me think', 'hold on', 'wait', 'not now']
 
+    # Add 'cancel' only if it's not a cancel_appointment request
+    if not is_cancel_appointment_request:
+        abort_phrases.append('cancel')
+
+    # If this is a cancel/reschedule appointment request, don't treat it as abort
+    # even if the message contains abort-like phrases
     is_abort = any(phrase in message_lower for phrase in abort_phrases)
+    if is_cancel_appointment_request or is_reschedule_request:
+        is_abort = False
+        logger.info(f"[CONTINUATION] Detected appointment action request (cancel={is_cancel_appointment_request}, reschedule={is_reschedule_request}) - bypassing abort")
 
     if is_abort and current_stage not in ['start', 'complete', None]:
         logger.info(f"[CONTINUATION] User wants to abort workflow at stage '{current_stage}'")
@@ -245,18 +276,43 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
         is_deny = any(pattern in message_lower for pattern in deny_patterns)
 
         if is_confirm:
-            logger.info(f"[CONTINUATION] User confirmed cancel at stage '{current_stage}'")
-            return {
-                'continue_workflow': True,
-                'action': 'cancel_appointment_execute',
-                'params': {
-                    'project_id': context.get('project_id'),
-                    'confirmed': True
-                },
-                'next_stage': 'complete',
-                'preserve_context': {},
-                'workflow_type': workflow_type
-            }
+            logger.info(f"[CONTINUATION] User confirmed cancel at stage '{current_stage}', workflow_type={workflow_type}")
+
+            # Check if this is a reschedule workflow - if so, continue to date selection
+            is_reschedule = workflow_type == 'reschedule_appointment'
+
+            if is_reschedule:
+                logger.info(f"[CONTINUATION] Reschedule workflow - will fetch dates after cancel")
+                return {
+                    'continue_workflow': True,
+                    'action': 'cancel_appointment_execute',
+                    'params': {
+                        'project_id': context.get('project_id'),
+                        'confirmed': True,
+                        'is_reschedule': True  # Signal to fetch dates after cancel
+                    },
+                    'next_stage': 'cancelled_awaiting_dates',
+                    'preserve_context': {
+                        'project_id': context.get('project_id'),
+                        'category': context.get('category'),
+                        'city': context.get('city'),
+                        'state': context.get('state')
+                    },
+                    'workflow_type': workflow_type
+                }
+            else:
+                # Regular cancel - complete the workflow
+                return {
+                    'continue_workflow': True,
+                    'action': 'cancel_appointment_execute',
+                    'params': {
+                        'project_id': context.get('project_id'),
+                        'confirmed': True
+                    },
+                    'next_stage': 'complete',
+                    'preserve_context': {},
+                    'workflow_type': workflow_type
+                }
         elif is_deny:
             logger.info(f"[CONTINUATION] User denied cancel at stage '{current_stage}'")
             return {
@@ -1580,7 +1636,7 @@ def orchestrate_intelligent_workflow(
                             logger.warning(f"[CONTINUATION][WEATHER] Weather enrichment failed (non-fatal): {weather_err}")
 
             # Format the response
-            response_text = format_lambda_response(action, response_body, message)
+            response_text = format_lambda_response(action, response_body, message, channel)
 
             # Update workflow state
             if next_stage == 'complete':
@@ -1663,7 +1719,7 @@ def orchestrate_intelligent_workflow(
                     response_body = list_body_str
 
                 # Format response for voice
-                response_text = format_lambda_response('list_projects', response_body, message)
+                response_text = format_lambda_response('list_projects', response_body, message, channel)
 
                 # Save project_ids AND project_mapping to workflow state for ordinal/category references
                 if 'projects' in response_body:
@@ -1839,7 +1895,7 @@ def orchestrate_intelligent_workflow(
                     logger.info(f"[ORDINAL-VOICE] Used direct voice formatting ({len(response_text)} chars)")
                 else:
                     # Chat/SMS: Use standard formatting with JSON
-                    response_text = format_lambda_response('get_project_details', response_body, message)
+                    response_text = format_lambda_response('get_project_details', response_body, message, channel)
 
                 timing['response_generation'] = time.time() - response_gen_start
 
@@ -2313,7 +2369,7 @@ What would you like to do?"""
                     weather_body = w_body_str
 
                 # Format the weather response (format_lambda_response already imported at top)
-                weather_text = format_lambda_response('get_weather', weather_body, message)
+                weather_text = format_lambda_response('get_weather', weather_body, message, channel)
 
                 # Add project context if available
                 project_data_for_ctx = extract_project_data_from_history(conversation_history, classification)
@@ -2387,7 +2443,7 @@ What would you like to do?"""
                         cancel_body = cancel_body_str
 
                     # Format response
-                    formatted_cancel = format_lambda_response('cancel_appointment', cancel_body, message)
+                    formatted_cancel = format_lambda_response('cancel_appointment', cancel_body, message, channel)
 
                     # Clear workflow state
                     state_manager.clear_state(session_id)
@@ -2512,7 +2568,75 @@ What would you like to do?"""
             else:
                 logger.warning(f"[CATEGORY-RESOLVE] Could not find project matching category '{search_category}' in mapping: {list(project_mapping.keys())}")
         else:
-            logger.warning(f"[CATEGORY-RESOLVE] No project_mapping in workflow_state - will need to fetch projects first")
+            # No project_mapping in workflow_state - fetch projects to resolve category
+            logger.info(f"[CATEGORY-RESOLVE] No project_mapping in workflow_state - fetching projects to resolve category '{search_category}'")
+            try:
+                # Fetch projects to build project_mapping
+                list_response = call_lambda_directly('list_projects', {
+                    'customer_id': customer_id,
+                    'client_id': client_id,
+                    'pf_bearer_token': pf_bearer_token
+                })
+
+                if list_response.get('statusCode') == 200:
+                    list_body = list_response.get('body', '{}')
+                    if isinstance(list_body, str):
+                        list_data = json.loads(list_body)
+                    else:
+                        list_data = list_body
+
+                    projects = list_data.get('projects', [])
+                    if projects:
+                        # Build project_mapping from fetched projects
+                        fetched_mapping = {}
+                        for p in projects:
+                            pid = str(p.get('id', ''))
+                            if pid:
+                                fetched_mapping[pid] = {
+                                    'category': p.get('category', ''),
+                                    'address': p.get('address', ''),
+                                    'status': p.get('status', '')
+                                }
+
+                        logger.info(f"[CATEGORY-RESOLVE] Fetched {len(fetched_mapping)} projects, searching for '{search_category}'")
+
+                        # Now resolve category from fetched projects
+                        resolved_project_id = None
+                        for pid, info in fetched_mapping.items():
+                            cat = info.get('category', '').lower().strip()
+                            if search_category in cat or cat in search_category:
+                                resolved_project_id = pid
+                                logger.info(f"[CATEGORY-RESOLVE] Matched '{search_category}' to project #{pid} (category: {info.get('category')})")
+                                break
+
+                        if resolved_project_id:
+                            # Update classification with resolved project_id
+                            if 'entities' not in classification:
+                                classification['entities'] = {}
+                            classification['entities']['project_id'] = resolved_project_id
+                            logger.info(f"[CATEGORY-RESOLVE] Updated classification with project_id={resolved_project_id}")
+
+                            # Also save project_mapping to workflow_state for future use
+                            project_ids = list(fetched_mapping.keys())
+                            state_manager.save_state(session_id, {
+                                'workflow_type': 'category_resolved',
+                                'current_stage': 'resolved',
+                                'context': {
+                                    'project_ids': project_ids,
+                                    'project_mapping': fetched_mapping,
+                                    'resolved_project_id': resolved_project_id,
+                                    'category': search_category
+                                }
+                            })
+                            logger.info(f"[CATEGORY-RESOLVE] Saved project_mapping to workflow state")
+                        else:
+                            logger.warning(f"[CATEGORY-RESOLVE] Could not find project matching category '{search_category}' in fetched projects")
+                    else:
+                        logger.warning(f"[CATEGORY-RESOLVE] No projects returned from list_projects")
+                else:
+                    logger.error(f"[CATEGORY-RESOLVE] list_projects failed: {list_response}")
+            except Exception as fetch_err:
+                logger.error(f"[CATEGORY-RESOLVE] Error fetching projects: {fetch_err}")
 
     # Step 2: Intelligent decision using Sonnet 3.7
     logger.info("[DECISION] Step 2: Intelligent decision-making with Sonnet 3.7")
@@ -3211,35 +3335,42 @@ What would you like to do?"""
                         logger.warning(f"No location found in workflow state for weather check")
 
             # Format response for user (with conversational wrapper from Claude)
-            formatted_response = format_lambda_response(lambda_action, response_body, message)
+            formatted_response = format_lambda_response(lambda_action, response_body, message, channel)
 
             response_text = formatted_response
 
-            # HANDLE CANCEL CONFIRMATION WORKFLOW: When cancel returns awaiting_confirmation, set workflow state
-            if lambda_action == 'cancel_appointment' and response_body.get('status') == 'awaiting_confirmation':
+            # HANDLE CANCEL/RESCHEDULE CONFIRMATION WORKFLOW: When cancel or reschedule returns awaiting_confirmation, set workflow state
+            # For reschedule, we need to preserve the workflow_type so we can continue to date selection after cancel
+            if (lambda_action in ['cancel_appointment', 'reschedule_appointment']) and response_body.get('status') == 'awaiting_confirmation':
                 project_id = response_body.get('project_id') or lambda_params.get('project_id')
                 project = response_body.get('project', {})
 
-                logger.info(f"[CANCEL] Setting awaiting_cancel_confirmation workflow state for project {project_id}")
+                # Determine if this is a reschedule workflow
+                is_reschedule = lambda_action == 'reschedule_appointment'
+                wf_type = 'reschedule_appointment' if is_reschedule else 'cancel_appointment'
+
+                logger.info(f"[WORKFLOW] Setting awaiting_cancel_confirmation workflow state for project {project_id}, workflow_type={wf_type}")
 
                 # Save workflow state for confirmation step
                 state_manager.save_state(session_id, {
-                    'workflow_type': 'cancel_appointment',
+                    'workflow_type': wf_type,  # Preserve reschedule_appointment if that's what started this
                     'current_stage': 'awaiting_cancel_confirmation',
                     'context': {
                         'project_id': project_id,
                         'project': project,
                         'category': project.get('category', ''),
-                        'scheduled_date': project.get('scheduledDate', '')
+                        'scheduled_date': project.get('scheduledDate', ''),
+                        'city': project.get('city', project.get('address', {}).get('city', '')),
+                        'state': project.get('state', project.get('address', {}).get('state', ''))
                     },
-                    'conversation_summary': f"User wants to cancel project #{project_id}, awaiting confirmation"
+                    'conversation_summary': f"User wants to {'reschedule' if is_reschedule else 'cancel'} project #{project_id}, awaiting confirmation"
                 })
 
                 timing['total'] = time.time() - start_time
                 return {
                     'response': response_text,
                     'intent': 'scheduling',
-                    'action': 'cancel_appointment',
+                    'action': wf_type,
                     'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
                     'direct_call': True,
                     'timing': timing
@@ -3495,7 +3626,7 @@ What would you like to do?"""
                                         logger.warning(f"Weather check for next batch project failed (non-fatal): {next_weather_err}")
 
                             # Format the next project's dates (with weather if available)
-                            next_dates_formatted = format_lambda_response('get_available_dates', next_dates_body, message)
+                            next_dates_formatted = format_lambda_response('get_available_dates', next_dates_body, message, channel)
                             logger.info(f"[BATCH] Next dates formatted length: {len(next_dates_formatted)} chars")
 
                             # Append to response

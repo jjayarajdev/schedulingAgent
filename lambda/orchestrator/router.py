@@ -111,7 +111,7 @@ def get_bedrock_runtime_client():
     return _bedrock_runtime_client
 
 
-def generate_conversational_response(action: str, user_message: str, structured_data: Dict[str, Any]) -> str:
+def generate_conversational_response(action: str, user_message: str, structured_data: Dict[str, Any], channel: str = 'chat') -> str:
     """
     Use Claude via Bedrock Converse API to generate conversational response
 
@@ -119,6 +119,7 @@ def generate_conversational_response(action: str, user_message: str, structured_
         action: The action performed (list_projects, get_project_details, etc.)
         user_message: Original user message
         structured_data: Structured data from Lambda response
+        channel: 'chat' or 'voice' - voice gets ultra-short responses
 
     Returns:
         Conversational response from Claude
@@ -126,8 +127,37 @@ def generate_conversational_response(action: str, user_message: str, structured_
     try:
         client = get_bedrock_runtime_client()
 
-        # Create prompt for Claude
-        system_prompt = """You help customers with scheduling. Be DIRECT. No filler.
+        # VOICE-SPECIFIC PROMPT: Ultra-concise for phone calls
+        if channel == 'voice':
+            system_prompt = """You're on a PHONE CALL. Be ULTRA concise - max 1-2 SHORT sentences.
+
+RULES:
+1. MAX 2 sentences total
+2. Say dates naturally: "December fifteenth" not "December 15, 2025"
+3. No project IDs or technical details
+4. Use contractions (you've, it's, there's)
+5. End with simple question if needed
+
+BANNED PHRASES:
+- "Let me check" / "One moment" / "I found"
+- "I'd be happy to" / "Sure thing"
+- Any address details (too long for voice)
+
+Examples:
+"You've got 3 projects: Plumbing, Solar, and Decking. Which one?"
+"Your Solar project is scheduled for December fifteenth with Mike."
+"5 dates available. December tenth through the fifteenth. Which works?"
+"Got 3 morning slots: 8 AM, 9 AM, and 10 AM. Which time?"
+"""
+            user_prompt = f"""User asked: "{user_message}"
+Data: {json.dumps(structured_data, indent=2)}
+
+Give a 1-2 sentence voice response. NO addresses, NO project IDs. End with a simple question if user needs to choose."""
+
+            max_tokens = 150  # Much shorter for voice
+        else:
+            # CHAT PROMPT: Original behavior
+            system_prompt = """You help customers with scheduling. Be DIRECT. No filler.
 
 BANNED PHRASES - NEVER USE THESE:
 - "Let me check" / "Let me look" / "Let me find"
@@ -174,7 +204,7 @@ Proactive Weather Indicators in Available Dates:
 - Present ALL dates but help user make informed choice
 - Keep it brief - just highlight the key info, don't explain every date's weather"""
 
-        user_prompt = f"""The user asked: "{user_message}"
+            user_prompt = f"""The user asked: "{user_message}"
 
 I retrieved the following data from our system:
 {json.dumps(structured_data, indent=2)}
@@ -191,6 +221,8 @@ Example of good response:
 
 Keep your response concise (3-5 sentences) and friendly. Do NOT include the raw JSON data - I'll show that separately."""
 
+            max_tokens = 500
+
         # Call Claude via Bedrock Converse API (using cross-region inference profile)
         response = client.converse(
             modelId="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
@@ -202,7 +234,7 @@ Keep your response concise (3-5 sentences) and friendly. Do NOT include the raw 
             ],
             system=[{"text": system_prompt}],
             inferenceConfig={
-                "maxTokens": 500,
+                "maxTokens": max_tokens,
                 "temperature": 0.7,
                 "topP": 0.9
             }
@@ -210,7 +242,7 @@ Keep your response concise (3-5 sentences) and friendly. Do NOT include the raw 
 
         # Extract conversational text
         conversational_text = response['output']['message']['content'][0]['text']
-        logger.info(f"[OK] Generated conversational response ({len(conversational_text)} chars)")
+        logger.info(f"[OK] Generated conversational response for {channel} ({len(conversational_text)} chars)")
 
         return conversational_text.strip()
 
@@ -220,7 +252,7 @@ Keep your response concise (3-5 sentences) and friendly. Do NOT include the raw 
         return f"Here's the information you requested about {action.replace('_', ' ')}:"
 
 
-def format_lambda_response(action: str, response_body: Dict[str, Any], user_message: str = "") -> str:
+def format_lambda_response(action: str, response_body: Dict[str, Any], user_message: str = "", channel: str = 'chat') -> str:
     """
     Format Lambda response with conversational text + structured JSON
 
@@ -228,9 +260,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
         action: The action that was performed (list_projects, get_project_details, etc.)
         response_body: The Lambda response body (parsed JSON)
         user_message: Original user message for context
+        channel: 'chat' or 'voice' - voice gets concise responses without JSON
 
     Returns:
-        Formatted response with conversational text and structured JSON
+        Formatted response with conversational text and structured JSON (chat)
+        or just conversational text (voice)
     """
     try:
         if action == 'list_projects':
@@ -245,7 +279,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             }
 
             # Generate conversational response using Claude
-            conversational = generate_conversational_response(action, user_message, result)
+            conversational = generate_conversational_response(action, user_message, result, channel)
+
+            # For voice, return only conversational text (no JSON)
+            if channel == 'voice':
+                return conversational
 
             # Return both conversational and structured
             return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
@@ -262,7 +300,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             }
 
             # Generate conversational response using Claude
-            conversational = generate_conversational_response(action, user_message, result)
+            conversational = generate_conversational_response(action, user_message, result, channel)
+
+            # For voice, return only conversational text (no JSON)
+            if channel == 'voice':
+                return conversational
 
             # Return both conversational and structured
             return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
@@ -339,7 +381,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             # This keeps the available dates response simple and focused
 
             # Generate conversational response using Claude
-            conversational = generate_conversational_response(action, user_message, result)
+            conversational = generate_conversational_response(action, user_message, result, channel)
+
+            # For voice, return only conversational text (no JSON)
+            if channel == 'voice':
+                return conversational
 
             # Return both conversational and structured
             return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
@@ -395,7 +441,9 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     "isReschedule": True
                 }
 
-                conversational = generate_conversational_response('get_time_slots', user_message, result)
+                conversational = generate_conversational_response('get_time_slots', user_message, result, channel)
+                if channel == 'voice':
+                    return conversational
                 return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
             # Otherwise show available dates
@@ -466,7 +514,9 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             }
 
             # Generate conversational response
-            conversational = generate_conversational_response(action, user_message, result)
+            conversational = generate_conversational_response(action, user_message, result, channel)
+            if channel == 'voice':
+                return conversational
             return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action in ['get_time_slots', 'get_available_timeslots']:
@@ -525,7 +575,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 result['currentWeather'] = response_body['current_weather']
 
             # Generate conversational response using Claude
-            conversational = generate_conversational_response(action, user_message, result)
+            conversational = generate_conversational_response(action, user_message, result, channel)
+
+            # For voice, return only conversational text (no JSON)
+            if channel == 'voice':
+                return conversational
 
             # Return both conversational and structured
             return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
@@ -545,7 +599,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             }
 
             # Generate conversational response using Claude
-            conversational = generate_conversational_response(action, user_message, result)
+            conversational = generate_conversational_response(action, user_message, result, channel)
+
+            # For voice, return only conversational text (no JSON)
+            if channel == 'voice':
+                return conversational
 
             # Return both conversational and structured
             return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
@@ -580,7 +638,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 }
 
             # Generate conversational response using Claude
-            conversational = generate_conversational_response(action, user_message, result)
+            conversational = generate_conversational_response(action, user_message, result, channel)
+
+            # For voice, return only conversational text (no JSON)
+            if channel == 'voice':
+                return conversational
 
             # Return both conversational and structured
             return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
@@ -600,7 +662,9 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     "status": "cannot_reschedule",
                     "details": response_body
                 }
-                conversational = generate_conversational_response(action, user_message, result)
+                conversational = generate_conversational_response(action, user_message, result, channel)
+                if channel == 'voice':
+                    return conversational
                 return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
             # Handle timeout status from scheduling Lambda
@@ -611,7 +675,9 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     "project_id": response_body.get('project_id'),
                     "action_type": "reschedule"
                 }
-                conversational = generate_conversational_response(action, user_message, result)
+                conversational = generate_conversational_response(action, user_message, result, channel)
+                if channel == 'voice':
+                    return conversational
                 return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
             # Handle error status from scheduling Lambda
@@ -622,7 +688,9 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     "project_id": response_body.get('project_id'),
                     "action_type": "reschedule"
                 }
-                conversational = generate_conversational_response(action, user_message, result)
+                conversational = generate_conversational_response(action, user_message, result, channel)
+                if channel == 'voice':
+                    return conversational
                 return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
             # Handle "cancelled_awaiting_dates" status - Step 1 of reschedule complete, waiting for user to confirm
@@ -635,7 +703,9 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     "action_type": "reschedule",
                     "requires_confirmation": True
                 }
-                conversational = generate_conversational_response(action, user_message, result)
+                conversational = generate_conversational_response(action, user_message, result, channel)
+                if channel == 'voice':
+                    return conversational
                 return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
             # Handle "awaiting_date_selection" status - reschedule workflow started, show available dates
@@ -664,7 +734,9 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     "action_type": "reschedule"
                 }
 
-                conversational = generate_conversational_response(action, user_message, result)
+                conversational = generate_conversational_response(action, user_message, result, channel)
+                if channel == 'voice':
+                    return conversational
                 return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
             # Format successful reschedule confirmation response
@@ -676,7 +748,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             }
 
             # Generate conversational response using Claude
-            conversational = generate_conversational_response(action, user_message, result)
+            conversational = generate_conversational_response(action, user_message, result, channel)
+
+            # For voice, return only conversational text (no JSON)
+            if channel == 'voice':
+                return conversational
 
             # Return both conversational and structured
             return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
@@ -708,7 +784,9 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 }
 
                 # Generate conversational response asking for confirmation
-                conversational = generate_conversational_response(action, user_message, result)
+                conversational = generate_conversational_response(action, user_message, result, channel)
+                if channel == 'voice':
+                    return conversational
                 return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
             # Check for "cannot cancel" status
@@ -718,7 +796,9 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     "status": response_body.get('status'),
                     "details": response_body
                 }
-                conversational = generate_conversational_response(action, user_message, result)
+                conversational = generate_conversational_response(action, user_message, result, channel)
+                if channel == 'voice':
+                    return conversational
                 return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
             # Format successful cancellation confirmation response
@@ -729,7 +809,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             }
 
             # Generate conversational response using Claude
-            conversational = generate_conversational_response(action, user_message, result)
+            conversational = generate_conversational_response(action, user_message, result, channel)
+
+            # For voice, return only conversational text (no JSON)
+            if channel == 'voice':
+                return conversational
 
             # Return both conversational and structured
             return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
@@ -784,7 +868,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             }
 
             # Generate conversational response using Claude
-            conversational = generate_conversational_response(action, user_message, result)
+            conversational = generate_conversational_response(action, user_message, result, channel)
+
+            # For voice, return only conversational text (no JSON)
+            if channel == 'voice':
+                return conversational
 
             # Return both conversational and structured
             return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
@@ -1375,20 +1463,15 @@ def route_request(
                 response_body = response_body_str
 
             # Format response for UI - conversational text + structured JSON
-            formatted_response = format_lambda_response(action, response_body, message)
+            # Pass channel so voice gets concise responses directly from Claude
+            formatted_response = format_lambda_response(action, response_body, message, channel)
             logger.debug(f"Formatted response: {formatted_response[:200]}...")
 
-            # VOICE ADAPTATION: For voice channel, extract conversational text only
+            # VOICE ADAPTATION: Apply additional voice formatting (SSML, date formatting)
             if channel == 'voice':
-                # Strip JSON block and keep only conversational text
-                if '```json' in formatted_response:
-                    voice_response = formatted_response.split('```json')[0].strip()
-                else:
-                    voice_response = formatted_response
-                # Apply voice formatting (natural dates, numbers, etc.)
-                voice_response = format_for_voice(voice_response, intent)
-                formatted_response = voice_response
-                logger.info(f"[VOICE] Adapted response for voice channel ({len(formatted_response)} chars)")
+                # Apply voice formatting (natural dates, numbers, SSML)
+                formatted_response = format_for_voice(formatted_response, intent)
+                logger.info(f"[VOICE] Applied voice formatting ({len(formatted_response)} chars)")
 
             logger.info(f"[TIMING]  Direct Lambda Performance: Total={timing['total']:.2f}s | "
                         f"Lambda={timing['lambda_direct']:.2f}s | "
