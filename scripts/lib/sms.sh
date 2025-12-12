@@ -633,6 +633,95 @@ deploy_sms_dynamodb_table() {
 }
 
 # =============================================================================
+# SMS Configuration Set
+# =============================================================================
+
+# SMS Configuration Set name
+# The SMS Lambda code expects: scheduling-agent-sms-config-${ENVIRONMENT}
+SMS_CONFIG_SET_NAME="scheduling-agent-sms-config"
+
+# Get SMS configuration set name with environment suffix
+sms_config_set_name() {
+    echo "${SMS_CONFIG_SET_NAME}-${ENVIRONMENT}"
+}
+
+# Create SMS configuration set if it doesn't exist
+# This is required for the SMS Lambda to send messages
+deploy_sms_configuration_set() {
+    local config_set_name
+    config_set_name=$(sms_config_set_name)
+
+    log_info "Deploying SMS configuration set: $config_set_name"
+
+    # Check if configuration set already exists
+    local existing
+    existing=$(aws pinpoint-sms-voice-v2 describe-configuration-sets \
+        --configuration-set-names "$config_set_name" \
+        --region "$VOICE_REGION" \
+        --query 'ConfigurationSets[0].ConfigurationSetName' \
+        --output text 2>/dev/null || echo "")
+
+    if [[ "$existing" == "$config_set_name" ]]; then
+        log_info "SMS configuration set already exists: $config_set_name"
+        return 0
+    fi
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${CYAN}[DRY-RUN]${NC} Create SMS configuration set: $config_set_name"
+        echo -e "${YELLOW}  \$ aws pinpoint-sms-voice-v2 create-configuration-set \\\\${NC}"
+        echo -e "${YELLOW}      --configuration-set-name \"$config_set_name\" \\\\${NC}"
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
+        echo ""
+        return 0
+    fi
+
+    log_info "Creating SMS configuration set: $config_set_name"
+
+    local output
+    output=$(aws pinpoint-sms-voice-v2 create-configuration-set \
+        --configuration-set-name "$config_set_name" \
+        --region "$VOICE_REGION" 2>&1)
+
+    if [[ $? -eq 0 ]]; then
+        log_info "SMS configuration set created: $config_set_name"
+    else
+        if echo "$output" | grep -q "ConflictException"; then
+            log_info "SMS configuration set already exists: $config_set_name"
+        else
+            log_error "Failed to create SMS configuration set: $output"
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+# Cleanup SMS configuration set
+cleanup_sms_configuration_set() {
+    local config_set_name
+    config_set_name=$(sms_config_set_name)
+
+    log_info "Cleaning up SMS configuration set: $config_set_name"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${CYAN}[DRY-RUN]${NC} Delete SMS configuration set: $config_set_name"
+        echo -e "${YELLOW}  \$ aws pinpoint-sms-voice-v2 delete-configuration-set \\\\${NC}"
+        echo -e "${YELLOW}      --configuration-set-name \"$config_set_name\" \\\\${NC}"
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
+        echo ""
+        return 0
+    fi
+
+    aws pinpoint-sms-voice-v2 delete-configuration-set \
+        --configuration-set-name "$config_set_name" \
+        --region "$VOICE_REGION" 2>/dev/null && \
+        log_info "SMS configuration set deleted: $config_set_name" || \
+        log_debug "SMS configuration set does not exist or already deleted"
+
+    return 0
+}
+
+# =============================================================================
 # SMS Deployment (All Components)
 # =============================================================================
 
@@ -642,7 +731,10 @@ deploy_sms() {
 
     local failed=0
 
-    # Deploy DynamoDB tables first
+    # Deploy SMS configuration set first (required for sending messages)
+    deploy_sms_configuration_set || ((failed++))
+
+    # Deploy DynamoDB tables
     deploy_sms_dynamodb_tables
 
     # Deploy SNS topic
@@ -762,6 +854,7 @@ cleanup_sms() {
     cleanup_sns_topic
     cleanup_sms_lambda
     cleanup_sms_dynamodb_tables
+    cleanup_sms_configuration_set
 
     log_info "SMS integration cleaned up"
     log_warn "Pinpoint phone number must be released manually via AWS Console"
@@ -822,6 +915,22 @@ validate_sms() {
     # Validate Pinpoint two-way SMS configuration
     validate_pinpoint_two_way_sms || log_warn "Pinpoint two-way SMS validation had issues"
 
+    # Validate SMS configuration set
+    local config_set_name
+    config_set_name=$(sms_config_set_name)
+    local config_set_exists
+    config_set_exists=$(aws pinpoint-sms-voice-v2 describe-configuration-sets \
+        --configuration-set-names "$config_set_name" \
+        --region "$VOICE_REGION" \
+        --query 'ConfigurationSets[0].ConfigurationSetName' \
+        --output text 2>/dev/null || echo "")
+    if [[ "$config_set_exists" == "$config_set_name" ]]; then
+        log_info "SMS configuration set $config_set_name: EXISTS"
+    else
+        log_error "SMS configuration set $config_set_name: NOT FOUND"
+        ((failed++))
+    fi
+
     # Validate DynamoDB tables
     for base in "${SMS_DYNAMODB_TABLE_BASES[@]}"; do
         local full_table_name=$(table_name "$base")
@@ -856,6 +965,7 @@ list_sms_resources() {
     echo ""
     echo "SNS Topic: $(sns_topic_name)"
     echo "SMS Phone: $SMS_PHONE_NUMBER"
+    echo "SMS Config Set: $(sms_config_set_name)"
 
     echo ""
     echo "DynamoDB Tables:"

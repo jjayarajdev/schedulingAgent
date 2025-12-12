@@ -369,14 +369,18 @@ EOF
 }
 
 # Configure sms-inbound role policies
+# MULTI-REGION NOTE:
+# - SMS Lambda runs in VOICE_REGION (us-east-1)
+# - DynamoDB tables are in VOICE_REGION (us-east-1)
+# - Secrets Manager is in SECRETS_REGION (us-east-2)
+# - Orchestrator Lambda is in CORE_REGION (us-east-2)
 configure_sms_inbound_role() {
     local role_name="$1"
 
     log_info "Configuring sms-inbound role: $role_name"
 
     # SMS inbound permissions - DynamoDB access for all SMS tables
-    # Tables: sms-sessions, sms-consent, sms-messages, opt-out-tracking
-    # Using explicit table names since wildcards don't match environment suffix properly
+    # Tables are in VOICE_REGION (us-east-1)
     local sms_dynamodb_policy
     sms_dynamodb_policy=$(cat <<EOF
 {
@@ -394,10 +398,10 @@ configure_sms_inbound_role() {
                 "dynamodb:Scan"
             ],
             "Resource": [
-                "arn:aws:dynamodb:${AWS_REGION}:${EXPECTED_ACCOUNT}:table/${RESOURCE_PREFIX}-sms-sessions-${ENVIRONMENT}",
-                "arn:aws:dynamodb:${AWS_REGION}:${EXPECTED_ACCOUNT}:table/${RESOURCE_PREFIX}-sms-consent-${ENVIRONMENT}",
-                "arn:aws:dynamodb:${AWS_REGION}:${EXPECTED_ACCOUNT}:table/${RESOURCE_PREFIX}-sms-messages-${ENVIRONMENT}",
-                "arn:aws:dynamodb:${AWS_REGION}:${EXPECTED_ACCOUNT}:table/${RESOURCE_PREFIX}-opt-out-tracking-${ENVIRONMENT}"
+                "arn:aws:dynamodb:${VOICE_REGION}:${EXPECTED_ACCOUNT}:table/${RESOURCE_PREFIX}-sms-sessions-${ENVIRONMENT}",
+                "arn:aws:dynamodb:${VOICE_REGION}:${EXPECTED_ACCOUNT}:table/${RESOURCE_PREFIX}-sms-consent-${ENVIRONMENT}",
+                "arn:aws:dynamodb:${VOICE_REGION}:${EXPECTED_ACCOUNT}:table/${RESOURCE_PREFIX}-sms-messages-${ENVIRONMENT}",
+                "arn:aws:dynamodb:${VOICE_REGION}:${EXPECTED_ACCOUNT}:table/${RESOURCE_PREFIX}-opt-out-tracking-${ENVIRONMENT}"
             ]
         },
         {
@@ -407,7 +411,7 @@ configure_sms_inbound_role() {
                 "dynamodb:Query"
             ],
             "Resource": [
-                "arn:aws:dynamodb:${AWS_REGION}:${EXPECTED_ACCOUNT}:table/${RESOURCE_PREFIX}-sms-sessions-${ENVIRONMENT}/index/*"
+                "arn:aws:dynamodb:${VOICE_REGION}:${EXPECTED_ACCOUNT}:table/${RESOURCE_PREFIX}-sms-sessions-${ENVIRONMENT}/index/*"
             ]
         }
     ]
@@ -417,26 +421,26 @@ EOF
 
     put_role_policy "$role_name" "SMSDynamoDBPolicy" "$sms_dynamodb_policy"
 
-    # SMS Lambda invocation and orchestrator access
+    # SMS Lambda invocation - cross-region to orchestrator in CORE_REGION
+    # Secrets are in SECRETS_REGION (us-east-2)
     local sms_lambda_policy
     sms_lambda_policy=$(cat <<EOF
 {
     "Version": "2012-10-17",
     "Statement": [
         {
-            "Sid": "LambdaInvoke",
+            "Sid": "LambdaInvokeOrchestrator",
             "Effect": "Allow",
             "Action": "lambda:InvokeFunction",
-            "Resource": "arn:aws:lambda:${AWS_REGION}:${EXPECTED_ACCOUNT}:function:${RESOURCE_PREFIX}-*-${ENVIRONMENT}"
+            "Resource": "arn:aws:lambda:${CORE_REGION}:${EXPECTED_ACCOUNT}:function:${RESOURCE_PREFIX}-orchestrator-${ENVIRONMENT}"
         },
         {
             "Sid": "SecretsAccess",
             "Effect": "Allow",
             "Action": [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:PutSecretValue"
+                "secretsmanager:GetSecretValue"
             ],
-            "Resource": "arn:aws:secretsmanager:${AWS_REGION}:${EXPECTED_ACCOUNT}:secret:projectforce/*"
+            "Resource": "arn:aws:secretsmanager:${SECRETS_REGION}:${EXPECTED_ACCOUNT}:secret:projectforce/*"
         }
     ]
 }
@@ -445,7 +449,7 @@ EOF
 
     put_role_policy "$role_name" "SMSLambdaPolicy" "$sms_lambda_policy"
 
-    # SMS sending via Pinpoint SMS Voice v2
+    # SMS sending via Pinpoint SMS Voice v2 (in VOICE_REGION)
     local sms_send_policy
     sms_send_policy=$(cat <<EOF
 {
@@ -466,7 +470,7 @@ EOF
             "Action": [
                 "sns:Publish"
             ],
-            "Resource": "arn:aws:sns:${AWS_REGION}:${EXPECTED_ACCOUNT}:${RESOURCE_PREFIX}-*"
+            "Resource": "arn:aws:sns:${VOICE_REGION}:${EXPECTED_ACCOUNT}:${RESOURCE_PREFIX}-*"
         }
     ]
 }
