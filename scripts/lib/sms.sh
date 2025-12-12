@@ -166,7 +166,8 @@ configure_sms_sns_trigger() {
         return 1
     fi
 
-    local lambda_arn="arn:aws:lambda:${AWS_REGION}:${EXPECTED_ACCOUNT}:function:${lambda_func_name}"
+    # SMS Lambda is deployed to VOICE_REGION (us-east-1), so use VOICE_REGION for the ARN
+    local lambda_arn="arn:aws:lambda:${VOICE_REGION}:${EXPECTED_ACCOUNT}:function:${lambda_func_name}"
 
     if [[ "$DRY_RUN" == "true" ]]; then
         echo -e "${CYAN}[DRY-RUN]${NC} Configure SNS trigger for Lambda"
