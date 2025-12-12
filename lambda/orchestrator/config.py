@@ -9,6 +9,10 @@ import logging
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
+# Dynamic resource naming - these are used to construct default resource names
+RESOURCE_PREFIX = os.environ.get('RESOURCE_PREFIX', 'pf')
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
+
 
 class Config:
     """Configuration for Orchestrator Lambda"""
@@ -45,12 +49,13 @@ class Config:
         self.classification_cache_ttl = int(os.environ.get('CLASSIFICATION_CACHE_TTL', '300'))  # 5 min
 
         # DynamoDB table for workflow state management
-        self.workflow_state_table = os.environ.get('WORKFLOW_STATE_TABLE', 'pf-workflow-states-dev')
+        self.workflow_state_table = os.environ.get('WORKFLOW_STATE_TABLE', f'{RESOURCE_PREFIX}-workflow-states-{ENVIRONMENT}')
 
         # Lambda Function Names (for direct invocation)
-        self.scheduling_lambda = os.environ.get('SCHEDULING_LAMBDA', 'pf-scheduling-actions')
-        self.information_lambda = os.environ.get('INFORMATION_LAMBDA', 'pf-information-actions')
-        self.chitchat_lambda = os.environ.get('CHITCHAT_LAMBDA', 'pf-chitchat-actions')
+        self.scheduling_lambda = os.environ.get('SCHEDULING_LAMBDA', f'{RESOURCE_PREFIX}-scheduling-actions-{ENVIRONMENT}')
+        self.information_lambda = os.environ.get('INFORMATION_LAMBDA', f'{RESOURCE_PREFIX}-information-actions-{ENVIRONMENT}')
+        self.chitchat_lambda = os.environ.get('CHITCHAT_LAMBDA', f'{RESOURCE_PREFIX}-chitchat-actions-{ENVIRONMENT}')
+        self.notes_lambda = os.environ.get('NOTES_LAMBDA', f'{RESOURCE_PREFIX}-notes-actions-{ENVIRONMENT}')
 
         # Agent IDs (for direct routing without supervisor)
         self.agents = self._load_agent_config()

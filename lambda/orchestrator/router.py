@@ -1130,14 +1130,14 @@ def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
     config = get_config()
     lambda_client = get_lambda_client()
 
-    # Map action to Lambda function
+    # Map action to Lambda function (use config values for dynamic naming)
     lambda_functions = {
         # Chitchat actions
-        'greet': 'pf-chitchat-actions',
-        'help': 'pf-chitchat-actions',
-        'general': 'pf-chitchat-actions',
+        'greet': config.chitchat_lambda,
+        'help': config.chitchat_lambda,
+        'general': config.chitchat_lambda,
         # Information actions
-        'get_weather': 'pf-information-actions',
+        'get_weather': config.information_lambda,
         # Scheduling query actions
         'list_projects': config.scheduling_lambda,
         'get_project_details': config.scheduling_lambda,
@@ -1149,7 +1149,12 @@ def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         # Scheduling write actions
         'confirm_appointment': config.scheduling_lambda,
         'reschedule_appointment': config.scheduling_lambda,
-        'cancel_appointment': config.scheduling_lambda
+        'cancel_appointment': config.scheduling_lambda,
+        # Notes actions
+        'add_notes': config.notes_lambda,
+        'add_note': config.notes_lambda,  # Alias
+        'list_notes': config.notes_lambda,
+        'get_notes': config.notes_lambda  # Alias
     }
 
     function_name = lambda_functions.get(action)

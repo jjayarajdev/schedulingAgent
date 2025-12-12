@@ -44,6 +44,7 @@ get_lambda_env_vars() {
             env_vars="${env_vars},SCHEDULING_LAMBDA=$(lambda_name 'scheduling-actions')"
             env_vars="${env_vars},INFORMATION_LAMBDA=$(lambda_name 'information-actions')"
             env_vars="${env_vars},CHITCHAT_LAMBDA=$(lambda_name 'chitchat-actions')"
+            env_vars="${env_vars},NOTES_LAMBDA=$(lambda_name 'notes-actions')"
             env_vars="${env_vars},ORCHESTRATOR_MODEL=us.anthropic.claude-3-5-sonnet-20241022-v2:0"
             env_vars="${env_vars},ALLOW_DIRECT_LAMBDA=true"
             env_vars="${env_vars},USE_SUPERVISOR=false"

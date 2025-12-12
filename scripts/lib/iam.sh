@@ -94,7 +94,7 @@ ensure_role_policies() {
         "voice-bedrock-bridge")
             configure_voice_bedrock_bridge_role "$full_role_name"
             ;;
-        "scheduling-actions"|"information-actions"|"chitchat-actions")
+        "scheduling-actions"|"information-actions"|"chitchat-actions"|"notes-actions")
             configure_actions_role "$full_role_name"
             ;;
         "customer-lookup")
