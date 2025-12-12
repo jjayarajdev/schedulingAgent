@@ -1150,11 +1150,27 @@ def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         'confirm_appointment': config.scheduling_lambda,
         'reschedule_appointment': config.scheduling_lambda,
         'cancel_appointment': config.scheduling_lambda,
-        # Notes actions
+        # Notes actions - add/create
         'add_notes': config.notes_lambda,
-        'add_note': config.notes_lambda,  # Alias
+        'add_note': config.notes_lambda,
+        'add_project_note': config.notes_lambda,
+        'addprojectnote': config.notes_lambda,
+        'create_note': config.notes_lambda,
+        'save_note': config.notes_lambda,
+        'add_reminder': config.notes_lambda,
+        'add_comment': config.notes_lambda,
+        'add_project_comment': config.notes_lambda,
+        'note': config.notes_lambda,
+        # Notes actions - list/get
         'list_notes': config.notes_lambda,
-        'get_notes': config.notes_lambda  # Alias
+        'get_notes': config.notes_lambda,
+        'get_project_notes': config.notes_lambda,
+        'view_notes': config.notes_lambda,
+        'show_notes': config.notes_lambda,
+        'list_reminders': config.notes_lambda,
+        'get_reminders': config.notes_lambda,
+        'list_comments': config.notes_lambda,
+        'get_comments': config.notes_lambda
     }
 
     function_name = lambda_functions.get(action)

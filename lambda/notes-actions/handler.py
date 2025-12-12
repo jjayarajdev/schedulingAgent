@@ -164,7 +164,8 @@ def handle_add_note(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str,
     Add a note to a project
     """
     project_id = params.get('project_id')
-    note_text = params.get('note_text')
+    # Accept both 'note_text' and 'note' parameter names for flexibility
+    note_text = params.get('note_text') or params.get('note')
     author = params.get('author', 'Agent')
 
     if not all([project_id, note_text]):
@@ -297,11 +298,32 @@ def lambda_handler(event, context):
             authorization = params.get('authorization', event.get('authorization', ''))
             auth_headers = get_auth_headers(authorization, client_id)
 
-        # Route to appropriate handler
-        handlers = {
+        # Route to appropriate handler - comprehensive aliases for add/create notes
+        add_handlers = {
             'add-note': handle_add_note,
-            'list-notes': handle_list_notes
+            'add-notes': handle_add_note,
+            'add-project-note': handle_add_note,
+            'addprojectnote': handle_add_note,
+            'create-note': handle_add_note,
+            'save-note': handle_add_note,
+            'add-reminder': handle_add_note,
+            'add-comment': handle_add_note,
+            'add-project-comment': handle_add_note,
+            'note': handle_add_note,
         }
+        # Comprehensive aliases for list/get notes
+        list_handlers = {
+            'list-notes': handle_list_notes,
+            'get-notes': handle_list_notes,
+            'get-project-notes': handle_list_notes,
+            'view-notes': handle_list_notes,
+            'show-notes': handle_list_notes,
+            'list-reminders': handle_list_notes,
+            'get-reminders': handle_list_notes,
+            'list-comments': handle_list_notes,
+            'get-comments': handle_list_notes,
+        }
+        handlers = {**add_handlers, **list_handlers}
 
         handler = handlers.get(action)
         if not handler:
