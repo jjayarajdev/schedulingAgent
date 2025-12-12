@@ -268,59 +268,199 @@ REGION=us-east-1
 
 ## 14. Architecture Flow
 
+### High-Level Overview
+
+```mermaid
+flowchart TB
+    subgraph Channels["Input Channels"]
+        Voice["Voice Call<br/>+14702832382"]
+        SMS["SMS<br/>+18786789053"]
+        Chat["Web Chat<br/>API Gateway"]
+    end
+
+    subgraph AWS["AWS Services"]
+        Connect["Amazon Connect"]
+        Lex["Lex V2 Bot<br/>pf-syn-scheduling-assistant-dev"]
+        SNS["SNS Topic<br/>pf-syn-sms-inbound-dev"]
+        APIGw["API Gateway<br/>pf-syn-orchestrator-api-dev"]
+
+        LexFulfill["pf-syn-lex-fulfillment-dev"]
+        SMSLambda["pf-syn-sms-inbound-dev"]
+
+        Orchestrator["pf-syn-orchestrator-dev<br/>(Bedrock Claude 3.5 Sonnet)"]
+
+        subgraph SkillLambdas["Skill Lambdas"]
+            Scheduling["pf-syn-scheduling-actions-dev"]
+            Information["pf-syn-information-actions-dev"]
+            Chitchat["pf-syn-chitchat-actions-dev"]
+            Notes["pf-syn-notes-actions-dev"]
+        end
+
+        DynamoDB[("DynamoDB<br/>Sessions, Notes,<br/>Workflow States")]
+        Secrets["Secrets Manager<br/>API Credentials"]
+    end
+
+    subgraph External["External APIs"]
+        PFAPI["ProjectForce API<br/>api.projectsforce.com"]
+        WeatherAPI["Weather API<br/>Open-Meteo"]
+        GeoAPI["Geocoding API<br/>Nominatim"]
+    end
+
+    Voice --> Connect --> Lex --> LexFulfill
+    SMS --> SNS --> SMSLambda
+    Chat --> APIGw
+
+    LexFulfill --> Orchestrator
+    SMSLambda --> Orchestrator
+    APIGw --> Orchestrator
+
+    Orchestrator --> Scheduling
+    Orchestrator --> Information
+    Orchestrator --> Chitchat
+    Orchestrator --> Notes
+
+    Scheduling --> PFAPI
+    Scheduling --> WeatherAPI
+    Scheduling --> GeoAPI
+    Scheduling --> DynamoDB
+
+    Information --> PFAPI
+    Information --> DynamoDB
+
+    Notes --> DynamoDB
+
+    Scheduling --> Secrets
+    Information --> Secrets
 ```
-                                    ┌─────────────────────┐
-                                    │   Amazon Connect    │
-                                    │  +14702832382 (DID) │
-                                    │ pf-schedule-voice-  │
-                                    │       dev           │
-                                    └──────────┬──────────┘
-                                               │
-                                               ▼
-┌─────────────────┐                 ┌─────────────────────┐
-│   SMS Inbound   │                 │   Lex V2 Bot        │
-│  +18786789053   │                 │ pf-syn-scheduling-  │
-│                 │                 │ assistant-dev       │
-└────────┬────────┘                 │ (RUSMRZJNYG)        │
-         │                          └──────────┬──────────┘
-         ▼                                     │
-┌─────────────────────┐                        ▼
-│  SNS Topic          │            ┌─────────────────────┐
-│  pf-syn-sms-        │            │ pf-syn-lex-         │
-│  inbound-dev        │            │ fulfillment-dev     │
-└────────┬────────────┘            └──────────┬──────────┘
-         │                                    │
-         ▼                                    │
-┌─────────────────────┐                       │
-│ pf-syn-sms-         │                       │
-│ inbound-dev         │                       │
-└────────┬────────────┘                       │
-         │                                    │
-         └──────────────┬─────────────────────┘
-                        │
-                        ▼
-              ┌─────────────────────┐
-              │ pf-syn-orchestrator │
-              │       -dev          │
-              │  (Bedrock Claude)   │
-              └──────────┬──────────┘
-                         │
-         ┌───────────────┼───────────────┬───────────────┐
-         │               │               │               │
-         ▼               ▼               ▼               ▼
-┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-│ pf-syn-     │  │ pf-syn-     │  │ pf-syn-     │  │ pf-syn-     │
-│ scheduling- │  │ information-│  │ chitchat-   │  │ notes-      │
-│ actions-dev │  │ actions-dev │  │ actions-dev │  │ actions-dev │
-└─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘
-         │               │               │               │
-         └───────────────┼───────────────┴───────────────┘
-                         │
-                         ▼
-              ┌─────────────────────┐
-              │  ProjectForce API   │
-              │     (External)      │
-              └─────────────────────┘
+
+### Detailed Data Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Channel as Voice/SMS/Chat
+    participant Orch as Orchestrator Lambda
+    participant Bedrock as Bedrock Claude
+    participant Skill as Skill Lambda
+    participant PF as ProjectForce API
+    participant Weather as Weather API
+    participant DB as DynamoDB
+
+    User->>Channel: Send message
+    Channel->>Orch: Forward request
+
+    Orch->>DB: Load session state
+    Orch->>Bedrock: Classify intent
+    Bedrock-->>Orch: Intent + routing decision
+
+    alt Scheduling Request
+        Orch->>Skill: Invoke scheduling-actions
+        Skill->>PF: Get projects/crews/equipment
+        PF-->>Skill: Project data
+
+        opt Weather-dependent scheduling
+            Skill->>Weather: Get forecast for location
+            Weather-->>Skill: Weather data
+        end
+
+        Skill->>PF: Create/update schedule
+        PF-->>Skill: Confirmation
+        Skill-->>Orch: Result
+    else Information Request
+        Orch->>Skill: Invoke information-actions
+        Skill->>PF: Query data
+        PF-->>Skill: Response
+        Skill-->>Orch: Result
+    else Notes Request
+        Orch->>Skill: Invoke notes-actions
+        Skill->>DB: Store/retrieve notes
+        DB-->>Skill: Notes data
+        Skill-->>Orch: Result
+    else Chitchat
+        Orch->>Skill: Invoke chitchat-actions
+        Skill-->>Orch: Response
+    end
+
+    Orch->>Bedrock: Generate response
+    Bedrock-->>Orch: Natural language response
+    Orch->>DB: Save session state
+    Orch-->>Channel: Return response
+    Channel-->>User: Display/speak response
+```
+
+### External API Integration
+
+```mermaid
+flowchart LR
+    subgraph Lambdas["Lambda Functions"]
+        Sched["scheduling-actions"]
+        Info["information-actions"]
+    end
+
+    subgraph ProjectForce["ProjectForce API"]
+        Auth["Authentication<br/>/api/Account/login"]
+        Projects["Projects<br/>/api/Project/*"]
+        Crews["Crews<br/>/api/Crew/*"]
+        Equipment["Equipment<br/>/api/Equipment/*"]
+        Schedule["Schedule<br/>/api/Schedule/*"]
+    end
+
+    subgraph WeatherServices["Weather Services"]
+        Geocode["Nominatim<br/>Address → Coordinates"]
+        Forecast["Open-Meteo<br/>Weather Forecast"]
+    end
+
+    Sched --> Auth
+    Sched --> Projects
+    Sched --> Crews
+    Sched --> Equipment
+    Sched --> Schedule
+
+    Sched --> Geocode
+    Sched --> Forecast
+
+    Info --> Auth
+    Info --> Projects
+    Info --> Crews
+    Info --> Equipment
+```
+
+### Voice Call Flow (Detailed)
+
+```mermaid
+flowchart TD
+    A["Caller dials +14702832382"] --> B["Amazon Connect<br/>pf-main-inbound-voice"]
+    B --> C{"Contact Flow<br/>Get customer attributes"}
+    C --> D["Pass to Lex V2 Bot<br/>pf-syn-scheduling-assistant-dev"]
+    D --> E["Lex captures utterance"]
+    E --> F["pf-syn-lex-fulfillment-dev"]
+    F --> G["Extract session attributes<br/>phone, customer_id, client_id"]
+    G --> H["pf-syn-orchestrator-dev"]
+    H --> I["Process with Bedrock Claude"]
+    I --> J["Invoke appropriate skill Lambda"]
+    J --> K["Return response to Lex"]
+    K --> L["Lex speaks response via Polly"]
+    L --> M{"User continues<br/>conversation?"}
+    M -->|Yes| E
+    M -->|No| N["End call"]
+```
+
+### SMS Flow (Detailed)
+
+```mermaid
+flowchart TD
+    A["User sends SMS to +18786789053"] --> B["AWS End User Messaging"]
+    B --> C["SNS Topic<br/>pf-syn-sms-inbound-dev"]
+    C --> D["pf-syn-sms-inbound-dev Lambda"]
+    D --> E["Parse SNS message<br/>Extract phone, message"]
+    E --> F["Lookup/create SMS session<br/>in DynamoDB"]
+    F --> G["pf-syn-orchestrator-dev"]
+    G --> H["Process with Bedrock Claude"]
+    H --> I["Invoke skill Lambda"]
+    I --> J["Get response"]
+    J --> K["Store message in DynamoDB"]
+    K --> L["Send SMS reply via<br/>sms-voice:SendTextMessage"]
+    L --> M["User receives response"]
 ```
 
 ---
