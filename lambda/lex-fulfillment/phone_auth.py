@@ -36,7 +36,8 @@ PF_AUTH_API = os.environ.get(
     f'{get_api_base_url()}/authentication/phone-call-login'
 )
 CREDENTIALS_SECRET = os.environ.get('PF_SECRET_NAME', 'projectforce/api/credentials')
-AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
+# Use SECRETS_REGION for cross-region access (secrets are in us-east-2, Lambda may be in us-east-1)
+SECRETS_REGION = os.environ.get('SECRETS_REGION', os.environ.get('AWS_REGION', 'us-east-1'))
 
 
 class AuthenticationError(Exception):
@@ -102,7 +103,7 @@ def get_or_authenticate(from_phone: str, to_phone: str) -> Dict:
     if not to_clean:
         raise AuthenticationError(f"Invalid system phone number: {to_phone}")
 
-    secrets = boto3.client('secretsmanager', region_name=AWS_REGION)
+    secrets = boto3.client('secretsmanager', region_name=SECRETS_REGION)
 
     # Step 1: Check Secrets Manager for existing credentials
     existing = _get_existing_credentials(secrets, from_clean)

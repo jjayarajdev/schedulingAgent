@@ -46,10 +46,12 @@ def get_credentials_from_secrets():
         response = secrets_client.get_secret_value(SecretId='projectforce/api/credentials')
         secret = json.loads(response['SecretString'])
 
+        # Use 'or' fallback to handle empty string values (not just missing keys)
+        default_client_id = os.environ.get('DEFAULT_CLIENT_ID', '09PF05VD')
         credentials = {
-            'bearer_token': secret.get('bearer_token', ''),
-            'client_id': secret.get('client_id', '09PF05VD'),
-            'user_id': secret.get('user_id', '1646085')
+            'bearer_token': secret.get('bearer_token') or '',
+            'client_id': secret.get('client_id') or default_client_id,
+            'user_id': secret.get('user_id') or '1646085'
         }
 
         logger.info(f"Using credentials from Secrets Manager - client_id: {credentials['client_id']}, user_id: {credentials['user_id']}")
