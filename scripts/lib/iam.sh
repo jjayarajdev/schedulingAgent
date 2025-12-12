@@ -193,7 +193,8 @@ configure_lex_fulfillment_role() {
             "Sid": "SecretsAccess",
             "Effect": "Allow",
             "Action": [
-                "secretsmanager:GetSecretValue"
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:PutSecretValue"
             ],
             "Resource": "arn:aws:secretsmanager:${AWS_REGION}:${EXPECTED_ACCOUNT}:secret:projectforce/*"
         }
@@ -432,7 +433,8 @@ EOF
             "Sid": "SecretsAccess",
             "Effect": "Allow",
             "Action": [
-                "secretsmanager:GetSecretValue"
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:PutSecretValue"
             ],
             "Resource": "arn:aws:secretsmanager:${AWS_REGION}:${EXPECTED_ACCOUNT}:secret:projectforce/*"
         }

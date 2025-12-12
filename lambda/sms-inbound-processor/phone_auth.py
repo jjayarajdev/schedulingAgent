@@ -116,10 +116,13 @@ def _get_existing_credentials(secrets, from_phone: str) -> Optional[Dict]:
     Returns credentials if:
     - Secret exists
     - Credentials are for the same phone number
-    - Token is not expired
+    - Token has at least 2 minutes remaining (TOKEN_REFRESH_BUFFER_SECONDS)
 
-    Returns None otherwise.
+    Returns None otherwise (triggering a fresh authentication).
     """
+    # Refresh token if less than 2 minutes remaining
+    TOKEN_REFRESH_BUFFER_SECONDS = 120
+
     try:
         response = secrets.get_secret_value(SecretId=CREDENTIALS_SECRET)
         existing = json.loads(response['SecretString'])
@@ -130,13 +133,21 @@ def _get_existing_credentials(secrets, from_phone: str) -> Optional[Dict]:
             logger.info(f"[PHONE_AUTH] Different phone - stored: ***{stored_phone[-4:] if stored_phone else 'none'}, current: ***{from_phone[-4:]}")
             return None
 
-        # Check if token is expired
+        # Check if token is expired or close to expiring
         exp = existing.get('exp', 0)
         now = datetime.utcnow().timestamp()
-        if exp <= now:
-            logger.info(f"[PHONE_AUTH] Token expired at {exp}, now is {now}")
+        remaining_seconds = exp - now
+        remaining_mins = remaining_seconds / 60
+
+        if remaining_seconds <= 0:
+            logger.info(f"[PHONE_AUTH] Token EXPIRED - exp: {exp}, now: {now}")
             return None
 
+        if remaining_seconds < TOKEN_REFRESH_BUFFER_SECONDS:
+            logger.info(f"[PHONE_AUTH] Token expiring soon - {remaining_seconds:.0f}s ({remaining_mins:.1f}m) remaining, refreshing proactively")
+            return None
+
+        logger.info(f"[PHONE_AUTH] Token valid - {remaining_seconds:.0f}s ({remaining_mins:.1f}m) remaining")
         return existing
 
     except secrets.exceptions.ResourceNotFoundException:
