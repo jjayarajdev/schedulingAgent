@@ -106,15 +106,16 @@ get_sns_topic_arn() {
 }
 
 # Create SNS topic for SMS
+# NOTE: This function returns the topic ARN via stdout, so all log messages must go to stderr
 deploy_sns_topic() {
-    log_info "Deploying SNS topic for SMS..."
+    log_info "Deploying SNS topic for SMS..." >&2
 
     local topic_name=$(sns_topic_name)
     local topic_arn
     topic_arn=$(get_sns_topic_arn "$topic_name")
 
     if [[ -n "$topic_arn" && "$topic_arn" != "None" ]]; then
-        log_info "SNS topic already exists: $topic_name"
+        log_info "SNS topic already exists: $topic_name" >&2
         echo "$topic_arn"
         return 0
     fi
@@ -128,7 +129,7 @@ deploy_sns_topic() {
         return 0
     fi
 
-    log_info "Creating SNS topic: $topic_name"
+    log_info "Creating SNS topic: $topic_name" >&2
 
     topic_arn=$(aws sns create-topic \
         --name "$topic_name" \
@@ -137,10 +138,10 @@ deploy_sns_topic() {
         --output text 2>/dev/null)
 
     if [[ -n "$topic_arn" ]]; then
-        log_info "SNS topic created: $topic_arn"
+        log_info "SNS topic created: $topic_arn" >&2
         echo "$topic_arn"
     else
-        log_error "Failed to create SNS topic"
+        log_error "Failed to create SNS topic" >&2
         return 1
     fi
 }
@@ -275,27 +276,28 @@ check_pinpoint_two_way_status() {
 }
 
 # Create IAM role for Pinpoint to publish to SNS
+# NOTE: This function returns the role ARN via stdout, so all log messages must go to stderr
 create_pinpoint_sns_role() {
     local role_name=$(sms_twoway_role_name)
     local topic_arn="$1"
 
-    log_info "Creating IAM role for Pinpoint two-way SMS: $role_name"
+    log_info "Creating IAM role for Pinpoint two-way SMS: $role_name" >&2
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        echo -e "${CYAN}[DRY-RUN]${NC} Create IAM role: $role_name"
-        echo -e "${YELLOW}  \$ aws iam create-role --role-name \"$role_name\" \\\\${NC}"
-        echo -e "${YELLOW}      --assume-role-policy-document '<trust_policy>' \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
-        echo -e "${YELLOW}  \$ aws iam put-role-policy --role-name \"$role_name\" \\\\${NC}"
-        echo -e "${YELLOW}      --policy-name \"sns-publish-policy\" \\\\${NC}"
-        echo -e "${YELLOW}      --policy-document '<sns_policy>'${NC}"
-        echo ""
+        echo -e "${CYAN}[DRY-RUN]${NC} Create IAM role: $role_name" >&2
+        echo -e "${YELLOW}  \$ aws iam create-role --role-name \"$role_name\" \\\\${NC}" >&2
+        echo -e "${YELLOW}      --assume-role-policy-document '<trust_policy>' \\\\${NC}" >&2
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}" >&2
+        echo -e "${YELLOW}  \$ aws iam put-role-policy --role-name \"$role_name\" \\\\${NC}" >&2
+        echo -e "${YELLOW}      --policy-name \"sns-publish-policy\" \\\\${NC}" >&2
+        echo -e "${YELLOW}      --policy-document '<sns_policy>'${NC}" >&2
+        echo "" >&2
         return 0
     fi
 
     # Check if role exists
     if aws iam get-role --role-name "$role_name" &>/dev/null; then
-        log_info "IAM role already exists: $role_name"
+        log_info "IAM role already exists: $role_name" >&2
         echo "arn:aws:iam::${EXPECTED_ACCOUNT}:role/${role_name}"
         return 0
     fi
@@ -354,7 +356,7 @@ EOF
         --policy-name "sns-publish-policy" \
         --policy-document "$sns_policy" &>/dev/null
 
-    log_info "IAM role created: $role_name"
+    log_info "IAM role created: $role_name" >&2
 
     # Wait for role to propagate
     sleep 5
