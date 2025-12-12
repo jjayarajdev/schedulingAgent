@@ -47,8 +47,8 @@ get_lambda_env_vars() {
     case "$role_base" in
         "orchestrator")
             # Core region Lambda - invokes other core Lambdas in same region
+            # NOTE: AWS_REGION is reserved by Lambda and set automatically - do not include
             env_vars="REGION=${CORE_REGION}"
-            env_vars="${env_vars},AWS_REGION=${CORE_REGION}"
             env_vars="${env_vars},DYNAMODB_TABLE=$(table_name 'sessions')"
             env_vars="${env_vars},WORKFLOW_STATE_TABLE=$(table_name 'workflow-states')"
             env_vars="${env_vars},SCHEDULING_LAMBDA=$(lambda_name 'scheduling-actions')"
@@ -70,7 +70,6 @@ get_lambda_env_vars() {
             env_vars="${env_vars},SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
             env_vars="${env_vars},SECRETS_REGION=${SECRETS_REGION:-us-east-2}"
             env_vars="${env_vars},REGION=${CORE_REGION}"
-            env_vars="${env_vars},AWS_REGION=${CORE_REGION}"
             ;;
         "notes-actions")
             # Core region Lambda
@@ -82,7 +81,6 @@ get_lambda_env_vars() {
             env_vars="${env_vars},SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
             env_vars="${env_vars},SECRETS_REGION=${SECRETS_REGION:-us-east-2}"
             env_vars="${env_vars},REGION=${CORE_REGION}"
-            env_vars="${env_vars},AWS_REGION=${CORE_REGION}"
             ;;
         "lex-fulfillment")
             # Voice region Lambda - needs cross-region ARN to invoke orchestrator
@@ -93,7 +91,6 @@ get_lambda_env_vars() {
             env_vars="${env_vars},DYNAMODB_REGION=${CORE_REGION}"
             env_vars="${env_vars},SECRETS_REGION=${SECRETS_REGION:-us-east-2}"
             env_vars="${env_vars},REGION=${VOICE_REGION}"
-            env_vars="${env_vars},AWS_REGION=${VOICE_REGION}"
             ;;
         "customer-lookup")
             # Voice region Lambda
@@ -101,7 +98,6 @@ get_lambda_env_vars() {
             env_vars="${env_vars},CUSTOMERS_TABLE=$(table_name 'customers')"
             env_vars="${env_vars},DYNAMODB_REGION=${CORE_REGION}"
             env_vars="${env_vars},REGION=${VOICE_REGION}"
-            env_vars="${env_vars},AWS_REGION=${VOICE_REGION}"
             ;;
         "voice-bedrock-bridge")
             # Voice region Lambda - calls Bedrock in core region
@@ -111,7 +107,6 @@ get_lambda_env_vars() {
             env_vars="${env_vars},DYNAMODB_TABLE=$(table_name 'sessions')"
             env_vars="${env_vars},DYNAMODB_REGION=${CORE_REGION}"
             env_vars="${env_vars},REGION=${VOICE_REGION}"
-            env_vars="${env_vars},AWS_REGION=${VOICE_REGION}"
             ;;
         "sms-inbound")
             # Voice region Lambda - needs cross-region ARN to invoke orchestrator
@@ -129,12 +124,10 @@ get_lambda_env_vars() {
             env_vars="${env_vars},SECRETS_REGION=${SECRETS_REGION:-us-east-2}"
             env_vars="${env_vars},AWS_REGION_NAME=${VOICE_REGION}"
             env_vars="${env_vars},REGION=${VOICE_REGION}"
-            env_vars="${env_vars},AWS_REGION=${VOICE_REGION}"
             ;;
         *)
             env_vars="ENVIRONMENT=${ENVIRONMENT}"
             env_vars="${env_vars},REGION=${CORE_REGION}"
-            env_vars="${env_vars},AWS_REGION=${CORE_REGION}"
             ;;
     esac
 
@@ -269,31 +262,43 @@ deploy_lambda() {
     if aws lambda get-function --function-name "$func_name" --region "$deploy_region" &>/dev/null; then
         # Update existing function
         log_debug "Updating existing function..."
-        aws lambda update-function-code \
+        local update_output
+        update_output=$(aws lambda update-function-code \
             --function-name "$func_name" \
             --zip-file "fileb://$zip_file" \
             --region "$deploy_region" \
-            --output text &>/dev/null
+            --output text 2>&1)
+        if [[ $? -ne 0 ]]; then
+            log_error "Failed to update Lambda code: $func_name"
+            log_error "Error: $update_output"
+            return 1
+        fi
 
         # Wait for update to complete
         aws lambda wait function-updated --function-name "$func_name" --region "$deploy_region" 2>/dev/null || sleep 5
 
         # Update configuration including environment variables
+        local config_output
         if [[ -n "$env_vars" ]]; then
-            aws lambda update-function-configuration \
+            config_output=$(aws lambda update-function-configuration \
                 --function-name "$func_name" \
                 --timeout "$timeout" \
                 --memory-size "$memory" \
                 --environment "Variables={$env_vars}" \
                 --region "$deploy_region" \
-                --output text &>/dev/null
+                --output text 2>&1)
         else
-            aws lambda update-function-configuration \
+            config_output=$(aws lambda update-function-configuration \
                 --function-name "$func_name" \
                 --timeout "$timeout" \
                 --memory-size "$memory" \
                 --region "$deploy_region" \
-                --output text &>/dev/null
+                --output text 2>&1)
+        fi
+        if [[ $? -ne 0 ]]; then
+            log_error "Failed to update Lambda configuration: $func_name"
+            log_error "Error: $config_output"
+            return 1
         fi
     else
         # Create new function
@@ -311,8 +316,10 @@ deploy_lambda() {
         fi
 
         # Create function with environment variables
+        local create_output
+        local create_result
         if [[ -n "$env_vars" ]]; then
-            aws lambda create-function \
+            create_output=$(aws lambda create-function \
                 --function-name "$func_name" \
                 --runtime python3.11 \
                 --role "$role_arn" \
@@ -322,9 +329,10 @@ deploy_lambda() {
                 --memory-size "$memory" \
                 --environment "Variables={$env_vars}" \
                 --region "$deploy_region" \
-                --output text &>/dev/null
+                --output text 2>&1)
+            create_result=$?
         else
-            aws lambda create-function \
+            create_output=$(aws lambda create-function \
                 --function-name "$func_name" \
                 --runtime python3.11 \
                 --role "$role_arn" \
@@ -333,11 +341,13 @@ deploy_lambda() {
                 --timeout "$timeout" \
                 --memory-size "$memory" \
                 --region "$deploy_region" \
-                --output text &>/dev/null
+                --output text 2>&1)
+            create_result=$?
         fi
 
-        if [[ $? -ne 0 ]]; then
+        if [[ $create_result -ne 0 ]]; then
             log_error "Failed to create Lambda function: $func_name"
+            log_error "Error: $create_output"
             return 1
         fi
 
