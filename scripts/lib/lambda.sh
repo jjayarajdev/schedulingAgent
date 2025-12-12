@@ -32,13 +32,23 @@ lambda_name() {
 
 # Get environment variables for a Lambda function based on its role base
 # Usage: env_vars=$(get_lambda_env_vars "orchestrator")
+#
+# MULTI-REGION NOTE:
+# - Core Lambdas (orchestrator, action Lambdas) run in CORE_REGION (us-east-2)
+# - Voice/SMS Lambdas run in VOICE_REGION (us-east-1)
+# - Voice/SMS Lambdas need full ARN to invoke orchestrator cross-region
 get_lambda_env_vars() {
     local role_base="$1"
     local env_vars=""
 
+    # Full ARN for cross-region orchestrator invocation
+    local orchestrator_arn="arn:aws:lambda:${CORE_REGION}:${EXPECTED_ACCOUNT}:function:$(lambda_name 'orchestrator')"
+
     case "$role_base" in
         "orchestrator")
-            env_vars="REGION=${AWS_REGION}"
+            # Core region Lambda - invokes other core Lambdas in same region
+            env_vars="REGION=${CORE_REGION}"
+            env_vars="${env_vars},AWS_REGION=${CORE_REGION}"
             env_vars="${env_vars},DYNAMODB_TABLE=$(table_name 'sessions')"
             env_vars="${env_vars},WORKFLOW_STATE_TABLE=$(table_name 'workflow-states')"
             env_vars="${env_vars},SCHEDULING_LAMBDA=$(lambda_name 'scheduling-actions')"
@@ -46,60 +56,81 @@ get_lambda_env_vars() {
             env_vars="${env_vars},CHITCHAT_LAMBDA=$(lambda_name 'chitchat-actions')"
             env_vars="${env_vars},NOTES_LAMBDA=$(lambda_name 'notes-actions')"
             env_vars="${env_vars},ORCHESTRATOR_MODEL=us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+            env_vars="${env_vars},BEDROCK_REGION=${CORE_REGION}"
             env_vars="${env_vars},ALLOW_DIRECT_LAMBDA=true"
             env_vars="${env_vars},USE_SUPERVISOR=false"
             env_vars="${env_vars},ENABLE_MULTI_AGENT_ORCHESTRATION=false"
             ;;
         "scheduling-actions"|"information-actions"|"chitchat-actions")
+            # Core region Lambdas
             env_vars="ENVIRONMENT=${ENVIRONMENT}"
             env_vars="${env_vars},USE_MOCK_API=false"
             env_vars="${env_vars},DEFAULT_CLIENT_ID=09PF05VD"
             env_vars="${env_vars},DYNAMODB_TABLE=$(table_name 'sessions')"
             env_vars="${env_vars},SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
-            env_vars="${env_vars},REGION=${AWS_REGION}"
+            env_vars="${env_vars},REGION=${CORE_REGION}"
+            env_vars="${env_vars},AWS_REGION=${CORE_REGION}"
             ;;
         "notes-actions")
+            # Core region Lambda
             env_vars="ENVIRONMENT=${ENVIRONMENT}"
             env_vars="${env_vars},USE_MOCK_API=false"
             env_vars="${env_vars},DEFAULT_CLIENT_ID=09PF05VD"
             env_vars="${env_vars},DYNAMODB_TABLE=$(table_name 'project-notes')"
             env_vars="${env_vars},RESOURCE_PREFIX=${RESOURCE_PREFIX}"
             env_vars="${env_vars},SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
-            env_vars="${env_vars},REGION=${AWS_REGION}"
+            env_vars="${env_vars},REGION=${CORE_REGION}"
+            env_vars="${env_vars},AWS_REGION=${CORE_REGION}"
             ;;
         "lex-fulfillment")
+            # Voice region Lambda - needs cross-region ARN to invoke orchestrator
             env_vars="ENVIRONMENT=${ENVIRONMENT}"
-            env_vars="${env_vars},ORCHESTRATOR_LAMBDA=$(lambda_name 'orchestrator')"
+            env_vars="${env_vars},ORCHESTRATOR_LAMBDA=${orchestrator_arn}"
+            env_vars="${env_vars},ORCHESTRATOR_REGION=${CORE_REGION}"
             env_vars="${env_vars},DYNAMODB_TABLE=$(table_name 'sessions')"
-            env_vars="${env_vars},REGION=${AWS_REGION}"
+            env_vars="${env_vars},DYNAMODB_REGION=${CORE_REGION}"
+            env_vars="${env_vars},REGION=${VOICE_REGION}"
+            env_vars="${env_vars},AWS_REGION=${VOICE_REGION}"
             ;;
         "customer-lookup")
+            # Voice region Lambda
             env_vars="ENVIRONMENT=${ENVIRONMENT}"
             env_vars="${env_vars},CUSTOMERS_TABLE=$(table_name 'customers')"
-            env_vars="${env_vars},REGION=${AWS_REGION}"
+            env_vars="${env_vars},DYNAMODB_REGION=${CORE_REGION}"
+            env_vars="${env_vars},REGION=${VOICE_REGION}"
+            env_vars="${env_vars},AWS_REGION=${VOICE_REGION}"
             ;;
         "voice-bedrock-bridge")
+            # Voice region Lambda - calls Bedrock in core region
             env_vars="ENVIRONMENT=${ENVIRONMENT}"
             env_vars="${env_vars},BEDROCK_MODEL_ID=us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+            env_vars="${env_vars},BEDROCK_REGION=${CORE_REGION}"
             env_vars="${env_vars},DYNAMODB_TABLE=$(table_name 'sessions')"
-            env_vars="${env_vars},REGION=${AWS_REGION}"
+            env_vars="${env_vars},DYNAMODB_REGION=${CORE_REGION}"
+            env_vars="${env_vars},REGION=${VOICE_REGION}"
+            env_vars="${env_vars},AWS_REGION=${VOICE_REGION}"
             ;;
         "sms-inbound")
+            # Voice region Lambda - needs cross-region ARN to invoke orchestrator
             env_vars="ENVIRONMENT=${ENVIRONMENT}"
-            env_vars="${env_vars},ORCHESTRATOR_LAMBDA=$(lambda_name 'orchestrator')"
+            env_vars="${env_vars},ORCHESTRATOR_LAMBDA=${orchestrator_arn}"
+            env_vars="${env_vars},ORCHESTRATOR_REGION=${CORE_REGION}"
             env_vars="${env_vars},SMS_SESSIONS_TABLE=$(table_name 'sms-sessions')"
             env_vars="${env_vars},SESSIONS_TABLE=$(table_name 'sms-sessions')"
             env_vars="${env_vars},CONSENT_TABLE=$(table_name 'sms-consent')"
             env_vars="${env_vars},MESSAGES_TABLE=$(table_name 'sms-messages')"
             env_vars="${env_vars},OPT_OUT_TRACKING_TABLE=$(table_name 'opt-out-tracking')"
+            env_vars="${env_vars},DYNAMODB_REGION=${CORE_REGION}"
             env_vars="${env_vars},ORIGINATION_NUMBER=${SMS_PHONE_NUMBER:-+18786789053}"
             env_vars="${env_vars},PF_SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
-            env_vars="${env_vars},AWS_REGION_NAME=${AWS_REGION}"
-            env_vars="${env_vars},REGION=${AWS_REGION}"
+            env_vars="${env_vars},AWS_REGION_NAME=${VOICE_REGION}"
+            env_vars="${env_vars},REGION=${VOICE_REGION}"
+            env_vars="${env_vars},AWS_REGION=${VOICE_REGION}"
             ;;
         *)
             env_vars="ENVIRONMENT=${ENVIRONMENT}"
-            env_vars="${env_vars},REGION=${AWS_REGION}"
+            env_vars="${env_vars},REGION=${CORE_REGION}"
+            env_vars="${env_vars},AWS_REGION=${CORE_REGION}"
             ;;
     esac
 
@@ -130,7 +161,9 @@ get_lambda_table_names() {
 # =============================================================================
 
 # Deploy a single Lambda function
-# Usage: deploy_lambda <func_name> <source_dir> <role_name> <timeout> <memory> [role_base]
+# Usage: deploy_lambda <func_name> <source_dir> <role_name> <timeout> <memory> [role_base] [deploy_region]
+#
+# MULTI-REGION: Core Lambdas deploy to CORE_REGION, Voice/SMS Lambdas to VOICE_REGION
 deploy_lambda() {
     local func_name="$1"
     local source_dir="$2"
@@ -138,6 +171,7 @@ deploy_lambda() {
     local timeout="${4:-60}"
     local memory="${5:-512}"
     local role_base="${6:-}"
+    local deploy_region="${7:-$CORE_REGION}"
 
     local project_root
     project_root="$(get_project_root)"
@@ -145,7 +179,7 @@ deploy_lambda() {
     local zip_file="/tmp/${func_name}.zip"
     local role_arn="arn:aws:iam::${EXPECTED_ACCOUNT}:role/${role_name}"
 
-    log_info "Deploying Lambda: $func_name"
+    log_info "Deploying Lambda: $func_name (region: $deploy_region)"
     log_debug "  Source: $full_source_path"
     log_debug "  Role: $role_name"
     log_debug "  Timeout: ${timeout}s, Memory: ${memory}MB"
@@ -176,11 +210,11 @@ deploy_lambda() {
         echo -e "${YELLOW}      --zip-file \"fileb://$zip_file\" \\\\${NC}"
         echo -e "${YELLOW}      --timeout $timeout \\\\${NC}"
         echo -e "${YELLOW}      --memory-size $memory \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}      --region \"$deploy_region\"${NC}"
         echo ""
         echo -e "${YELLOW}  # OR update existing function${NC}"
-        echo -e "${YELLOW}  \$ aws lambda update-function-code --function-name \"$func_name\" --zip-file \"fileb://$zip_file\" --region \"$AWS_REGION\"${NC}"
-        echo -e "${YELLOW}  \$ aws lambda update-function-configuration --function-name \"$func_name\" --timeout $timeout --memory-size $memory --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}  \$ aws lambda update-function-code --function-name \"$func_name\" --zip-file \"fileb://$zip_file\" --region \"$deploy_region\"${NC}"
+        echo -e "${YELLOW}  \$ aws lambda update-function-configuration --function-name \"$func_name\" --timeout $timeout --memory-size $memory --region \"$deploy_region\"${NC}"
         echo ""
         return 0
     fi
@@ -228,17 +262,17 @@ deploy_lambda() {
     fi
 
     # Check if function exists
-    if aws lambda get-function --function-name "$func_name" --region "$AWS_REGION" &>/dev/null; then
+    if aws lambda get-function --function-name "$func_name" --region "$deploy_region" &>/dev/null; then
         # Update existing function
         log_debug "Updating existing function..."
         aws lambda update-function-code \
             --function-name "$func_name" \
             --zip-file "fileb://$zip_file" \
-            --region "$AWS_REGION" \
+            --region "$deploy_region" \
             --output text &>/dev/null
 
         # Wait for update to complete
-        aws lambda wait function-updated --function-name "$func_name" --region "$AWS_REGION" 2>/dev/null || sleep 5
+        aws lambda wait function-updated --function-name "$func_name" --region "$deploy_region" 2>/dev/null || sleep 5
 
         # Update configuration including environment variables
         if [[ -n "$env_vars" ]]; then
@@ -247,14 +281,14 @@ deploy_lambda() {
                 --timeout "$timeout" \
                 --memory-size "$memory" \
                 --environment "Variables={$env_vars}" \
-                --region "$AWS_REGION" \
+                --region "$deploy_region" \
                 --output text &>/dev/null
         else
             aws lambda update-function-configuration \
                 --function-name "$func_name" \
                 --timeout "$timeout" \
                 --memory-size "$memory" \
-                --region "$AWS_REGION" \
+                --region "$deploy_region" \
                 --output text &>/dev/null
         fi
     else
@@ -283,7 +317,7 @@ deploy_lambda() {
                 --timeout "$timeout" \
                 --memory-size "$memory" \
                 --environment "Variables={$env_vars}" \
-                --region "$AWS_REGION" \
+                --region "$deploy_region" \
                 --output text &>/dev/null
         else
             aws lambda create-function \
@@ -294,7 +328,7 @@ deploy_lambda() {
                 --zip-file "fileb://$zip_file" \
                 --timeout "$timeout" \
                 --memory-size "$memory" \
-                --region "$AWS_REGION" \
+                --region "$deploy_region" \
                 --output text &>/dev/null
         fi
 
@@ -304,7 +338,7 @@ deploy_lambda() {
         fi
 
         # Wait for function to be active
-        aws lambda wait function-active --function-name "$func_name" --region "$AWS_REGION" 2>/dev/null || sleep 5
+        aws lambda wait function-active --function-name "$func_name" --region "$deploy_region" 2>/dev/null || sleep 5
     fi
 
     # Cleanup
@@ -315,21 +349,23 @@ deploy_lambda() {
 }
 
 # Deploy all core Lambda functions
+# Core Lambdas deploy to CORE_REGION (us-east-2)
 deploy_all_lambdas() {
     log_section "Deploying Core Lambda Functions"
     print_naming_config
+    log_info "Deploy region: $CORE_REGION"
 
     local failed=0
 
-    # Deploy DynamoDB tables first
+    # Deploy DynamoDB tables first (to CORE_REGION)
     deploy_lambda_dynamodb_tables
 
-    # Deploy each Lambda function
+    # Deploy each Lambda function to CORE_REGION
     for entry in "${LAMBDA_FUNCTION_LIST[@]}"; do
         IFS=':' read -r base_name source_dir role_base timeout memory <<< "$entry"
         local func_name=$(lambda_name "$base_name")
         local full_role_name=$(role_name "$role_base")
-        deploy_lambda "$func_name" "$source_dir" "$full_role_name" "$timeout" "$memory" "$role_base" || ((failed++))
+        deploy_lambda "$func_name" "$source_dir" "$full_role_name" "$timeout" "$memory" "$role_base" "$CORE_REGION" || ((failed++))
     done
 
     if [[ $failed -gt 0 ]]; then
@@ -337,7 +373,7 @@ deploy_all_lambdas() {
         return 1
     fi
 
-    log_info "All Lambda functions deployed successfully"
+    log_info "All core Lambda functions deployed to $CORE_REGION"
     return 0
 }
 
@@ -352,27 +388,28 @@ deploy_lambda_dynamodb_tables() {
 }
 
 # Deploy a single DynamoDB table
+# DynamoDB tables deploy to CORE_REGION
 deploy_dynamodb_table() {
     local table_name="$1"
 
-    if aws dynamodb describe-table --table-name "$table_name" --region "$AWS_REGION" &>/dev/null; then
-        log_info "Table $table_name already exists - skipping"
+    if aws dynamodb describe-table --table-name "$table_name" --region "$CORE_REGION" &>/dev/null; then
+        log_info "Table $table_name already exists in $CORE_REGION - skipping"
         return 0
     fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        echo -e "${CYAN}[DRY-RUN]${NC} Create DynamoDB table: $table_name"
+        echo -e "${CYAN}[DRY-RUN]${NC} Create DynamoDB table: $table_name (region: $CORE_REGION)"
         echo -e "${YELLOW}  \$ aws dynamodb create-table \\\\${NC}"
         echo -e "${YELLOW}      --table-name \"$table_name\" \\\\${NC}"
         echo -e "${YELLOW}      --attribute-definitions AttributeName=session_id,AttributeType=S \\\\${NC}"
         echo -e "${YELLOW}      --key-schema AttributeName=session_id,KeyType=HASH \\\\${NC}"
         echo -e "${YELLOW}      --billing-mode PAY_PER_REQUEST \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}      --region \"$CORE_REGION\"${NC}"
         echo ""
         return 0
     fi
 
-    log_info "Creating DynamoDB table: $table_name"
+    log_info "Creating DynamoDB table: $table_name (region: $CORE_REGION)"
 
     # Default table schema (session-based)
     local create_output
@@ -381,7 +418,7 @@ deploy_dynamodb_table() {
         --attribute-definitions AttributeName=session_id,AttributeType=S \
         --key-schema AttributeName=session_id,KeyType=HASH \
         --billing-mode PAY_PER_REQUEST \
-        --region "$AWS_REGION" \
+        --region "$CORE_REGION" \
         --output text 2>&1)
 
     local create_result=$?
@@ -396,7 +433,7 @@ deploy_dynamodb_table() {
     local waited=0
     while [[ $waited -lt $max_wait ]]; do
         local status
-        status=$(aws dynamodb describe-table --table-name "$table_name" --region "$AWS_REGION" \
+        status=$(aws dynamodb describe-table --table-name "$table_name" --region "$CORE_REGION" \
             --query 'Table.TableStatus' --output text 2>/dev/null)
 
         if [[ "$status" == "ACTIVE" ]]; then
@@ -418,15 +455,17 @@ deploy_dynamodb_table() {
 # =============================================================================
 
 # Delete a single Lambda function
+# Usage: cleanup_lambda <func_name> <role_name> [region]
 cleanup_lambda() {
     local func_name="$1"
     local role_name="$2"
+    local cleanup_region="${3:-$CORE_REGION}"
 
-    log_info "Cleaning up Lambda: $func_name"
+    log_info "Cleaning up Lambda: $func_name (region: $cleanup_region)"
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        echo -e "${CYAN}[DRY-RUN]${NC} Delete Lambda: $func_name"
-        echo -e "${YELLOW}  \$ aws lambda delete-function --function-name \"$func_name\" --region \"$AWS_REGION\"${NC}"
+        echo -e "${CYAN}[DRY-RUN]${NC} Delete Lambda: $func_name (region: $cleanup_region)"
+        echo -e "${YELLOW}  \$ aws lambda delete-function --function-name \"$func_name\" --region \"$cleanup_region\"${NC}"
         if [[ -n "$role_name" ]]; then
             echo -e "${YELLOW}  \$ aws iam delete-role --role-name \"$role_name\"${NC}"
         fi
@@ -435,8 +474,8 @@ cleanup_lambda() {
     fi
 
     # Delete the Lambda function
-    if aws lambda get-function --function-name "$func_name" --region "$AWS_REGION" &>/dev/null; then
-        aws lambda delete-function --function-name "$func_name" --region "$AWS_REGION" 2>/dev/null
+    if aws lambda get-function --function-name "$func_name" --region "$cleanup_region" &>/dev/null; then
+        aws lambda delete-function --function-name "$func_name" --region "$cleanup_region" 2>/dev/null
         log_info "Lambda $func_name deleted"
     else
         log_debug "Lambda $func_name does not exist"
@@ -476,20 +515,20 @@ cleanup_all_lambdas() {
     return 0
 }
 
-# Cleanup Lambda-related DynamoDB tables
+# Cleanup Lambda-related DynamoDB tables (in CORE_REGION)
 cleanup_lambda_dynamodb_tables() {
-    log_info "Cleaning up DynamoDB tables..."
+    log_info "Cleaning up DynamoDB tables in $CORE_REGION..."
 
     for base in "${LAMBDA_DYNAMODB_TABLE_BASES[@]}"; do
         local full_table_name=$(table_name "$base")
-        if aws dynamodb describe-table --table-name "$full_table_name" --region "$AWS_REGION" &>/dev/null; then
+        if aws dynamodb describe-table --table-name "$full_table_name" --region "$CORE_REGION" &>/dev/null; then
             if [[ "$DRY_RUN" == "true" ]]; then
-                echo -e "${CYAN}[DRY-RUN]${NC} Delete DynamoDB table: $full_table_name"
-                echo -e "${YELLOW}  \$ aws dynamodb delete-table --table-name \"$full_table_name\" --region \"$AWS_REGION\"${NC}"
+                echo -e "${CYAN}[DRY-RUN]${NC} Delete DynamoDB table: $full_table_name (region: $CORE_REGION)"
+                echo -e "${YELLOW}  \$ aws dynamodb delete-table --table-name \"$full_table_name\" --region \"$CORE_REGION\"${NC}"
                 echo ""
             else
                 log_info "Deleting table: $full_table_name"
-                aws dynamodb delete-table --table-name "$full_table_name" --region "$AWS_REGION" 2>/dev/null
+                aws dynamodb delete-table --table-name "$full_table_name" --region "$CORE_REGION" 2>/dev/null
             fi
         fi
     done
@@ -500,38 +539,40 @@ cleanup_lambda_dynamodb_tables() {
 # =============================================================================
 
 # Validate all Lambda functions
+# Core Lambdas validated in CORE_REGION
 validate_lambdas() {
     log_section "Validating Lambda Functions"
     print_naming_config
+    log_info "Validating in region: $CORE_REGION"
 
     local failed=0
 
     for entry in "${LAMBDA_FUNCTION_LIST[@]}"; do
         IFS=':' read -r base_name source_dir role_base timeout memory <<< "$entry"
         local func_name=$(lambda_name "$base_name")
-        if aws lambda get-function --function-name "$func_name" --region "$AWS_REGION" &>/dev/null; then
+        if aws lambda get-function --function-name "$func_name" --region "$CORE_REGION" &>/dev/null; then
             local state
-            state=$(aws lambda get-function --function-name "$func_name" --region "$AWS_REGION" \
+            state=$(aws lambda get-function --function-name "$func_name" --region "$CORE_REGION" \
                 --query 'Configuration.State' --output text 2>/dev/null)
             if [[ "$state" == "Active" ]]; then
-                log_info "$func_name: Active"
+                log_info "$func_name: Active (${CORE_REGION})"
             else
                 log_warn "$func_name: $state"
                 ((failed++))
             fi
         else
-            log_error "$func_name: NOT FOUND"
+            log_error "$func_name: NOT FOUND in $CORE_REGION"
             ((failed++))
         fi
     done
 
-    # Validate DynamoDB tables
+    # Validate DynamoDB tables (in CORE_REGION)
     for base in "${LAMBDA_DYNAMODB_TABLE_BASES[@]}"; do
         local full_table_name=$(table_name "$base")
-        if aws dynamodb describe-table --table-name "$full_table_name" --region "$AWS_REGION" &>/dev/null; then
-            log_info "Table $full_table_name: EXISTS"
+        if aws dynamodb describe-table --table-name "$full_table_name" --region "$CORE_REGION" &>/dev/null; then
+            log_info "Table $full_table_name: EXISTS (${CORE_REGION})"
         else
-            log_error "Table $full_table_name: NOT FOUND"
+            log_error "Table $full_table_name: NOT FOUND in $CORE_REGION"
             ((failed++))
         fi
     done
@@ -541,16 +582,23 @@ validate_lambdas() {
         return 1
     fi
 
-    log_info "All Lambda resources validated successfully"
+    log_info "All core Lambda resources validated successfully"
     return 0
 }
 
-# List Lambda functions
+# List Lambda functions in both regions
 list_lambda_functions() {
     log_section "Lambda Functions (${RESOURCE_PREFIX}-*-${ENVIRONMENT})"
 
+    log_info "Core Lambdas ($CORE_REGION):"
     aws lambda list-functions \
         --query "Functions[?starts_with(FunctionName, \`${RESOURCE_PREFIX}-\`) && ends_with(FunctionName, \`-${ENVIRONMENT}\`)].{Name:FunctionName,Runtime:Runtime,Memory:MemorySize,Timeout:Timeout}" \
         --output table \
-        --region "$AWS_REGION"
+        --region "$CORE_REGION"
+
+    log_info "Voice/SMS Lambdas ($VOICE_REGION):"
+    aws lambda list-functions \
+        --query "Functions[?starts_with(FunctionName, \`${RESOURCE_PREFIX}-\`) && ends_with(FunctionName, \`-${ENVIRONMENT}\`)].{Name:FunctionName,Runtime:Runtime,Memory:MemorySize,Timeout:Timeout}" \
+        --output table \
+        --region "$VOICE_REGION"
 }

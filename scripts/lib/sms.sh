@@ -99,7 +99,7 @@ get_sns_topic_arn() {
     local topic_name="$1"
 
     aws sns list-topics \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query "Topics[?contains(TopicArn, '$topic_name')].TopicArn" \
         --output text 2>/dev/null | head -1
 }
@@ -120,7 +120,7 @@ deploy_sns_topic() {
 
     if [[ "$DRY_RUN" == "true" ]]; then
         echo -e "${CYAN}[DRY-RUN]${NC} Create SNS topic: $topic_name" >&2
-        echo -e "${YELLOW}  \$ aws sns create-topic --name \"$topic_name\" --region \"$AWS_REGION\"${NC}" >&2
+        echo -e "${YELLOW}  \$ aws sns create-topic --name \"$topic_name\" --region \"$VOICE_REGION\"${NC}" >&2
         echo "" >&2
         # Return a placeholder ARN for dry-run mode (this is the only stdout)
         echo "arn:aws:sns:${AWS_REGION}:${EXPECTED_ACCOUNT}:${topic_name}"
@@ -131,7 +131,7 @@ deploy_sns_topic() {
 
     topic_arn=$(aws sns create-topic \
         --name "$topic_name" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query 'TopicArn' \
         --output text 2>/dev/null)
 
@@ -174,13 +174,13 @@ configure_sms_sns_trigger() {
         echo -e "${YELLOW}      --action \"lambda:InvokeFunction\" \\\\${NC}"
         echo -e "${YELLOW}      --principal \"sns.amazonaws.com\" \\\\${NC}"
         echo -e "${YELLOW}      --source-arn \"<topic_arn>\" \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
         echo ""
         echo -e "${YELLOW}  \$ aws sns subscribe \\\\${NC}"
         echo -e "${YELLOW}      --topic-arn \"<topic_arn>\" \\\\${NC}"
         echo -e "${YELLOW}      --protocol lambda \\\\${NC}"
         echo -e "${YELLOW}      --notification-endpoint \"$lambda_arn\" \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
         echo ""
         return 0
     fi
@@ -192,13 +192,13 @@ configure_sms_sns_trigger() {
         --action "lambda:InvokeFunction" \
         --principal "sns.amazonaws.com" \
         --source-arn "$topic_arn" \
-        --region "$AWS_REGION" 2>/dev/null || true
+        --region "$VOICE_REGION" 2>/dev/null || true
 
     # Subscribe Lambda to SNS topic
     local existing_sub
     existing_sub=$(aws sns list-subscriptions-by-topic \
         --topic-arn "$topic_arn" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query "Subscriptions[?Protocol=='lambda' && Endpoint=='$lambda_arn'].SubscriptionArn" \
         --output text 2>/dev/null)
 
@@ -207,7 +207,7 @@ configure_sms_sns_trigger() {
             --topic-arn "$topic_arn" \
             --protocol lambda \
             --notification-endpoint "$lambda_arn" \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --output text &>/dev/null
 
         log_info "Lambda subscribed to SNS topic"
@@ -235,7 +235,7 @@ get_pinpoint_phone_number() {
     # List phone numbers
     local phone_info
     phone_info=$(aws pinpoint-sms-voice-v2 describe-phone-numbers \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query "PhoneNumbers[?PhoneNumber=='$SMS_PHONE_NUMBER']" \
         --output json 2>/dev/null)
 
@@ -252,7 +252,7 @@ get_pinpoint_phone_number() {
 # Get Pinpoint phone number ID
 get_pinpoint_phone_number_id() {
     aws pinpoint-sms-voice-v2 describe-phone-numbers \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query "PhoneNumbers[?PhoneNumber=='$SMS_PHONE_NUMBER'].PhoneNumberId" \
         --output text 2>/dev/null
 }
@@ -263,7 +263,7 @@ check_pinpoint_two_way_status() {
 
     local two_way_enabled
     two_way_enabled=$(aws pinpoint-sms-voice-v2 describe-phone-numbers \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query "PhoneNumbers[?PhoneNumberId=='$phone_number_id'].TwoWayEnabled" \
         --output text 2>/dev/null)
 
@@ -284,7 +284,7 @@ create_pinpoint_sns_role() {
         echo -e "${CYAN}[DRY-RUN]${NC} Create IAM role: $role_name"
         echo -e "${YELLOW}  \$ aws iam create-role --role-name \"$role_name\" \\\\${NC}"
         echo -e "${YELLOW}      --assume-role-policy-document '<trust_policy>' \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
         echo -e "${YELLOW}  \$ aws iam put-role-policy --role-name \"$role_name\" \\\\${NC}"
         echo -e "${YELLOW}      --policy-name \"sns-publish-policy\" \\\\${NC}"
         echo -e "${YELLOW}      --policy-document '<sns_policy>'${NC}"
@@ -388,7 +388,7 @@ configure_pinpoint_two_way_sms() {
         # Verify it's pointing to correct SNS topic
         local current_channel
         current_channel=$(aws pinpoint-sms-voice-v2 describe-phone-numbers \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --query "PhoneNumbers[?PhoneNumberId=='$phone_number_id'].TwoWayChannelArn" \
             --output text 2>/dev/null)
 
@@ -420,7 +420,7 @@ configure_pinpoint_two_way_sms() {
         echo -e "${YELLOW}      --two-way-enabled \\\\${NC}"
         echo -e "${YELLOW}      --two-way-channel-arn \"$expected_topic_arn\" \\\\${NC}"
         echo -e "${YELLOW}      --two-way-channel-role \"arn:aws:iam::${EXPECTED_ACCOUNT}:role/$(sms_twoway_role_name)\" \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
         echo ""
         return 0
     fi
@@ -445,7 +445,7 @@ configure_pinpoint_two_way_sms() {
         --two-way-enabled \
         --two-way-channel-arn "$topic_arn" \
         --two-way-channel-role "$role_arn" \
-        --region "$AWS_REGION" 2>&1)
+        --region "$VOICE_REGION" 2>&1)
 
     local result=$?
     if [[ $result -eq 0 ]]; then
@@ -469,7 +469,7 @@ configure_pinpoint_two_way_sms() {
             echo "    --two-way-enabled \\"
             echo "    --two-way-channel-arn \"$topic_arn\" \\"
             echo "    --two-way-channel-role \"$role_arn\" \\"
-            echo "    --region \"$AWS_REGION\""
+            echo "    --region \"$VOICE_REGION\""
             echo ""
         elif echo "$output" | grep -q "ValidationException"; then
             log_warn "Two-way SMS configuration may already exist or has validation issues"
@@ -496,7 +496,7 @@ validate_pinpoint_two_way_sms() {
     # Get full phone number details
     local phone_details
     phone_details=$(aws pinpoint-sms-voice-v2 describe-phone-numbers \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query "PhoneNumbers[?PhoneNumberId=='$phone_number_id']" \
         --output json 2>/dev/null)
 
@@ -549,12 +549,12 @@ deploy_sms_dynamodb_table() {
     local tbl_name="$1"
     local base_name="$2"  # Optional: base name to determine key schema
 
-    if aws dynamodb describe-table --table-name "$tbl_name" --region "$AWS_REGION" &>/dev/null; then
+    if aws dynamodb describe-table --table-name "$tbl_name" --region "$VOICE_REGION" &>/dev/null; then
         log_debug "Table $tbl_name already exists"
         # Check if sms-sessions table needs phone-index GSI
         if [[ "$base_name" == "sms-sessions" || "$tbl_name" == *"sms-sessions"* ]]; then
             local has_gsi
-            has_gsi=$(aws dynamodb describe-table --table-name "$tbl_name" --region "$AWS_REGION" \
+            has_gsi=$(aws dynamodb describe-table --table-name "$tbl_name" --region "$VOICE_REGION" \
                 --query "Table.GlobalSecondaryIndexes[?IndexName=='phone-index'].IndexName" --output text 2>/dev/null)
             if [[ -z "$has_gsi" || "$has_gsi" == "None" ]]; then
                 log_info "Adding phone-index GSI to $tbl_name..."
@@ -563,7 +563,7 @@ deploy_sms_dynamodb_table() {
                     --attribute-definitions AttributeName=phone_number,AttributeType=S \
                     --global-secondary-index-updates \
                     "[{\"Create\":{\"IndexName\":\"phone-index\",\"KeySchema\":[{\"AttributeName\":\"phone_number\",\"KeyType\":\"HASH\"}],\"Projection\":{\"ProjectionType\":\"ALL\"}}}]" \
-                    --region "$AWS_REGION" &>/dev/null || true
+                    --region "$VOICE_REGION" &>/dev/null || true
             fi
         fi
         return 0
@@ -592,7 +592,7 @@ deploy_sms_dynamodb_table() {
             echo -e "${YELLOW}      $gsi_option \\\\${NC}"
         fi
         echo -e "${YELLOW}      --billing-mode PAY_PER_REQUEST \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
         echo ""
         return 0
     fi
@@ -606,7 +606,7 @@ deploy_sms_dynamodb_table() {
             --key-schema "AttributeName=$key_attr,KeyType=HASH" \
             --global-secondary-indexes '[{"IndexName":"phone-index","KeySchema":[{"AttributeName":"phone_number","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}}]' \
             --billing-mode PAY_PER_REQUEST \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --output text &>/dev/null
     else
         aws dynamodb create-table \
@@ -614,12 +614,12 @@ deploy_sms_dynamodb_table() {
             --attribute-definitions "AttributeName=$key_attr,AttributeType=$key_type" \
             --key-schema "AttributeName=$key_attr,KeyType=HASH" \
             --billing-mode PAY_PER_REQUEST \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --output text &>/dev/null
     fi
 
     # Wait for table to be active
-    aws dynamodb wait table-exists --table-name "$tbl_name" --region "$AWS_REGION" 2>/dev/null
+    aws dynamodb wait table-exists --table-name "$tbl_name" --region "$VOICE_REGION" 2>/dev/null
 }
 
 # =============================================================================
@@ -691,9 +691,9 @@ cleanup_sns_topic() {
 
     if [[ "$DRY_RUN" == "true" ]]; then
         echo -e "${CYAN}[DRY-RUN]${NC} Delete SNS topic: $topic_name"
-        echo -e "${YELLOW}  \$ aws sns list-subscriptions-by-topic --topic-arn \"$topic_arn\" --region \"$AWS_REGION\"${NC}"
-        echo -e "${YELLOW}  \$ aws sns unsubscribe --subscription-arn \"<sub_arn>\" --region \"$AWS_REGION\"${NC}"
-        echo -e "${YELLOW}  \$ aws sns delete-topic --topic-arn \"$topic_arn\" --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}  \$ aws sns list-subscriptions-by-topic --topic-arn \"$topic_arn\" --region \"$VOICE_REGION\"${NC}"
+        echo -e "${YELLOW}  \$ aws sns unsubscribe --subscription-arn \"<sub_arn>\" --region \"$VOICE_REGION\"${NC}"
+        echo -e "${YELLOW}  \$ aws sns delete-topic --topic-arn \"$topic_arn\" --region \"$VOICE_REGION\"${NC}"
         echo ""
         return 0
     fi
@@ -702,19 +702,19 @@ cleanup_sns_topic() {
     local subscriptions
     subscriptions=$(aws sns list-subscriptions-by-topic \
         --topic-arn "$topic_arn" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query 'Subscriptions[*].SubscriptionArn' \
         --output text 2>/dev/null)
 
     for sub_arn in $subscriptions; do
         if [[ -n "$sub_arn" && "$sub_arn" != "None" && "$sub_arn" != "PendingConfirmation" ]]; then
             log_debug "Deleting subscription: $sub_arn"
-            aws sns unsubscribe --subscription-arn "$sub_arn" --region "$AWS_REGION" 2>/dev/null || true
+            aws sns unsubscribe --subscription-arn "$sub_arn" --region "$VOICE_REGION" 2>/dev/null || true
         fi
     done
 
     # Delete the topic
-    aws sns delete-topic --topic-arn "$topic_arn" --region "$AWS_REGION" 2>/dev/null
+    aws sns delete-topic --topic-arn "$topic_arn" --region "$VOICE_REGION" 2>/dev/null
     log_info "SNS topic deleted: $topic_name"
 }
 
@@ -724,14 +724,14 @@ cleanup_sms_dynamodb_tables() {
 
     for base in "${SMS_DYNAMODB_TABLE_BASES[@]}"; do
         local full_table_name=$(table_name "$base")
-        if aws dynamodb describe-table --table-name "$full_table_name" --region "$AWS_REGION" &>/dev/null; then
+        if aws dynamodb describe-table --table-name "$full_table_name" --region "$VOICE_REGION" &>/dev/null; then
             if [[ "$DRY_RUN" == "true" ]]; then
                 echo -e "${CYAN}[DRY-RUN]${NC} Delete DynamoDB table: $full_table_name"
-                echo -e "${YELLOW}  \$ aws dynamodb delete-table --table-name \"$full_table_name\" --region \"$AWS_REGION\"${NC}"
+                echo -e "${YELLOW}  \$ aws dynamodb delete-table --table-name \"$full_table_name\" --region \"$VOICE_REGION\"${NC}"
                 echo ""
             else
                 log_info "Deleting table: $full_table_name"
-                aws dynamodb delete-table --table-name "$full_table_name" --region "$AWS_REGION" 2>/dev/null
+                aws dynamodb delete-table --table-name "$full_table_name" --region "$VOICE_REGION" 2>/dev/null
             fi
         fi
     done
@@ -772,9 +772,9 @@ validate_sms() {
     for entry in "${SMS_LAMBDA_FUNCTION_LIST[@]}"; do
         IFS=':' read -r base_name source_dir role_base timeout memory <<< "$entry"
         local func_name=$(sms_lambda_name "$base_name")
-        if aws lambda get-function --function-name "$func_name" --region "$AWS_REGION" &>/dev/null; then
+        if aws lambda get-function --function-name "$func_name" --region "$VOICE_REGION" &>/dev/null; then
             local state
-            state=$(aws lambda get-function --function-name "$func_name" --region "$AWS_REGION" \
+            state=$(aws lambda get-function --function-name "$func_name" --region "$VOICE_REGION" \
                 --query 'Configuration.State' --output text 2>/dev/null)
             if [[ "$state" == "Active" ]]; then
                 log_info "$func_name: Active"
@@ -799,7 +799,7 @@ validate_sms() {
         local sub_count
         sub_count=$(aws sns list-subscriptions-by-topic \
             --topic-arn "$topic_arn" \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --query 'length(Subscriptions)' \
             --output text 2>/dev/null)
         log_info "  Subscriptions: $sub_count"
@@ -814,7 +814,7 @@ validate_sms() {
     # Validate DynamoDB tables
     for base in "${SMS_DYNAMODB_TABLE_BASES[@]}"; do
         local full_table_name=$(table_name "$base")
-        if aws dynamodb describe-table --table-name "$full_table_name" --region "$AWS_REGION" &>/dev/null; then
+        if aws dynamodb describe-table --table-name "$full_table_name" --region "$VOICE_REGION" &>/dev/null; then
             log_info "Table $full_table_name: EXISTS"
         else
             log_error "Table $full_table_name: NOT FOUND"
@@ -874,7 +874,7 @@ send_test_sms() {
         echo -e "${YELLOW}  \$ aws pinpoint-sms-voice-v2 send-text-message \\\\${NC}"
         echo -e "${YELLOW}      --destination-phone-number \"$to_number\" \\\\${NC}"
         echo -e "${YELLOW}      --message-body \"$message\" \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
         echo ""
         return 0
     fi
@@ -882,7 +882,7 @@ send_test_sms() {
     aws pinpoint-sms-voice-v2 send-text-message \
         --destination-phone-number "$to_number" \
         --message-body "$message" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --output text
 
     if [[ $? -eq 0 ]]; then

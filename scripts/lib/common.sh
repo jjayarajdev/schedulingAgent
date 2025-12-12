@@ -18,8 +18,12 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_debug() { [[ "$DEBUG" == "true" ]] && echo -e "${CYAN}[DEBUG]${NC} $1"; }
 log_section() { echo -e "\n${BLUE}=== $1 ===${NC}"; }
 
-# AWS Configuration
-AWS_REGION="${AWS_REGION:-us-east-1}"
+# AWS Configuration - Multi-Region Setup
+# CORE_REGION: For main Lambdas, API Gateway, DynamoDB, Bedrock (us-east-2)
+# VOICE_REGION: For Connect, Lex, voice/SMS Lambdas (us-east-1)
+CORE_REGION="${CORE_REGION:-us-east-2}"
+VOICE_REGION="${VOICE_REGION:-us-east-1}"
+AWS_REGION="${AWS_REGION:-$CORE_REGION}"
 EXPECTED_ACCOUNT="772634497954"
 
 # =============================================================================
@@ -225,10 +229,15 @@ RESOURCE NAMING:
 
 ENVIRONMENT VARIABLES:
     AWS_PROFILE       AWS profile to use (default: pf-aws)
-    AWS_REGION        AWS region (default: us-east-1)
+    CORE_REGION       Region for core Lambdas/API (default: us-east-2)
+    VOICE_REGION      Region for Voice/SMS resources (default: us-east-1)
     RESOURCE_PREFIX   Resource prefix (default: pf-syn)
     ENVIRONMENT       Target environment (default: dev)
     DEBUG             Enable debug output (set to 'true')
+
+MULTI-REGION ARCHITECTURE:
+    Core (us-east-2): orchestrator, scheduling/information/chitchat-actions, API Gateway, DynamoDB
+    Voice (us-east-1): Connect, Lex, lex-fulfillment, sms-inbound, customer-lookup
 
 EOF
 }
@@ -275,7 +284,8 @@ print_banner() {
 EOF
     echo -e "${NC}"
     echo "Agent AI Scheduler Setup - AWS Resource Manager"
-    echo "Account: $EXPECTED_ACCOUNT | Region: $AWS_REGION"
+    echo "Account: $EXPECTED_ACCOUNT"
+    echo "Core Region: $CORE_REGION | Voice Region: $VOICE_REGION"
     echo "Prefix: $RESOURCE_PREFIX | Environment: $ENVIRONMENT"
     echo ""
 }

@@ -41,7 +41,8 @@ except ImportError:
 def get_credentials_from_secrets():
     """Get all credentials from Secrets Manager (bearer_token, client_id, user_id)"""
     try:
-        secrets_client = boto3.client('secretsmanager', region_name=os.getenv('AWS_REGION', 'us-east-1'))
+        # Secrets Manager is in CORE_REGION where credentials are stored
+        secrets_client = boto3.client('secretsmanager', region_name=CORE_REGION)
         response = secrets_client.get_secret_value(SecretId='projectforce/api/credentials')
         secret = json.loads(response['SecretString'])
 
@@ -77,9 +78,18 @@ LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
 logger = logging.getLogger()
 logger.setLevel(LOG_LEVEL)
 
-# Initialize AWS clients
-dynamodb = boto3.resource('dynamodb')
-lambda_client = boto3.client('lambda')
+# Multi-region configuration
+# VOICE_REGION (us-east-1): Where this Lambda runs - for Secrets Manager access
+# CORE_REGION (us-east-2): Where orchestrator, DynamoDB sessions, and Bedrock run
+VOICE_REGION = os.environ.get('AWS_REGION', 'us-east-1')
+CORE_REGION = os.environ.get('ORCHESTRATOR_REGION', 'us-east-2')
+DYNAMODB_REGION = os.environ.get('DYNAMODB_REGION', CORE_REGION)
+
+# Initialize AWS clients with appropriate regions
+# DynamoDB sessions table is in CORE_REGION
+dynamodb = boto3.resource('dynamodb', region_name=DYNAMODB_REGION)
+# Lambda client for orchestrator calls (cross-region to CORE_REGION)
+lambda_client = boto3.client('lambda', region_name=CORE_REGION)
 
 # Dynamic resource naming
 RESOURCE_PREFIX = os.environ.get('RESOURCE_PREFIX', 'pf')

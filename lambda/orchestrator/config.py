@@ -19,7 +19,8 @@ class Config:
 
     def __init__(self):
         # AWS Configuration
-        self.region = os.environ.get('REGION', os.environ.get('AWS_REGION', 'us-east-1'))
+        # Default to us-east-2 (CORE_REGION) where orchestrator and core services run
+        self.region = os.environ.get('REGION', os.environ.get('AWS_REGION', 'us-east-2'))
 
         # Redis/ElastiCache Configuration
         self.redis_endpoint = os.environ.get('REDIS_ENDPOINT', '')

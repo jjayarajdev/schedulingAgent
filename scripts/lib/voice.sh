@@ -101,7 +101,7 @@ get_lex_bot_id() {
     local bot_name="$1"
 
     aws lexv2-models list-bots \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query "botSummaries[?botName=='$bot_name'].botId" \
         --output text 2>/dev/null
 }
@@ -113,7 +113,7 @@ get_lex_bot_alias_id() {
 
     aws lexv2-models list-bot-aliases \
         --bot-id "$bot_id" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query "botAliasSummaries[?botAliasName=='$alias_name'].botAliasId" \
         --output text 2>/dev/null
 }
@@ -145,8 +145,8 @@ deploy_lex_bot() {
 
     if [[ "$DRY_RUN" == "true" ]]; then
         echo -e "${CYAN}[DRY-RUN]${NC} Update Lex bot configuration: $bot_name"
-        echo -e "${YELLOW}  \$ aws lexv2-models list-bot-aliases --bot-id \"$bot_id\" --region \"$AWS_REGION\"${NC}"
-        echo -e "${YELLOW}  \$ aws lexv2-models list-bot-versions --bot-id \"$bot_id\" --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}  \$ aws lexv2-models list-bot-aliases --bot-id \"$bot_id\" --region \"$VOICE_REGION\"${NC}"
+        echo -e "${YELLOW}  \$ aws lexv2-models list-bot-versions --bot-id \"$bot_id\" --region \"$VOICE_REGION\"${NC}"
         echo ""
         return 0
     fi
@@ -162,7 +162,7 @@ deploy_lex_bot() {
         local bot_version
         bot_version=$(aws lexv2-models list-bot-versions \
             --bot-id "$bot_id" \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --query 'botVersionSummaries[-1].botVersion' \
             --output text 2>/dev/null)
 
@@ -192,12 +192,12 @@ verify_lex_fulfillment() {
     lambda_arn="arn:aws:lambda:${AWS_REGION}:${EXPECTED_ACCOUNT}:function:${fulfillment_lambda}"
 
     # Check if Lambda exists
-    if aws lambda get-function --function-name "$fulfillment_lambda" --region "$AWS_REGION" &>/dev/null; then
+    if aws lambda get-function --function-name "$fulfillment_lambda" --region "$VOICE_REGION" &>/dev/null; then
         log_info "Fulfillment Lambda exists: $fulfillment_lambda"
 
         # Check Lambda permission for Lex
         local policy
-        policy=$(aws lambda get-policy --function-name "$fulfillment_lambda" --region "$AWS_REGION" 2>/dev/null || echo "")
+        policy=$(aws lambda get-policy --function-name "$fulfillment_lambda" --region "$VOICE_REGION" 2>/dev/null || echo "")
 
         if [[ -z "$policy" ]] || ! echo "$policy" | grep -q "lexv2"; then
             log_warn "Lambda may not have Lex invocation permission"
@@ -210,7 +210,7 @@ verify_lex_fulfillment() {
                     --action "lambda:InvokeFunction" \
                     --principal "lexv2.amazonaws.com" \
                     --source-arn "arn:aws:lex:${AWS_REGION}:${EXPECTED_ACCOUNT}:bot-alias/${bot_id}/*" \
-                    --region "$AWS_REGION" 2>/dev/null || true
+                    --region "$VOICE_REGION" 2>/dev/null || true
             fi
         else
             log_info "Lambda has Lex invocation permission"
@@ -235,7 +235,7 @@ build_lex_bot() {
         echo -e "${YELLOW}      --bot-id \"$bot_id\" \\\\${NC}"
         echo -e "${YELLOW}      --bot-version \"DRAFT\" \\\\${NC}"
         echo -e "${YELLOW}      --locale-id \"$LEX_BOT_LOCALE\" \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
         echo ""
         return 0
     fi
@@ -245,7 +245,7 @@ build_lex_bot() {
         --bot-id "$bot_id" \
         --bot-version "DRAFT" \
         --locale-id "$LEX_BOT_LOCALE" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --output text &>/dev/null
 
     # Wait for build to complete
@@ -259,7 +259,7 @@ build_lex_bot() {
             --bot-id "$bot_id" \
             --bot-version "DRAFT" \
             --locale-id "$LEX_BOT_LOCALE" \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --query 'botLocaleStatus' \
             --output text 2>/dev/null)
 
@@ -289,7 +289,7 @@ get_connect_instance_id() {
     local alias="$1"
 
     aws connect list-instances \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query "InstanceSummaryList[?InstanceAlias=='$alias'].Id" \
         --output text 2>/dev/null
 }
@@ -314,7 +314,7 @@ validate_connect_instance() {
     local instance_status
     instance_status=$(aws connect describe-instance \
         --instance-id "$instance_id" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query 'Instance.InstanceStatus' \
         --output text 2>/dev/null)
 
@@ -325,7 +325,7 @@ validate_connect_instance() {
     local lex_bots
     lex_bots=$(aws connect list-lex-bots \
         --instance-id "$instance_id" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query 'LexBots[*].Name' \
         --output text 2>/dev/null || echo "")
 
@@ -357,7 +357,7 @@ associate_lex_with_connect() {
         echo -e "${YELLOW}  \$ aws connect associate-bot \\\\${NC}"
         echo -e "${YELLOW}      --instance-id \"$instance_id\" \\\\${NC}"
         echo -e "${YELLOW}      --lex-v2-bot \"AliasArn=$alias_arn\" \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
         echo ""
         return 0
     fi
@@ -367,7 +367,7 @@ associate_lex_with_connect() {
     output=$(aws connect associate-bot \
         --instance-id "$instance_id" \
         --lex-v2-bot "AliasArn=$alias_arn" \
-        --region "$AWS_REGION" 2>&1)
+        --region "$VOICE_REGION" 2>&1)
 
     local result=$?
     if [[ $result -eq 0 ]]; then
@@ -378,7 +378,7 @@ associate_lex_with_connect() {
         existing=$(aws connect list-bots \
             --instance-id "$instance_id" \
             --lex-version "V2" \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --query "LexBots[?LexV2Bot.AliasArn=='$alias_arn']" \
             --output text 2>/dev/null)
 
@@ -417,7 +417,7 @@ deploy_voice_dynamodb_table() {
     local tbl_name="$1"
     local base_name="$2"
 
-    if aws dynamodb describe-table --table-name "$tbl_name" --region "$AWS_REGION" &>/dev/null; then
+    if aws dynamodb describe-table --table-name "$tbl_name" --region "$VOICE_REGION" &>/dev/null; then
         log_info "Table $tbl_name already exists - skipping"
         return 0
     fi
@@ -431,7 +431,7 @@ deploy_voice_dynamodb_table() {
         echo -e "${YELLOW}      --attribute-definitions AttributeName=$key_attr,AttributeType=S \\\\${NC}"
         echo -e "${YELLOW}      --key-schema AttributeName=$key_attr,KeyType=HASH \\\\${NC}"
         echo -e "${YELLOW}      --billing-mode PAY_PER_REQUEST \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
         echo ""
         return 0
     fi
@@ -446,7 +446,7 @@ deploy_voice_dynamodb_table() {
             --attribute-definitions AttributeName=phone_number,AttributeType=S \
             --key-schema AttributeName=phone_number,KeyType=HASH \
             --billing-mode PAY_PER_REQUEST \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --output text 2>&1)
     else
         # Default session-based schema
@@ -455,7 +455,7 @@ deploy_voice_dynamodb_table() {
             --attribute-definitions AttributeName=session_id,AttributeType=S \
             --key-schema AttributeName=session_id,KeyType=HASH \
             --billing-mode PAY_PER_REQUEST \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --output text 2>&1)
     fi
 
@@ -471,7 +471,7 @@ deploy_voice_dynamodb_table() {
     local waited=0
     while [[ $waited -lt $max_wait ]]; do
         local status
-        status=$(aws dynamodb describe-table --table-name "$tbl_name" --region "$AWS_REGION" \
+        status=$(aws dynamodb describe-table --table-name "$tbl_name" --region "$VOICE_REGION" \
             --query 'Table.TableStatus' --output text 2>/dev/null)
 
         if [[ "$status" == "ACTIVE" ]]; then
@@ -565,7 +565,7 @@ associate_lex_bot_with_connect_if_needed() {
     local associated_bots
     associated_bots=$(aws connect list-lex-bots \
         --instance-id "$instance_id" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --output json 2>/dev/null || echo "{}")
 
     if echo "$associated_bots" | grep -q "$bot_id"; then
@@ -614,9 +614,9 @@ cleanup_lex_bot() {
 
     if [[ "$DRY_RUN" == "true" ]]; then
         echo -e "${CYAN}[DRY-RUN]${NC} Delete Lex bot: $bot_name (ID: $bot_id)"
-        echo -e "${YELLOW}  \$ aws lexv2-models list-bot-aliases --bot-id \"$bot_id\" --region \"$AWS_REGION\"${NC}"
-        echo -e "${YELLOW}  \$ aws lexv2-models delete-bot-alias --bot-id \"$bot_id\" --bot-alias-id \"<alias_id>\" --region \"$AWS_REGION\"${NC}"
-        echo -e "${YELLOW}  \$ aws lexv2-models delete-bot --bot-id \"$bot_id\" --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}  \$ aws lexv2-models list-bot-aliases --bot-id \"$bot_id\" --region \"$VOICE_REGION\"${NC}"
+        echo -e "${YELLOW}  \$ aws lexv2-models delete-bot-alias --bot-id \"$bot_id\" --bot-alias-id \"<alias_id>\" --region \"$VOICE_REGION\"${NC}"
+        echo -e "${YELLOW}  \$ aws lexv2-models delete-bot --bot-id \"$bot_id\" --region \"$VOICE_REGION\"${NC}"
         echo ""
         return 0
     fi
@@ -627,7 +627,7 @@ cleanup_lex_bot() {
     local aliases
     aliases=$(aws lexv2-models list-bot-aliases \
         --bot-id "$bot_id" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query 'botAliasSummaries[*].botAliasId' \
         --output text 2>/dev/null)
 
@@ -637,7 +637,7 @@ cleanup_lex_bot() {
             aws lexv2-models delete-bot-alias \
                 --bot-id "$bot_id" \
                 --bot-alias-id "$alias_id" \
-                --region "$AWS_REGION" 2>/dev/null || true
+                --region "$VOICE_REGION" 2>/dev/null || true
         fi
     done
 
@@ -645,7 +645,7 @@ cleanup_lex_bot() {
     local versions
     versions=$(aws lexv2-models list-bot-versions \
         --bot-id "$bot_id" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query 'botVersionSummaries[?botVersion!=`DRAFT`].botVersion' \
         --output text 2>/dev/null)
 
@@ -655,14 +655,14 @@ cleanup_lex_bot() {
             aws lexv2-models delete-bot-version \
                 --bot-id "$bot_id" \
                 --bot-version "$version" \
-                --region "$AWS_REGION" 2>/dev/null || true
+                --region "$VOICE_REGION" 2>/dev/null || true
         fi
     done
 
     # Delete the bot
     aws lexv2-models delete-bot \
         --bot-id "$bot_id" \
-        --region "$AWS_REGION" 2>/dev/null
+        --region "$VOICE_REGION" 2>/dev/null
 
     log_info "Lex bot deleted: $bot_name"
     return 0
@@ -674,14 +674,14 @@ cleanup_voice_dynamodb_tables() {
 
     for base in "${VOICE_DYNAMODB_TABLE_BASES[@]}"; do
         local full_table_name=$(table_name "$base")
-        if aws dynamodb describe-table --table-name "$full_table_name" --region "$AWS_REGION" &>/dev/null; then
+        if aws dynamodb describe-table --table-name "$full_table_name" --region "$VOICE_REGION" &>/dev/null; then
             if [[ "$DRY_RUN" == "true" ]]; then
                 echo -e "${CYAN}[DRY-RUN]${NC} Delete DynamoDB table: $full_table_name"
-                echo -e "${YELLOW}  \$ aws dynamodb delete-table --table-name \"$full_table_name\" --region \"$AWS_REGION\"${NC}"
+                echo -e "${YELLOW}  \$ aws dynamodb delete-table --table-name \"$full_table_name\" --region \"$VOICE_REGION\"${NC}"
                 echo ""
             else
                 log_info "Deleting table: $full_table_name"
-                aws dynamodb delete-table --table-name "$full_table_name" --region "$AWS_REGION" 2>/dev/null
+                aws dynamodb delete-table --table-name "$full_table_name" --region "$VOICE_REGION" 2>/dev/null
             fi
         fi
     done
@@ -722,9 +722,9 @@ validate_voice() {
     for entry in "${VOICE_LAMBDA_FUNCTION_LIST[@]}"; do
         IFS=':' read -r base_name source_dir role_base timeout memory <<< "$entry"
         local func_name=$(voice_lambda_name "$base_name")
-        if aws lambda get-function --function-name "$func_name" --region "$AWS_REGION" &>/dev/null; then
+        if aws lambda get-function --function-name "$func_name" --region "$VOICE_REGION" &>/dev/null; then
             local state
-            state=$(aws lambda get-function --function-name "$func_name" --region "$AWS_REGION" \
+            state=$(aws lambda get-function --function-name "$func_name" --region "$VOICE_REGION" \
                 --query 'Configuration.State' --output text 2>/dev/null)
             if [[ "$state" == "Active" ]]; then
                 log_info "$func_name: Active"
@@ -763,7 +763,7 @@ validate_voice() {
     # Validate DynamoDB tables
     for base in "${VOICE_DYNAMODB_TABLE_BASES[@]}"; do
         local full_table_name=$(table_name "$base")
-        if aws dynamodb describe-table --table-name "$full_table_name" --region "$AWS_REGION" &>/dev/null; then
+        if aws dynamodb describe-table --table-name "$full_table_name" --region "$VOICE_REGION" &>/dev/null; then
             log_info "Table $full_table_name: EXISTS"
         else
             log_error "Table $full_table_name: NOT FOUND"
@@ -819,7 +819,7 @@ get_connect_phone_number_id() {
     local phone_number="$1"
 
     aws connect list-phone-numbers-v2 \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query "ListPhoneNumbersSummaryList[?PhoneNumber=='$phone_number'].PhoneNumberId" \
         --output text 2>/dev/null
 }
@@ -835,7 +835,7 @@ get_phone_number_contact_flow() {
     # We need to check via associate-phone-number-contact-flow
     aws connect describe-phone-number \
         --phone-number-id "$phone_number_id" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query 'ClaimedPhoneNumberSummary.TargetArn' \
         --output text 2>/dev/null
 }
@@ -858,7 +858,7 @@ associate_phone_number_with_contact_flow() {
         echo -e "${YELLOW}      --phone-number-id \"$phone_number_id\" \\\\${NC}" >&2
         echo -e "${YELLOW}      --instance-id \"$instance_id\" \\\\${NC}" >&2
         echo -e "${YELLOW}      --contact-flow-id \"$contact_flow_id\" \\\\${NC}" >&2
-        echo -e "${YELLOW}      --region \"$AWS_REGION\"${NC}" >&2
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}" >&2
         echo "" >&2
         return 0
     fi
@@ -868,7 +868,7 @@ associate_phone_number_with_contact_flow() {
         --phone-number-id "$phone_number_id" \
         --instance-id "$instance_id" \
         --contact-flow-id "$contact_flow_id" \
-        --region "$AWS_REGION" 2>&1)
+        --region "$VOICE_REGION" 2>&1)
 
     local result=$?
     if [[ $result -eq 0 ]]; then
@@ -917,7 +917,7 @@ configure_voice_phone_number() {
     local contact_flow_id
     contact_flow_id=$(aws connect list-contact-flows \
         --instance-id "$instance_id" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query "ContactFlowSummaryList[?Name=='$main_flow_name'].Id" \
         --output text 2>/dev/null)
 
@@ -931,7 +931,7 @@ configure_voice_phone_number() {
         flows=$(aws connect list-contact-flows \
             --instance-id "$instance_id" \
             --contact-flow-types "CONTACT_FLOW" \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --query "ContactFlowSummaryList[*].{Name:Name,Id:Id}" \
             --output json 2>/dev/null)
 
@@ -975,7 +975,7 @@ validate_voice_phone_number() {
     local target_arn
     target_arn=$(aws connect describe-phone-number \
         --phone-number-id "$phone_number_id" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query 'ClaimedPhoneNumberSummary.TargetArn' \
         --output text 2>/dev/null)
 
@@ -1037,10 +1037,10 @@ deploy_contact_flow() {
         echo -e "${YELLOW}      --name \"$flow_name\" \\\\${NC}"
         echo -e "${YELLOW}      --type \"CONTACT_FLOW\" \\\\${NC}"
         echo -e "${YELLOW}      --content \"<flow_content_from_json>\" \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
         echo ""
         echo -e "${YELLOW}  # OR update existing flow${NC}"
-        echo -e "${YELLOW}  \$ aws connect update-contact-flow-content --instance-id \"$instance_id\" --contact-flow-id \"<id>\" --content \"<content>\" --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}  \$ aws connect update-contact-flow-content --instance-id \"$instance_id\" --contact-flow-id \"<id>\" --content \"<content>\" --region \"$VOICE_REGION\"${NC}"
         echo ""
         return 0
     fi
@@ -1058,7 +1058,7 @@ deploy_contact_flow() {
     local existing_flow_id
     existing_flow_id=$(aws connect list-contact-flows \
         --instance-id "$instance_id" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query "ContactFlowSummaryList[?Name=='$flow_name'].Id" \
         --output text 2>/dev/null)
 
@@ -1070,7 +1070,7 @@ deploy_contact_flow() {
             --instance-id "$instance_id" \
             --contact-flow-id "$existing_flow_id" \
             --content "$flow_content" \
-            --region "$AWS_REGION" 2>/dev/null
+            --region "$VOICE_REGION" 2>/dev/null
 
         if [[ $? -eq 0 ]]; then
             log_info "Contact Flow updated: $flow_name"
@@ -1091,7 +1091,7 @@ deploy_contact_flow() {
             --type "CONTACT_FLOW" \
             --description "$description" \
             --content "$flow_content" \
-            --region "$AWS_REGION" 2>/dev/null
+            --region "$VOICE_REGION" 2>/dev/null
 
         if [[ $? -eq 0 ]]; then
             log_info "Contact Flow created: $flow_name"
@@ -1144,7 +1144,7 @@ export_contact_flow() {
     local flow_id
     flow_id=$(aws connect list-contact-flows \
         --instance-id "$instance_id" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query "ContactFlowSummaryList[?Name=='$flow_name'].Id" \
         --output text 2>/dev/null)
 
@@ -1157,7 +1157,7 @@ export_contact_flow() {
     aws connect describe-contact-flow \
         --instance-id "$instance_id" \
         --contact-flow-id "$flow_id" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --output json > "$output_file"
 
     log_info "Exported to: $output_file"
@@ -1183,7 +1183,7 @@ validate_contact_flows() {
         local flow_id
         flow_id=$(aws connect list-contact-flows \
             --instance-id "$instance_id" \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --query "ContactFlowSummaryList[?Name=='$flow_name'].Id" \
             --output text 2>/dev/null)
 
@@ -1232,7 +1232,7 @@ import_lex_bot() {
         echo -e "${YELLOW}      --import-id \"import-<timestamp>\" \\\\${NC}"
         echo -e "${YELLOW}      --resource-specification \"botImportSpecification={botName=$bot_name,roleArn=arn:aws:iam::${EXPECTED_ACCOUNT}:role/${lex_role},dataPrivacy={childDirected=false},idleSessionTTLInSeconds=300}\" \\\\${NC}"
         echo -e "${YELLOW}      --merge-strategy \"FailOnConflict\" \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$AWS_REGION\"${NC}"
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
         echo ""
         return 0
     fi
@@ -1257,7 +1257,7 @@ import_lex_bot() {
         --resource-specification "botImportSpecification={botName=$bot_name,roleArn=arn:aws:iam::${EXPECTED_ACCOUNT}:role/${lex_role},dataPrivacy={childDirected=false},idleSessionTTLInSeconds=300}" \
         --merge-strategy "FailOnConflict" \
         --file-password "" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query 'importId' \
         --output text 2>/dev/null || echo "")
 
@@ -1294,7 +1294,7 @@ export_lex_bot() {
     export_response=$(aws lexv2-models create-export \
         --resource-specification "botExportSpecification={botId=$bot_id,botVersion=DRAFT}" \
         --file-format LexJson \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --output json 2>/dev/null)
 
     local export_id
@@ -1316,7 +1316,7 @@ export_lex_bot() {
         local status
         status=$(aws lexv2-models describe-export \
             --export-id "$export_id" \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --query 'exportStatus' \
             --output text 2>/dev/null)
 
@@ -1325,7 +1325,7 @@ export_lex_bot() {
             local download_url
             download_url=$(aws lexv2-models describe-export \
                 --export-id "$export_id" \
-                --region "$AWS_REGION" \
+                --region "$VOICE_REGION" \
                 --query 'downloadUrl' \
                 --output text 2>/dev/null)
 
@@ -1410,7 +1410,7 @@ clone_lex_bot() {
     export_response=$(aws lexv2-models create-export \
         --resource-specification "botExportSpecification={botId=$source_bot_id,botVersion=DRAFT}" \
         --file-format LexJson \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --output json 2>&1)
 
     local export_result=$?
@@ -1438,14 +1438,14 @@ clone_lex_bot() {
         local status
         status=$(aws lexv2-models describe-export \
             --export-id "$export_id" \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --query 'exportStatus' \
             --output text 2>/dev/null)
 
         if [[ "$status" == "Completed" ]]; then
             download_url=$(aws lexv2-models describe-export \
                 --export-id "$export_id" \
-                --region "$AWS_REGION" \
+                --region "$VOICE_REGION" \
                 --query 'downloadUrl' \
                 --output text 2>/dev/null)
             break
@@ -1477,7 +1477,7 @@ clone_lex_bot() {
     log_info "Step 3: Creating upload URL..."
     local upload_response
     upload_response=$(aws lexv2-models create-upload-url \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --output json 2>/dev/null)
 
     local upload_url
@@ -1513,7 +1513,7 @@ clone_lex_bot() {
         --import-id "$import_id" \
         --resource-specification "botImportSpecification={botName=$target_bot_name,roleArn=arn:aws:iam::${EXPECTED_ACCOUNT}:role/$lex_role,dataPrivacy={childDirected=false},idleSessionTTLInSeconds=300}" \
         --merge-strategy "FailOnConflict" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --output json 2>/dev/null)
 
     if [[ -z "$import_response" ]]; then
@@ -1529,7 +1529,7 @@ clone_lex_bot() {
         local import_status
         import_status=$(aws lexv2-models describe-import \
             --import-id "$import_id" \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --query 'importStatus' \
             --output text 2>/dev/null)
 
@@ -1540,7 +1540,7 @@ clone_lex_bot() {
             local failure_reason
             failure_reason=$(aws lexv2-models describe-import \
                 --import-id "$import_id" \
-                --region "$AWS_REGION" \
+                --region "$VOICE_REGION" \
                 --query 'failureReasons' \
                 --output text 2>/dev/null)
             log_error "Import failed: $failure_reason"
@@ -1640,7 +1640,7 @@ create_lex_bot_alias() {
     local bot_version
     bot_version=$(aws lexv2-models list-bot-versions \
         --bot-id "$bot_id" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --query 'botVersionSummaries[?botVersion!=`DRAFT`].botVersion' \
         --output text 2>/dev/null | tail -1)
 
@@ -1651,7 +1651,7 @@ create_lex_bot_alias() {
         version_response=$(aws lexv2-models create-bot-version \
             --bot-id "$bot_id" \
             --bot-version-locale-specification '{"en_US":{"sourceBotVersion":"DRAFT"}}' \
-            --region "$AWS_REGION" \
+            --region "$VOICE_REGION" \
             --output json 2>/dev/null)
 
         bot_version=$(echo "$version_response" | jq -r '.botVersion')
@@ -1667,7 +1667,7 @@ create_lex_bot_alias() {
         --bot-id "$bot_id" \
         --bot-alias-name "$alias_name" \
         --bot-version "$bot_version" \
-        --region "$AWS_REGION" \
+        --region "$VOICE_REGION" \
         --output text &>/dev/null
 
     log_info "Bot alias created: $alias_name"
