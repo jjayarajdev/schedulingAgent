@@ -297,10 +297,10 @@ create_pinpoint_sns_role() {
     fi
 
     # Check if role exists
+    local role_exists=false
     if aws iam get-role --role-name "$role_name" &>/dev/null; then
         log_info "IAM role already exists: $role_name" >&2
-        echo "arn:aws:iam::${EXPECTED_ACCOUNT}:role/${role_name}"
-        return 0
+        role_exists=true
     fi
 
     # Trust policy for SMS Voice service
@@ -326,14 +326,18 @@ create_pinpoint_sns_role() {
 EOF
 )
 
-    # Create the role
-    aws iam create-role \
-        --role-name "$role_name" \
-        --assume-role-policy-document "$trust_policy" \
-        --description "Role for Pinpoint SMS two-way messaging to SNS - ${RESOURCE_PREFIX}-${ENVIRONMENT}" \
-        --output text &>/dev/null
+    # Create the role if it doesn't exist
+    if [[ "$role_exists" == "false" ]]; then
+        aws iam create-role \
+            --role-name "$role_name" \
+            --assume-role-policy-document "$trust_policy" \
+            --description "Role for Pinpoint SMS two-way messaging to SNS - ${RESOURCE_PREFIX}-${ENVIRONMENT}" \
+            --output text &>/dev/null
+        log_info "IAM role created: $role_name" >&2
+    fi
 
     # Policy to allow publishing to SNS topic
+    # Always update the policy to ensure it points to the correct topic ARN
     local sns_policy
     sns_policy=$(cat <<EOF
 {
@@ -351,16 +355,18 @@ EOF
 EOF
 )
 
-    # Attach the policy
+    # Attach/update the policy
     aws iam put-role-policy \
         --role-name "$role_name" \
         --policy-name "sns-publish-policy" \
         --policy-document "$sns_policy" &>/dev/null
 
-    log_info "IAM role created: $role_name" >&2
+    log_info "SNS publish policy attached to role: $role_name" >&2
 
-    # Wait for role to propagate
-    sleep 5
+    # Wait for role/policy to propagate
+    if [[ "$role_exists" == "false" ]]; then
+        sleep 5
+    fi
 
     echo "arn:aws:iam::${EXPECTED_ACCOUNT}:role/${role_name}"
 }
