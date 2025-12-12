@@ -110,6 +110,7 @@ get_lambda_env_vars() {
             ;;
         "sms-inbound")
             # Voice region Lambda - needs cross-region ARN to invoke orchestrator
+            # SMS DynamoDB tables are in VOICE_REGION (same as Lambda)
             env_vars="ENVIRONMENT=${ENVIRONMENT}"
             env_vars="${env_vars},ORCHESTRATOR_LAMBDA=${orchestrator_arn}"
             env_vars="${env_vars},ORCHESTRATOR_REGION=${CORE_REGION}"
@@ -118,7 +119,7 @@ get_lambda_env_vars() {
             env_vars="${env_vars},CONSENT_TABLE=$(table_name 'sms-consent')"
             env_vars="${env_vars},MESSAGES_TABLE=$(table_name 'sms-messages')"
             env_vars="${env_vars},OPT_OUT_TRACKING_TABLE=$(table_name 'opt-out-tracking')"
-            env_vars="${env_vars},DYNAMODB_REGION=${CORE_REGION}"
+            env_vars="${env_vars},DYNAMODB_REGION=${VOICE_REGION}"
             env_vars="${env_vars},ORIGINATION_NUMBER=${SMS_PHONE_NUMBER:-+18786789053}"
             env_vars="${env_vars},PF_SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
             env_vars="${env_vars},SECRETS_REGION=${SECRETS_REGION:-us-east-2}"

@@ -18,10 +18,22 @@ from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+# Environment-specific API URLs
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
+API_BASE_URLS = {
+    "dev": "https://api-cx-portal.dev.projectsforce.com",
+    "staging": "https://api-cx-portal.staging.projectsforce.com",
+    "prod": "https://api-cx-portal.projectsforce.com"
+}
+
+def get_api_base_url():
+    """Get the API base URL for the current environment"""
+    return API_BASE_URLS.get(ENVIRONMENT, API_BASE_URLS["dev"])
+
 # Configuration
 PF_AUTH_API = os.environ.get(
     'PF_AUTH_API',
-    'https://api-cx-portal.dev.projectsforce.com/authentication/phone-call-login'
+    f'{get_api_base_url()}/authentication/phone-call-login'
 )
 CREDENTIALS_SECRET = os.environ.get('PF_SECRET_NAME', 'projectforce/api/credentials')
 AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')

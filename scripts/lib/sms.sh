@@ -75,7 +75,8 @@ deploy_sms_lambda() {
         IFS=':' read -r base_name source_dir role_base timeout memory <<< "$entry"
         local func_name=$(sms_lambda_name "$base_name")
         local full_role_name=$(role_name "$role_base")
-        deploy_lambda "$func_name" "$source_dir" "$full_role_name" "$timeout" "$memory" "$role_base" || ((failed++))
+        # SMS Lambda deploys to VOICE_REGION (us-east-1)
+        deploy_lambda "$func_name" "$source_dir" "$full_role_name" "$timeout" "$memory" "$role_base" "$VOICE_REGION" || ((failed++))
     done
 
     if [[ $failed -gt 0 ]]; then
@@ -670,7 +671,8 @@ cleanup_sms_lambda() {
         IFS=':' read -r base_name source_dir role_base timeout memory <<< "$entry"
         local func_name=$(sms_lambda_name "$base_name")
         local full_role_name=$(role_name "$role_base")
-        cleanup_lambda "$func_name" "$full_role_name"
+        # SMS Lambda is in VOICE_REGION (us-east-1)
+        cleanup_lambda "$func_name" "$full_role_name" "$VOICE_REGION"
     done
 
     log_info "SMS Lambda cleaned up"

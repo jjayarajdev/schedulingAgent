@@ -13,6 +13,18 @@ from typing import Optional, Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Environment-specific API URLs
+ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
+API_BASE_URLS = {
+    "dev": "https://api-cx-portal.dev.projectsforce.com",
+    "staging": "https://api-cx-portal.staging.projectsforce.com",
+    "prod": "https://api-cx-portal.projectsforce.com"
+}
+
+def get_api_base_url():
+    """Get the API base URL for the current environment"""
+    return API_BASE_URLS.get(ENVIRONMENT, API_BASE_URLS["dev"])
+
 class TokenManager:
     """
     Manages Bearer tokens for ProjectForce API with automatic refresh and caching.
@@ -142,7 +154,7 @@ class TokenManager:
         """
         auth_url = os.getenv(
             'AUTH_API_URL',
-            'https://api-cx-portal.dev.projectsforce.com/authentication/login'
+            f'{get_api_base_url()}/authentication/login'
         )
         identifier = os.getenv('AUTH_IDENTIFIER', 'projectforce-validation')
 
@@ -189,7 +201,7 @@ class TokenManager:
         """
         refresh_url = os.getenv(
             'AUTH_API_URL',
-            'https://api-cx-portal.dev.projectsforce.com/authentication/refresh'
+            f'{get_api_base_url()}/authentication/refresh'
         )
 
         payload = {'refresh_token': refresh_token}

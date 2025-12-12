@@ -80,7 +80,8 @@ deploy_voice_lambdas() {
         IFS=':' read -r base_name source_dir role_base timeout memory <<< "$entry"
         local func_name=$(voice_lambda_name "$base_name")
         local full_role_name=$(role_name "$role_base")
-        deploy_lambda "$func_name" "$source_dir" "$full_role_name" "$timeout" "$memory" "$role_base" || ((failed++))
+        # Voice Lambda deploys to VOICE_REGION (us-east-1)
+        deploy_lambda "$func_name" "$source_dir" "$full_role_name" "$timeout" "$memory" "$role_base" "$VOICE_REGION" || ((failed++))
     done
 
     if [[ $failed -gt 0 ]]; then
@@ -189,7 +190,7 @@ verify_lex_fulfillment() {
 
     # Get the fulfillment Lambda ARN
     local lambda_arn
-    lambda_arn="arn:aws:lambda:${AWS_REGION}:${EXPECTED_ACCOUNT}:function:${fulfillment_lambda}"
+    lambda_arn="arn:aws:lambda:${VOICE_REGION}:${EXPECTED_ACCOUNT}:function:${fulfillment_lambda}"
 
     # Check if Lambda exists
     if aws lambda get-function --function-name "$fulfillment_lambda" --region "$VOICE_REGION" &>/dev/null; then
@@ -209,7 +210,7 @@ verify_lex_fulfillment() {
                     --statement-id "lex-invoke-${bot_id}" \
                     --action "lambda:InvokeFunction" \
                     --principal "lexv2.amazonaws.com" \
-                    --source-arn "arn:aws:lex:${AWS_REGION}:${EXPECTED_ACCOUNT}:bot-alias/${bot_id}/*" \
+                    --source-arn "arn:aws:lex:${VOICE_REGION}:${EXPECTED_ACCOUNT}:bot-alias/${bot_id}/*" \
                     --region "$VOICE_REGION" 2>/dev/null || true
             fi
         else
@@ -345,7 +346,7 @@ associate_lex_with_connect() {
     local alias_id="$3"
 
     local bot_name=$(lex_bot_name)
-    local alias_arn="arn:aws:lex:${AWS_REGION}:${EXPECTED_ACCOUNT}:bot-alias/${bot_id}/${alias_id}"
+    local alias_arn="arn:aws:lex:${VOICE_REGION}:${EXPECTED_ACCOUNT}:bot-alias/${bot_id}/${alias_id}"
 
     log_info "Associating Lex V2 bot with Connect..."
     log_info "  Bot: $bot_name (ID: $bot_id)"
@@ -593,7 +594,8 @@ cleanup_voice_lambdas() {
         IFS=':' read -r base_name source_dir role_base timeout memory <<< "$entry"
         local func_name=$(voice_lambda_name "$base_name")
         local full_role_name=$(role_name "$role_base")
-        cleanup_lambda "$func_name" "$full_role_name"
+        # Voice Lambda is in VOICE_REGION (us-east-1)
+        cleanup_lambda "$func_name" "$full_role_name" "$VOICE_REGION"
     done
 
     log_info "Voice Lambda functions cleaned up"

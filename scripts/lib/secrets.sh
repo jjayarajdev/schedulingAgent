@@ -59,12 +59,14 @@ deploy_secrets() {
         log_warn "✗ Shared secret not found: $SHARED_SECRET_NAME"
         log_warn "  This secret should be created manually with API credentials"
         log_info ""
-        log_info "To create the secret, run:"
-        log_info "  aws secretsmanager create-secret \\"
-        log_info "    --name '$SHARED_SECRET_NAME' \\"
-        log_info "    --region '${SECRETS_REGION:-us-east-1}' \\"
-        log_info "    --description 'ProjectForce API credentials' \\"
-        log_info "    --secret-string '{\"bearer_token\":\"\",\"refresh_token\":\"\",\"client_id\":\"\"}'"
+        log_info "To create the secret, copy and run this command:"
+        echo ""
+        echo "aws secretsmanager create-secret \\"
+        echo "  --name '$SHARED_SECRET_NAME' \\"
+        echo "  --region '${SECRETS_REGION:-us-east-2}' \\"
+        echo "  --description 'ProjectForce API credentials' \\"
+        echo "  --secret-string '{\"bearer_token\":\"\",\"refresh_token\":\"\",\"client_id\":\"\"}'"
+        echo ""
 
         if [[ "$DRY_RUN" != "true" ]]; then
             return 1
