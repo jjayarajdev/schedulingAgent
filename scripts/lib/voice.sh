@@ -274,8 +274,8 @@ deploy_lex_bot() {
         log_warn "Bot alias $LEX_BOT_ALIAS not found"
     fi
 
-    # Verify fulfillment Lambda is connected
-    verify_lex_fulfillment "$bot_id"
+    # Configure the bot alias with Lambda code hook (critical for voice calls)
+    configure_lex_bot_alias_lambda "$bot_id" "$LEX_BOT_ALIAS"
 
     log_info "Lex bot configuration verified"
     return 0
@@ -2045,5 +2045,148 @@ create_lex_bot_alias() {
         --output text &>/dev/null
 
     log_info "Bot alias created: $alias_name"
+
+    # Configure Lambda code hook for the alias
+    configure_lex_bot_alias_lambda "$bot_id" "$alias_name"
+
+    return 0
+}
+
+# =============================================================================
+# Configure Lex Bot Alias with Lambda Code Hook
+# =============================================================================
+# This is CRITICAL for voice calls to work - without the code hook configuration,
+# the Lex bot will not invoke the fulfillment Lambda and calls will disconnect
+# immediately after the welcome message.
+# =============================================================================
+
+# Configure Lex bot alias with Lambda code hook specification
+# Args: bot_id, alias_name (default: $LEX_BOT_ALIAS)
+configure_lex_bot_alias_lambda() {
+    local bot_id="$1"
+    local alias_name="${2:-$LEX_BOT_ALIAS}"
+    local fulfillment_lambda=$(voice_lambda_name "lex-fulfillment")
+    local lambda_arn="arn:aws:lambda:${VOICE_REGION}:${EXPECTED_ACCOUNT}:function:${fulfillment_lambda}"
+
+    log_info "Configuring Lex bot alias Lambda code hook..."
+    log_info "  Bot ID: $bot_id"
+    log_info "  Alias: $alias_name"
+    log_info "  Lambda: $fulfillment_lambda"
+
+    # Get the alias ID
+    local alias_id
+    alias_id=$(get_lex_bot_alias_id "$bot_id" "$alias_name")
+
+    if [[ -z "$alias_id" || "$alias_id" == "None" ]]; then
+        log_error "Bot alias not found: $alias_name"
+        return 1
+    fi
+
+    log_info "  Alias ID: $alias_id"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${CYAN}[DRY-RUN]${NC} Configure Lex bot alias Lambda code hook" >&2
+        echo -e "${YELLOW}  \$ aws lexv2-models update-bot-alias \\\\${NC}" >&2
+        echo -e "${YELLOW}      --bot-id \"$bot_id\" \\\\${NC}" >&2
+        echo -e "${YELLOW}      --bot-alias-id \"$alias_id\" \\\\${NC}" >&2
+        echo -e "${YELLOW}      --bot-alias-name \"$alias_name\" \\\\${NC}" >&2
+        echo -e "${YELLOW}      --bot-alias-locale-settings '{\"${LEX_BOT_LOCALE}\":{\"enabled\":true,\"codeHookSpecification\":{\"lambdaCodeHook\":{\"lambdaARN\":\"$lambda_arn\",\"codeHookInterfaceVersion\":\"1.0\"}}}}' \\\\${NC}" >&2
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}" >&2
+        echo "" >&2
+        return 0
+    fi
+
+    # Check if Lambda exists
+    if ! aws lambda get-function --function-name "$fulfillment_lambda" --region "$VOICE_REGION" &>/dev/null; then
+        log_error "Fulfillment Lambda not found: $fulfillment_lambda"
+        log_info "Deploy voice Lambdas first, then configure the bot alias"
+        return 1
+    fi
+
+    # Build the locale settings JSON with code hook specification
+    local locale_settings=$(cat <<EOF
+{
+    "${LEX_BOT_LOCALE}": {
+        "enabled": true,
+        "codeHookSpecification": {
+            "lambdaCodeHook": {
+                "lambdaARN": "${lambda_arn}",
+                "codeHookInterfaceVersion": "1.0"
+            }
+        }
+    }
+}
+EOF
+)
+
+    # Update the bot alias with Lambda code hook
+    local output
+    output=$(aws lexv2-models update-bot-alias \
+        --bot-id "$bot_id" \
+        --bot-alias-id "$alias_id" \
+        --bot-alias-name "$alias_name" \
+        --bot-alias-locale-settings "$locale_settings" \
+        --region "$VOICE_REGION" 2>&1)
+
+    local result=$?
+    if [[ $result -eq 0 ]]; then
+        log_info "Bot alias Lambda code hook configured successfully"
+    else
+        log_error "Failed to configure bot alias Lambda code hook: $output"
+        return 1
+    fi
+
+    # Add Lambda permission for Lex to invoke the function
+    add_lex_lambda_permission "$bot_id" "$alias_id" "$fulfillment_lambda"
+
+    return 0
+}
+
+# Add Lambda permission for Lex bot alias to invoke the function
+# Args: bot_id, alias_id, lambda_name
+add_lex_lambda_permission() {
+    local bot_id="$1"
+    local alias_id="$2"
+    local lambda_name="$3"
+    local statement_id="lex-invoke-${alias_id}"
+    local source_arn="arn:aws:lex:${VOICE_REGION}:${EXPECTED_ACCOUNT}:bot-alias/${bot_id}/${alias_id}"
+
+    log_info "Adding Lambda permission for Lex invocation..."
+    log_info "  Statement ID: $statement_id"
+    log_info "  Source ARN: $source_arn"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${CYAN}[DRY-RUN]${NC} Add Lambda permission for Lex" >&2
+        echo -e "${YELLOW}  \$ aws lambda add-permission \\\\${NC}" >&2
+        echo -e "${YELLOW}      --function-name \"$lambda_name\" \\\\${NC}" >&2
+        echo -e "${YELLOW}      --statement-id \"$statement_id\" \\\\${NC}" >&2
+        echo -e "${YELLOW}      --action \"lambda:InvokeFunction\" \\\\${NC}" >&2
+        echo -e "${YELLOW}      --principal \"lexv2.amazonaws.com\" \\\\${NC}" >&2
+        echo -e "${YELLOW}      --source-arn \"$source_arn\" \\\\${NC}" >&2
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}" >&2
+        echo "" >&2
+        return 0
+    fi
+
+    # Try to add the permission (may fail if it already exists)
+    local output
+    output=$(aws lambda add-permission \
+        --function-name "$lambda_name" \
+        --statement-id "$statement_id" \
+        --action "lambda:InvokeFunction" \
+        --principal "lexv2.amazonaws.com" \
+        --source-arn "$source_arn" \
+        --region "$VOICE_REGION" 2>&1)
+
+    local result=$?
+    if [[ $result -eq 0 ]]; then
+        log_info "Lambda permission added successfully"
+    elif echo "$output" | grep -q "ResourceConflictException\|already exists"; then
+        log_info "Lambda permission already exists"
+    else
+        log_warn "Could not add Lambda permission: $output"
+        log_info "This may already exist or may need manual configuration"
+    fi
+
     return 0
 }
