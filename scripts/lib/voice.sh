@@ -617,6 +617,10 @@ deploy_voice() {
     # Deploy Contact Flows
     deploy_contact_flows || ((failed++))
 
+    # Update Contact Flows to use the correct Lex bot ARN
+    # This is CRITICAL - ensures the Contact Flow references the correct environment's Lex bot
+    update_all_contact_flows_lex_bot || log_warn "Could not update Contact Flow Lex bot references"
+
     # Configure voice phone number routing
     configure_voice_phone_number || log_warn "Could not configure phone number routing"
 
@@ -1570,6 +1574,163 @@ validate_contact_flows() {
     done
 
     return $failed
+}
+
+# =============================================================================
+# Contact Flow Lex Bot Configuration
+# =============================================================================
+# This is CRITICAL: Contact Flows must reference the correct Lex bot ARN.
+# If the Contact Flow references the wrong bot (e.g., dev instead of prod),
+# the voice calls will fail or invoke the wrong fulfillment Lambda.
+# =============================================================================
+
+# Update Contact Flow to use the correct Lex bot ARN
+# This function finds all Lex bot references in a Contact Flow and updates them
+# to use the current environment's Lex bot.
+# Args: instance_id, contact_flow_id
+update_contact_flow_lex_bot() {
+    local instance_id="$1"
+    local contact_flow_id="$2"
+
+    local bot_name=$(lex_bot_name)
+    local bot_id
+    bot_id=$(get_lex_bot_id "$bot_name")
+
+    if [[ -z "$bot_id" || "$bot_id" == "None" ]]; then
+        log_error "Cannot update Contact Flow - Lex bot not found: $bot_name"
+        return 1
+    fi
+
+    local alias_id
+    alias_id=$(get_lex_bot_alias_id "$bot_id" "$LEX_BOT_ALIAS")
+
+    if [[ -z "$alias_id" || "$alias_id" == "None" ]]; then
+        log_error "Cannot update Contact Flow - Lex bot alias not found: $LEX_BOT_ALIAS"
+        return 1
+    fi
+
+    local target_lex_arn="arn:aws:lex:${VOICE_REGION}:${EXPECTED_ACCOUNT}:bot-alias/${bot_id}/${alias_id}"
+
+    log_info "Updating Contact Flow Lex bot reference..."
+    log_info "  Target Lex ARN: $target_lex_arn"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${CYAN}[DRY-RUN]${NC} Update Contact Flow Lex bot ARN" >&2
+        echo -e "${YELLOW}  Contact Flow ID: $contact_flow_id${NC}" >&2
+        echo -e "${YELLOW}  Target Lex ARN: $target_lex_arn${NC}" >&2
+        echo "" >&2
+        return 0
+    fi
+
+    # Get current Contact Flow content
+    local flow_content
+    flow_content=$(aws connect describe-contact-flow \
+        --instance-id "$instance_id" \
+        --contact-flow-id "$contact_flow_id" \
+        --region "$VOICE_REGION" \
+        --query 'ContactFlow.Content' \
+        --output text 2>/dev/null)
+
+    if [[ -z "$flow_content" ]]; then
+        log_error "Failed to get Contact Flow content"
+        return 1
+    fi
+
+    # Check if Contact Flow has any Lex bot references
+    if ! echo "$flow_content" | grep -q "bot-alias"; then
+        log_info "Contact Flow has no Lex bot references - skipping"
+        return 0
+    fi
+
+    # Extract current Lex ARN(s) from the flow
+    local current_arns
+    current_arns=$(echo "$flow_content" | grep -o 'arn:aws:lex:[^"]*bot-alias/[^"]*' | sort -u)
+
+    if [[ -z "$current_arns" ]]; then
+        log_info "No Lex bot ARNs found in Contact Flow"
+        return 0
+    fi
+
+    log_info "Current Lex ARN(s) in Contact Flow:"
+    echo "$current_arns" | while read -r arn; do
+        log_info "  - $arn"
+    done
+
+    # Check if already using the correct ARN
+    if echo "$current_arns" | grep -q "$target_lex_arn"; then
+        log_info "Contact Flow already using correct Lex bot"
+        return 0
+    fi
+
+    # Update all Lex bot ARNs to the target ARN
+    # This handles different bot IDs (e.g., MCMSOW2OXJ -> 8WGHCIZS8C)
+    local updated_content="$flow_content"
+
+    # Replace any bot-alias ARN with the target ARN
+    # Pattern: arn:aws:lex:REGION:ACCOUNT:bot-alias/BOT_ID/ALIAS_ID
+    updated_content=$(echo "$updated_content" | sed -E "s|arn:aws:lex:[^:]+:[0-9]+:bot-alias/[A-Z0-9]+/[A-Z0-9]+|${target_lex_arn}|g")
+
+    # Also update the metadata bot name references
+    updated_content=$(echo "$updated_content" | sed "s/pf-scheduling-assistant-dev/${bot_name}/g")
+    updated_content=$(echo "$updated_content" | sed "s/pf-syn-scheduling-assistant-dev/${bot_name}/g")
+
+    # Apply the update
+    local output
+    output=$(aws connect update-contact-flow-content \
+        --instance-id "$instance_id" \
+        --contact-flow-id "$contact_flow_id" \
+        --content "$updated_content" \
+        --region "$VOICE_REGION" 2>&1)
+
+    local result=$?
+    if [[ $result -eq 0 ]]; then
+        log_info "Contact Flow updated to use Lex bot: $bot_name"
+    else
+        log_error "Failed to update Contact Flow: $output"
+        return 1
+    fi
+
+    return 0
+}
+
+# Update all Contact Flows to use the correct Lex bot
+update_all_contact_flows_lex_bot() {
+    log_section "Updating Contact Flows with Correct Lex Bot"
+
+    local instance_alias=$(connect_instance_alias)
+    local instance_id
+    instance_id=$(get_connect_instance_id "$instance_alias")
+
+    if [[ -z "$instance_id" || "$instance_id" == "None" ]]; then
+        log_error "Connect instance not found: $instance_alias"
+        return 1
+    fi
+
+    local failed=0
+    for base in "${CONTACT_FLOW_BASES[@]}"; do
+        local flow_name=$(contact_flow_name "$base")
+        local flow_id
+        flow_id=$(aws connect list-contact-flows \
+            --instance-id "$instance_id" \
+            --region "$VOICE_REGION" \
+            --query "ContactFlowSummaryList[?Name=='$flow_name'].Id" \
+            --output text 2>/dev/null)
+
+        if [[ -n "$flow_id" && "$flow_id" != "None" ]]; then
+            log_info "Checking Contact Flow: $flow_name"
+            update_contact_flow_lex_bot "$instance_id" "$flow_id" || ((failed++))
+        else
+            log_warn "Contact Flow not found: $flow_name"
+        fi
+    done
+
+    if [[ $failed -gt 0 ]]; then
+        log_error "Failed to update $failed Contact Flow(s)"
+        return 1
+    fi
+
+    log_info "All Contact Flows updated successfully"
+    return 0
 }
 
 # =============================================================================
