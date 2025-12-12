@@ -25,13 +25,15 @@ secret_name() {
 get_secret_arn() {
     local secret_id="$1"
     aws secretsmanager describe-secret --secret-id "$secret_id" \
+        --region "${SECRETS_REGION:-us-east-2}" \
         --query 'ARN' --output text 2>/dev/null
 }
 
 # Check if secret exists
 secret_exists() {
     local secret_id="$1"
-    aws secretsmanager describe-secret --secret-id "$secret_id" &>/dev/null
+    aws secretsmanager describe-secret --secret-id "$secret_id" \
+        --region "${SECRETS_REGION:-us-east-2}" &>/dev/null
 }
 
 # =============================================================================
@@ -41,6 +43,7 @@ secret_exists() {
 # Validate or create secrets
 deploy_secrets() {
     log_section "Validating Secrets Manager"
+    log_info "Secrets region: ${SECRETS_REGION:-us-east-1}"
 
     # Check if shared secret exists
     if secret_exists "$SHARED_SECRET_NAME"; then
@@ -59,6 +62,7 @@ deploy_secrets() {
         log_info "To create the secret, run:"
         log_info "  aws secretsmanager create-secret \\"
         log_info "    --name '$SHARED_SECRET_NAME' \\"
+        log_info "    --region '${SECRETS_REGION:-us-east-1}' \\"
         log_info "    --description 'ProjectForce API credentials' \\"
         log_info "    --secret-string '{\"bearer_token\":\"\",\"refresh_token\":\"\",\"client_id\":\"\"}'"
 
@@ -79,6 +83,7 @@ validate_secret_keys() {
     # Get secret value and check keys
     local secret_json
     secret_json=$(aws secretsmanager get-secret-value --secret-id "$secret_id" \
+        --region "${SECRETS_REGION:-us-east-2}" \
         --query 'SecretString' --output text 2>/dev/null)
 
     if [[ -z "$secret_json" ]]; then

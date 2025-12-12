@@ -68,6 +68,7 @@ get_lambda_env_vars() {
             env_vars="${env_vars},DEFAULT_CLIENT_ID=09PF05VD"
             env_vars="${env_vars},DYNAMODB_TABLE=$(table_name 'sessions')"
             env_vars="${env_vars},SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
+            env_vars="${env_vars},SECRETS_REGION=${SECRETS_REGION:-us-east-2}"
             env_vars="${env_vars},REGION=${CORE_REGION}"
             env_vars="${env_vars},AWS_REGION=${CORE_REGION}"
             ;;
@@ -79,6 +80,7 @@ get_lambda_env_vars() {
             env_vars="${env_vars},DYNAMODB_TABLE=$(table_name 'project-notes')"
             env_vars="${env_vars},RESOURCE_PREFIX=${RESOURCE_PREFIX}"
             env_vars="${env_vars},SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
+            env_vars="${env_vars},SECRETS_REGION=${SECRETS_REGION:-us-east-2}"
             env_vars="${env_vars},REGION=${CORE_REGION}"
             env_vars="${env_vars},AWS_REGION=${CORE_REGION}"
             ;;
@@ -89,6 +91,7 @@ get_lambda_env_vars() {
             env_vars="${env_vars},ORCHESTRATOR_REGION=${CORE_REGION}"
             env_vars="${env_vars},DYNAMODB_TABLE=$(table_name 'sessions')"
             env_vars="${env_vars},DYNAMODB_REGION=${CORE_REGION}"
+            env_vars="${env_vars},SECRETS_REGION=${SECRETS_REGION:-us-east-2}"
             env_vars="${env_vars},REGION=${VOICE_REGION}"
             env_vars="${env_vars},AWS_REGION=${VOICE_REGION}"
             ;;
@@ -123,6 +126,7 @@ get_lambda_env_vars() {
             env_vars="${env_vars},DYNAMODB_REGION=${CORE_REGION}"
             env_vars="${env_vars},ORIGINATION_NUMBER=${SMS_PHONE_NUMBER:-+18786789053}"
             env_vars="${env_vars},PF_SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
+            env_vars="${env_vars},SECRETS_REGION=${SECRETS_REGION:-us-east-2}"
             env_vars="${env_vars},AWS_REGION_NAME=${VOICE_REGION}"
             env_vars="${env_vars},REGION=${VOICE_REGION}"
             env_vars="${env_vars},AWS_REGION=${VOICE_REGION}"

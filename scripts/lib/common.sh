@@ -21,8 +21,10 @@ log_section() { echo -e "\n${BLUE}=== $1 ===${NC}"; }
 # AWS Configuration - Multi-Region Setup
 # CORE_REGION: For main Lambdas, API Gateway, DynamoDB, Bedrock (us-east-2)
 # VOICE_REGION: For Connect, Lex, voice/SMS Lambdas (us-east-1)
+# SECRETS_REGION: For Secrets Manager (us-east-2 with core services)
 CORE_REGION="${CORE_REGION:-us-east-2}"
 VOICE_REGION="${VOICE_REGION:-us-east-1}"
+SECRETS_REGION="${SECRETS_REGION:-us-east-2}"
 AWS_REGION="${AWS_REGION:-$CORE_REGION}"
 EXPECTED_ACCOUNT="772634497954"
 
