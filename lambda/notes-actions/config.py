@@ -21,6 +21,7 @@ except ImportError:
 # Core Configuration
 USE_MOCK_API = os.getenv("USE_MOCK_API", "true").lower() == "true"
 ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
+RESOURCE_PREFIX = os.getenv("RESOURCE_PREFIX", "pf-syn")
 
 # Real ProjectForce API endpoints (CX Portal API)
 API_BASE_URLS = {
@@ -38,7 +39,7 @@ BEARER_TOKEN = os.getenv("BEARER_TOKEN", "")
 DEFAULT_CLIENT_ID = os.getenv("DEFAULT_CLIENT_ID", "09PF05VD")
 
 # DynamoDB Configuration (for storing notes if no API available)
-DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", "scheduling-agent-notes-dev")
+DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", f"{RESOURCE_PREFIX}-project-notes-{ENVIRONMENT}")
 
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
