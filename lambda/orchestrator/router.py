@@ -19,6 +19,47 @@ from voice_formatter import format_for_voice
 logger = logging.getLogger()
 
 # ============================================================================
+# DynamoDB client for notes lookup
+# ============================================================================
+_dynamodb_resource = None
+
+def get_dynamodb_resource():
+    """Get cached DynamoDB resource."""
+    global _dynamodb_resource
+    if _dynamodb_resource is None:
+        _dynamodb_resource = boto3.resource('dynamodb')
+    return _dynamodb_resource
+
+def fetch_project_notes(project_id: str) -> list:
+    """
+    Fetch notes for a project from DynamoDB.
+    Returns empty list if no notes found or on error.
+    """
+    try:
+        config = get_config()
+        # Notes table name follows pattern: {RESOURCE_PREFIX}-project-notes-{ENVIRONMENT}
+        table_name = f"{config.resource_prefix}-project-notes-{config.environment}"
+
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(table_name)
+
+        response = table.query(
+            KeyConditionExpression='project_id = :pid',
+            ExpressionAttributeValues={
+                ':pid': str(project_id)
+            },
+            ScanIndexForward=False  # Sort by timestamp descending (newest first)
+        )
+
+        notes = response.get('Items', [])
+        logger.info(f"[NOTES] Fetched {len(notes)} notes for project {project_id}")
+        return notes
+
+    except Exception as e:
+        logger.warning(f"[NOTES] Failed to fetch notes for project {project_id}: {e}")
+        return []
+
+# ============================================================================
 # NEXT ACTION SUGGESTIONS - Added for proactive UX
 # Append helpful follow-up suggestions after completing actions
 # ============================================================================
@@ -293,11 +334,23 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             if not project:
                 return "Project details not found."
 
+            # Fetch notes for this project from DynamoDB
+            project_id = project.get('id')
+            notes = []
+            if project_id:
+                notes = fetch_project_notes(str(project_id))
+
             # Prepare structured data
             result = {
                 "message": f"Project #{project.get('id', 'Unknown')} Details",
                 "project": project
             }
+
+            # Include notes if any exist
+            if notes:
+                result["notes"] = notes
+                result["notes_count"] = len(notes)
+                logger.info(f"[PROJECT_DETAILS] Including {len(notes)} notes for project {project_id}")
 
             # Generate conversational response using Claude
             conversational = generate_conversational_response(action, user_message, result, channel)
@@ -875,6 +928,64 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 return conversational
 
             # Return both conversational and structured
+            return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
+
+        elif action == 'add_note':
+            # Format add_note response for UI
+            project_id = response_body.get('project_id', 'Unknown')
+            note_text = response_body.get('note_text', '')
+            author = response_body.get('author', 'Agent')
+            note_data = response_body.get('note_data', {})
+            created_at = note_data.get('created_at', '')
+
+            # Prepare structured result with clean message
+            result = {
+                "status": "success",
+                "message": "Note added for reference",
+                "note": {
+                    "project_id": project_id,
+                    "text": note_text,
+                    "author": author,
+                    "created_at": created_at
+                }
+            }
+
+            # Generate conversational response
+            if channel == 'voice':
+                return f"I've added the note to project {project_id}. The note says: {note_text}"
+
+            # Chat response - clean checkmark confirmation
+            conversational = f"Note added for reference"
+
+            return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
+
+        elif action == 'list_notes':
+            # Format list_notes response for UI
+            project_id = response_body.get('project_id', 'Unknown')
+            notes = response_body.get('notes', [])
+            total_count = response_body.get('total_count', len(notes))
+
+            if not notes:
+                if channel == 'voice':
+                    return f"There are no notes for project {project_id}."
+                return f"No notes found for project #{project_id}."
+
+            # Prepare structured result
+            result = {
+                "project_id": project_id,
+                "notes": notes,
+                "total_count": total_count
+            }
+
+            # Generate conversational response
+            if channel == 'voice':
+                note_summaries = []
+                for i, note in enumerate(notes[:3], 1):  # Limit to first 3 for voice
+                    note_summaries.append(f"Note {i}: {note.get('note_text', '')[:50]}")
+                return f"Project {project_id} has {total_count} notes. " + ". ".join(note_summaries)
+
+            conversational = f"Found {total_count} note(s) for project #{project_id}"
+
             return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
         else:

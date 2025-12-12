@@ -14,6 +14,10 @@ from config import get_config
 
 logger = logging.getLogger()
 
+# Dynamic resource naming
+RESOURCE_PREFIX = os.environ.get('RESOURCE_PREFIX', 'pf')
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
+
 
 class ConversationManager:
     """Manages conversation history in DynamoDB with TTL"""
@@ -22,8 +26,8 @@ class ConversationManager:
         self.config = get_config()
         self._dynamodb = None
         self._table = None
-        # Get table name from environment (set by deploy script)
-        self.table_name = os.environ.get('DYNAMODB_TABLE', 'pf-sessions-dev')
+        # Get table name from environment (set by deploy script) with dynamic default
+        self.table_name = os.environ.get('DYNAMODB_TABLE', f'{RESOURCE_PREFIX}-sessions-{ENVIRONMENT}')
 
     @property
     def table(self):

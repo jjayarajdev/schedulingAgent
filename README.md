@@ -1,9 +1,10 @@
 # ProjectForce AI Scheduling Agent
 
-**Version**: 5.0 (Multi-Channel Production)
+**Version**: 6.0 (Consolidated pf-syn-* Stack)
 **Status**: Production - Voice, SMS, and Chat Channels Live
 **Architecture**: Direct Lambda with Claude 3.5 Sonnet Classification
-**Last Updated**: 2025-12-07
+**Resource Prefix**: `pf-syn-`
+**Last Updated**: 2025-12-12
 
 ---
 
@@ -17,74 +18,83 @@ Production multi-channel AI scheduling assistant for ProjectForce customers. Sup
 |---------|--------|-------------|
 | **Voice** | Live | +1 (470) 283-2382 (Amazon Connect) |
 | **SMS** | Live | +1 (878) 678-9053 (AWS End User Messaging) |
-| **Chat** | Live | API Gateway + React Integration |
+| **Chat** | Live | API Gateway (`pf-syn-orchestrator-api-dev`) |
 
 ### Key Features
 
 - **Natural Language Understanding** - Claude 3.5 Sonnet for intent classification
 - **Multi-Turn Conversations** - Context-aware session management
-- **Weather Integration** - Proactive weather advisories for scheduling
+- **Weather Integration** - Open-Meteo API for weather forecasts + Nominatim for geocoding
 - **Channel-Specific Formatting** - Optimized responses for voice, SMS, and chat
 - **TCPA 2025 Compliance** - Opt-out handling for SMS
+- **Unified Deployment** - Single `pf-manage.sh` script for all operations
 
 ---
 
 ## Architecture
 
+See [docs/AWS_RESOURCES_INVENTORY.md](./docs/AWS_RESOURCES_INVENTORY.md) for detailed Mermaid diagrams.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           SCHEDULING AGENT SYSTEM                            │
+│                    SCHEDULING AGENT SYSTEM (pf-syn-*)                        │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │    ┌──────────────┐     ┌──────────────┐     ┌──────────────┐              │
 │    │    VOICE     │     │     SMS      │     │    CHAT      │              │
-│    │  (Connect)   │     │  (Pinpoint)  │     │   (React)    │              │
-│    │ +14702832382 │     │ +18786789053 │     │  API Gateway │              │
+│    │  (Connect)   │     │ (End User    │     │   (React)    │              │
+│    │ +14702832382 │     │  Messaging)  │     │  API Gateway │              │
+│    │              │     │ +18786789053 │     │              │              │
 │    └──────┬───────┘     └──────┬───────┘     └──────┬───────┘              │
 │           │                    │                    │                       │
 │           ▼                    ▼                    │                       │
 │    ┌──────────────┐     ┌──────────────┐           │                       │
 │    │   Lex V2     │     │  SNS Topic   │           │                       │
-│    │     Bot      │     │   Inbound    │           │                       │
-│    └──────┬───────┘     └──────┬───────┘           │                       │
-│           │                    │                    │                       │
-│           ▼                    ▼                    ▼                       │
-│    ┌──────────────┐     ┌──────────────┐     ┌──────────────┐              │
-│    │  pf-lex-     │     │ sms-inbound- │     │ API Gateway  │              │
-│    │ fulfillment  │     │  processor   │     │ /invoke-agent│              │
-│    └──────┬───────┘     └──────┬───────┘     └──────┬───────┘              │
-│           │                    │                    │                       │
-│           └────────────────────┼────────────────────┘                       │
+│    │ pf-syn-      │     │ pf-syn-sms-  │           │                       │
+│    │ scheduling-  │     │ inbound-dev  │           │                       │
+│    │ assistant    │     └──────┬───────┘           │                       │
+│    └──────┬───────┘            │                   │                       │
+│           │                    ▼                   ▼                       │
+│           ▼             ┌──────────────┐    ┌──────────────┐               │
+│    ┌──────────────┐     │ pf-syn-sms-  │    │ API Gateway  │               │
+│    │ pf-syn-lex-  │     │ inbound-dev  │    │ /chat        │               │
+│    │ fulfillment  │     └──────┬───────┘    └──────┬───────┘               │
+│    └──────┬───────┘            │                   │                       │
+│           │                    │                   │                       │
+│           └────────────────────┼───────────────────┘                       │
 │                                │                                            │
 │                                ▼                                            │
 │                    ┌───────────────────────┐                                │
-│                    │    pf-orchestrator    │                                │
+│                    │ pf-syn-orchestrator   │                                │
+│                    │       -dev            │                                │
 │                    │   (Claude 3.5 Sonnet) │                                │
 │                    │  Intent Classification │                                │
 │                    │   + Smart Routing      │                                │
 │                    └───────────┬───────────┘                                │
 │                                │                                            │
-│              ┌─────────────────┼─────────────────┐                          │
-│              │                 │                 │                          │
-│              ▼                 ▼                 ▼                          │
-│    ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐             │
-│    │  pf-scheduling  │ │ pf-information  │ │   pf-chitchat   │             │
-│    │    -actions     │ │    -actions     │ │    -actions     │             │
-│    │                 │ │                 │ │                 │             │
-│    │ • list_projects │ │ • get_weather   │ │ • greet         │             │
-│    │ • get_details   │ │                 │ │ • help          │             │
-│    │ • get_dates     │ │                 │ │ • goodbye       │             │
-│    │ • get_timeslots │ │                 │ │                 │             │
-│    │ • schedule      │ │                 │ │                 │             │
-│    │ • reschedule    │ │                 │ │                 │             │
-│    │ • cancel        │ │                 │ │                 │             │
-│    └────────┬────────┘ └─────────────────┘ └─────────────────┘             │
-│             │                                                               │
-│             ▼                                                               │
-│    ┌─────────────────┐                                                      │
-│    │  ProjectForce   │                                                      │
-│    │  External API   │                                                      │
-│    └─────────────────┘                                                      │
+│         ┌──────────────────────┼──────────────────────┐                    │
+│         │                      │                      │                    │
+│         ▼                      ▼                      ▼                    │
+│  ┌────────────────┐   ┌────────────────┐   ┌────────────────┐              │
+│  │ pf-syn-        │   │ pf-syn-        │   │ pf-syn-        │              │
+│  │ scheduling-    │   │ information-   │   │ chitchat-      │              │
+│  │ actions-dev    │   │ actions-dev    │   │ actions-dev    │              │
+│  │                │   │                │   │                │              │
+│  │ • list_projects│   │ • get_weather  │   │ • greet        │              │
+│  │ • get_details  │   │                │   │ • help         │              │
+│  │ • get_dates    │   │                │   │ • goodbye      │              │
+│  │ • get_timeslots│   │                │   │                │              │
+│  │ • schedule     │   │                │   │                │              │
+│  │ • reschedule   │   │                │   │                │              │
+│  │ • cancel       │   │                │   │                │              │
+│  └───────┬────────┘   └───────┬────────┘   └────────────────┘              │
+│          │                    │                                             │
+│          ▼                    ▼                                             │
+│  ┌────────────────┐   ┌────────────────┐                                   │
+│  │ ProjectForce   │   │ Weather APIs   │                                   │
+│  │ External API   │   │ (Open-Meteo +  │                                   │
+│  │                │   │  Nominatim)    │                                   │
+│  └────────────────┘   └────────────────┘                                   │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -95,20 +105,23 @@ Production multi-channel AI scheduling assistant for ProjectForce customers. Sup
 
 | Resource | Name/ID | Purpose |
 |----------|---------|---------|
-| **Lambda** | `pf-orchestrator` | Main classifier + router |
-| **Lambda** | `pf-scheduling-actions` | Scheduling operations |
-| **Lambda** | `pf-information-actions` | Weather queries |
-| **Lambda** | `pf-chitchat-actions` | Greetings, help |
-| **Lambda** | `pf-lex-fulfillment-dev` | Voice/Lex fulfillment |
-| **Lambda** | `scheduling-agent-sms-inbound-dev` | SMS processing |
-| **API Gateway** | `fpheaag7c7` | REST API for chat |
-| **Lex V2 Bot** | `pf-scheduling-assistant-dev` | Voice NLU |
-| **Connect** | `pf-schedule-voice-dev` | Voice contact center |
-| **DynamoDB** | `pf-sessions-dev` | Session storage |
-| **DynamoDB** | `pf-workflow-states-dev` | Workflow state |
+| **Lambda** | `pf-syn-orchestrator-dev` | Main classifier + router |
+| **Lambda** | `pf-syn-scheduling-actions-dev` | Scheduling operations |
+| **Lambda** | `pf-syn-information-actions-dev` | Weather queries |
+| **Lambda** | `pf-syn-chitchat-actions-dev` | Greetings, help |
+| **Lambda** | `pf-syn-notes-actions-dev` | Notes management |
+| **Lambda** | `pf-syn-lex-fulfillment-dev` | Voice/Lex fulfillment |
+| **Lambda** | `pf-syn-sms-inbound-dev` | SMS processing |
+| **Lambda** | `pf-syn-customer-lookup-dev` | Customer lookup |
+| **API Gateway** | `pf-syn-orchestrator-api-dev` (`4e4680oc2h`) | REST API for chat |
+| **Lex V2 Bot** | `pf-syn-scheduling-assistant-dev` (`RUSMRZJNYG`) | Voice NLU |
+| **Connect** | `pf-schedule-voice-dev` (`3edd99db-...`) | Voice contact center |
+| **DynamoDB** | `pf-syn-sessions-dev` | Session storage |
+| **DynamoDB** | `pf-syn-workflow-states-dev` | Workflow state |
+| **DynamoDB** | `pf-syn-sms-sessions-dev` | SMS session tracking |
 | **Secrets Manager** | `projectforce/api/credentials` | API credentials |
 
-See [AWS_RESOURCES_INVENTORY.md](./AWS_RESOURCES_INVENTORY.md) for complete details.
+See [docs/AWS_RESOURCES_INVENTORY.md](./docs/AWS_RESOURCES_INVENTORY.md) for complete details.
 
 ---
 
@@ -143,32 +156,51 @@ See [AWS_RESOURCES_INVENTORY.md](./AWS_RESOURCES_INVENTORY.md) for complete deta
 - Python 3.11
 - Access to AWS account `772634497954`
 
-### Deploy Lambda Functions
+### Deploy All Resources
 
 ```bash
 cd scripts
-AWS_PROFILE=pf-aws ./DEPLOY_LAMBDA_ONLY_ADVANCED.sh
+AWS_PROFILE=pf-aws ./pf-manage.sh deploy --all
 ```
 
-### Deploy API Gateway (if needed)
+### Deploy Lambda Functions Only
 
 ```bash
 cd scripts
-AWS_PROFILE=pf-aws ./deploy_api_gateway.sh dev
+AWS_PROFILE=pf-aws ./pf-manage.sh deploy --lambda
+```
+
+### Deploy Voice Resources
+
+```bash
+cd scripts
+AWS_PROFILE=pf-aws ./pf-manage.sh deploy --voice
+```
+
+### Deploy SMS Resources
+
+```bash
+cd scripts
+AWS_PROFILE=pf-aws ./pf-manage.sh deploy --sms
+```
+
+### Validate Deployment
+
+```bash
+cd scripts
+AWS_PROFILE=pf-aws ./pf-manage.sh validate --all
 ```
 
 ### Test Chat Channel
 
 ```bash
-curl -X POST https://fpheaag7c7.execute-api.us-east-1.amazonaws.com/dev/invoke-agent \
+curl -X POST https://4e4680oc2h.execute-api.us-east-1.amazonaws.com/dev/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "list my projects",
     "session_id": "test-123",
     "pf_client_id": "09PF05VD",
     "pf_user_id": "1646085",
-    "pf_token": "YOUR_TOKEN",
-    "pf_user_name": "Test User",
     "channel": "chat"
   }'
 ```
@@ -215,26 +247,42 @@ schedulingAgent/
 │   ├── orchestrator/           # Main orchestrator Lambda
 │   │   ├── handler.py          # API Gateway handler
 │   │   ├── router.py           # Intent classification + routing
+│   │   ├── conversation.py     # Conversation management
 │   │   ├── sms_formatter.py    # SMS response formatting
 │   │   └── voice_formatter.py  # Voice response formatting
 │   ├── scheduling-actions/     # Scheduling operations
 │   ├── information-actions/    # Weather queries
 │   ├── chitchat-actions/       # Greetings, help
+│   ├── notes-actions/          # Notes management
 │   ├── lex-fulfillment/        # Voice/Lex integration
-│   └── sms-inbound-processor/  # SMS processing
+│   ├── sms-inbound-processor/  # SMS processing
+│   ├── customer-lookup/        # Customer lookup
+│   └── voice-bedrock-bridge/   # Voice-to-Bedrock bridge
 ├── scripts/
-│   ├── DEPLOY_LAMBDA_ONLY_ADVANCED.sh  # Main deploy script
-│   ├── deploy_api_gateway.sh           # API Gateway setup
-│   └── CLEANUP_ADVANCED.sh             # Cleanup script
+│   ├── pf-manage.sh            # Unified deployment script
+│   ├── lib/                    # Deployment library modules
+│   │   ├── common.sh           # Common functions
+│   │   ├── lambda.sh           # Lambda deployment
+│   │   ├── voice.sh            # Voice resources
+│   │   ├── sms.sh              # SMS resources
+│   │   ├── iam.sh              # IAM roles
+│   │   ├── dynamodb.sh         # DynamoDB tables
+│   │   ├── api.sh              # API Gateway
+│   │   ├── secrets.sh          # Secrets Manager
+│   │   ├── cloudwatch.sh       # CloudWatch logs
+│   │   └── validate.sh         # Validation
+│   └── config/                 # Deployment configuration
+│       ├── resources.env       # Resource naming
+│       ├── connect/            # Connect flow templates
+│       └── lex/                # Lex bot configuration
 ├── testing/
 │   ├── ui/                     # Test UI + proxy
 │   │   ├── index.html          # Chat test interface
 │   │   ├── pf_proxy.py         # Flask CORS proxy
 │   │   └── launch_webapp.sh    # Start script
-│   ├── ProjectForce_Happy_Path.postman_collection.json
-│   └── postman_test_report.txt
-├── AWS_RESOURCES_INVENTORY.md  # Complete AWS resource list
-├── REACT_INTEGRATION_GUIDE.md  # React.js integration guide
+│   └── ProjectForce_Happy_Path.postman_collection.json
+├── docs/
+│   └── AWS_RESOURCES_INVENTORY.md  # Complete AWS resource list
 └── README.md                   # This file
 ```
 
@@ -244,11 +292,12 @@ schedulingAgent/
 
 | Document | Description |
 |----------|-------------|
-| [AWS_RESOURCES_INVENTORY.md](./AWS_RESOURCES_INVENTORY.md) | Complete AWS resource inventory |
+| [docs/AWS_RESOURCES_INVENTORY.md](./docs/AWS_RESOURCES_INVENTORY.md) | Complete AWS resource inventory with Mermaid diagrams |
 | [REACT_INTEGRATION_GUIDE.md](./REACT_INTEGRATION_GUIDE.md) | React.js integration guide |
 | [lambda/sms-inbound-processor/README.md](./lambda/sms-inbound-processor/README.md) | SMS Lambda documentation |
 | [lambda/orchestrator/sms_formatter.py](./lambda/orchestrator/sms_formatter.py) | SMS formatting code |
 | [lambda/orchestrator/voice_formatter.py](./lambda/orchestrator/voice_formatter.py) | Voice formatting code |
+| [scripts/pf-manage.sh](./scripts/pf-manage.sh) | Unified deployment script |
 
 ---
 
@@ -258,13 +307,16 @@ schedulingAgent/
 
 ```bash
 # Orchestrator
-AWS_PROFILE=pf-aws aws logs tail /aws/lambda/pf-orchestrator --since 5m --follow
+AWS_PROFILE=pf-aws aws logs tail /aws/lambda/pf-syn-orchestrator-dev --since 5m --follow
 
 # SMS Inbound
-AWS_PROFILE=pf-aws aws logs tail /aws/lambda/scheduling-agent-sms-inbound-dev --since 5m --follow
+AWS_PROFILE=pf-aws aws logs tail /aws/lambda/pf-syn-sms-inbound-dev --since 5m --follow
 
 # Lex Fulfillment
-AWS_PROFILE=pf-aws aws logs tail /aws/lambda/pf-lex-fulfillment-dev --since 5m --follow
+AWS_PROFILE=pf-aws aws logs tail /aws/lambda/pf-syn-lex-fulfillment-dev --since 5m --follow
+
+# Scheduling Actions
+AWS_PROFILE=pf-aws aws logs tail /aws/lambda/pf-syn-scheduling-actions-dev --since 5m --follow
 ```
 
 ### Key Log Searches
@@ -318,10 +370,10 @@ See [REACT_INTEGRATION_GUIDE.md](./REACT_INTEGRATION_GUIDE.md#10-sample-conversa
 ### Voice Calls Not Working
 1. Verify Connect instance is active
 2. Check Lex bot is associated with contact flow
-3. Review `/aws/lambda/pf-lex-fulfillment-dev` logs
+3. Review `/aws/lambda/pf-syn-lex-fulfillment-dev` logs
 
 ### Chat API Errors
-1. Verify API Gateway endpoint: `fpheaag7c7`
+1. Verify API Gateway endpoint: `4e4680oc2h`
 2. Check CORS headers (should be `*`)
 3. Verify required parameters in request body
 
@@ -353,6 +405,7 @@ See [REACT_INTEGRATION_GUIDE.md](./REACT_INTEGRATION_GUIDE.md#10-sample-conversa
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 6.0 | 2025-12-12 | Consolidated `pf-syn-*` stack, unified `pf-manage.sh` deployment |
 | 5.0 | 2025-12-07 | Multi-channel production (Voice + SMS + Chat) |
 | 4.0 | 2025-11-15 | Direct Lambda architecture (removed Bedrock Agents) |
 | 3.0 | 2025-10-01 | Bedrock Agents with Supervisor |
@@ -361,4 +414,4 @@ See [REACT_INTEGRATION_GUIDE.md](./REACT_INTEGRATION_GUIDE.md#10-sample-conversa
 
 ---
 
-*Last Updated: December 7, 2025*
+*Last Updated: December 12, 2025*

@@ -2,8 +2,8 @@
   "environment": "dev",
   "supervisor_id": "GEMYQNPYB4",
   "supervisor_alias": "TSTALIASID",
-  "orchestrator_arn": "arn:aws:lambda:us-east-1:772634497954:function:pf_orchestrator",
-  "orchestrator_function": "pf-orchestrator",
+  "orchestrator_arn": "arn:aws:lambda:us-east-1:772634497954:function:pf-syn-orchestrator-dev",
+  "orchestrator_function": "pf-syn-orchestrator-dev",
   "agents": {
     "scheduling": {
       "agent_id": "LMJI2V9E8Y",

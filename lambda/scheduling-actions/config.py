@@ -17,6 +17,7 @@ except ImportError:
 # Environment variables
 USE_MOCK_API = os.getenv("USE_MOCK_API", "false").lower() == "true"
 ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
+RESOURCE_PREFIX = os.getenv("RESOURCE_PREFIX", "pf")
 
 # Real ProjectForce API endpoints (CX Portal API)
 API_BASE_URLS = {
@@ -36,8 +37,9 @@ DEFAULT_CLIENT_ID = os.getenv("DEFAULT_CLIENT_ID", "09PF05VD")
 # Logging configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
-# DynamoDB table for session management
-DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", "scheduling-agent-sessions-dev")
+# DynamoDB tables (with dynamic defaults)
+DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", f"{RESOURCE_PREFIX}-sessions-{ENVIRONMENT}")
+DYNAMODB_NOTES_TABLE = os.getenv("DYNAMODB_NOTES_TABLE", f"{RESOURCE_PREFIX}-notes-{ENVIRONMENT}")
 
 # Feature flags (for gradual rollout)
 # Changed defaults to "true" to enable real API calls for cancel/reschedule

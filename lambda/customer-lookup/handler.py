@@ -32,8 +32,12 @@ logger.setLevel(LOG_LEVEL)
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
 
-# Environment variables
-CUSTOMER_TABLE = os.environ.get('CUSTOMER_TABLE', 'pf-customers-dev')
+# Dynamic resource naming
+RESOURCE_PREFIX = os.environ.get('RESOURCE_PREFIX', 'pf')
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
+
+# Environment variables (with dynamic defaults)
+CUSTOMER_TABLE = os.environ.get('CUSTOMER_TABLE', f'{RESOURCE_PREFIX}-customers-{ENVIRONMENT}')
 CACHE_TTL_SECONDS = int(os.environ.get('CACHE_TTL_SECONDS', '300'))
 
 # In-memory cache (Lambda container reuse)

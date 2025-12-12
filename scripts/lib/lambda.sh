@@ -19,8 +19,8 @@ LAMBDA_FUNCTION_LIST=(
 # Actual names will be: ${RESOURCE_PREFIX}-${base_name}-${ENVIRONMENT}
 LAMBDA_DYNAMODB_TABLE_BASES=(
     "sessions"
-    "notes"
     "workflow-states"
+    "project-notes"
 )
 
 # Build full Lambda function name from base
@@ -50,11 +50,20 @@ get_lambda_env_vars() {
             env_vars="${env_vars},USE_SUPERVISOR=false"
             env_vars="${env_vars},ENABLE_MULTI_AGENT_ORCHESTRATION=false"
             ;;
-        "scheduling-actions"|"information-actions"|"chitchat-actions"|"notes-actions")
+        "scheduling-actions"|"information-actions"|"chitchat-actions")
             env_vars="ENVIRONMENT=${ENVIRONMENT}"
             env_vars="${env_vars},USE_MOCK_API=false"
             env_vars="${env_vars},DEFAULT_CLIENT_ID=09PF05VD"
             env_vars="${env_vars},DYNAMODB_TABLE=$(table_name 'sessions')"
+            env_vars="${env_vars},SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
+            env_vars="${env_vars},REGION=${AWS_REGION}"
+            ;;
+        "notes-actions")
+            env_vars="ENVIRONMENT=${ENVIRONMENT}"
+            env_vars="${env_vars},USE_MOCK_API=false"
+            env_vars="${env_vars},DEFAULT_CLIENT_ID=09PF05VD"
+            env_vars="${env_vars},DYNAMODB_TABLE=$(table_name 'project-notes')"
+            env_vars="${env_vars},RESOURCE_PREFIX=${RESOURCE_PREFIX}"
             env_vars="${env_vars},SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
             env_vars="${env_vars},REGION=${AWS_REGION}"
             ;;

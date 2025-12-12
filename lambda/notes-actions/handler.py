@@ -82,7 +82,25 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
         return {}
 
 def format_success_response(event: Dict, action: str, result: Dict[str, Any]) -> Dict[str, Any]:
-    """Format successful response for Bedrock Agent"""
+    """Format successful response for Bedrock Agent - supports both OpenAPI and Function formats"""
+    # Check if this is function calling format (new format used by orchestrator)
+    if 'function' in event:
+        return {
+            'messageVersion': '1.0',
+            'response': {
+                'actionGroup': event.get('actionGroup', 'notes'),
+                'function': event.get('function', action),
+                'functionResponse': {
+                    'responseBody': {
+                        'TEXT': {
+                            'body': json.dumps(result, separators=(',', ':'))
+                        }
+                    }
+                }
+            }
+        }
+
+    # Fall back to OpenAPI format (old format)
     return {
         'messageVersion': '1.0',
         'response': {
@@ -99,7 +117,27 @@ def format_success_response(event: Dict, action: str, result: Dict[str, Any]) ->
     }
 
 def format_error_response(event: Dict, action: str, error_message: str, status_code: int = 500) -> Dict[str, Any]:
-    """Format error response for Bedrock Agent"""
+    """Format error response for Bedrock Agent - supports both OpenAPI and Function formats"""
+    error_body = {'error': error_message, 'action': action}
+
+    # Check if this is function calling format (new format used by orchestrator)
+    if 'function' in event:
+        return {
+            'messageVersion': '1.0',
+            'response': {
+                'actionGroup': event.get('actionGroup', 'notes'),
+                'function': event.get('function', action),
+                'functionResponse': {
+                    'responseBody': {
+                        'TEXT': {
+                            'body': json.dumps(error_body)
+                        }
+                    }
+                }
+            }
+        }
+
+    # Fall back to OpenAPI format (old format)
     return {
         'messageVersion': '1.0',
         'response': {
@@ -109,10 +147,7 @@ def format_error_response(event: Dict, action: str, error_message: str, status_c
             'httpStatusCode': status_code,
             'responseBody': {
                 'application/json': {
-                    'body': json.dumps({
-                        'error': error_message,
-                        'action': action
-                    })
+                    'body': json.dumps(error_body)
                 }
             }
         }
@@ -195,7 +230,7 @@ def handle_add_note(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str,
             note = store_note_in_dynamodb(config['dynamodb_table'], project_id, note_text, author)
             response = {
                 "status": "success",
-                "message": "Note added (stored in DynamoDB)",
+                "message": "Note added for reference",
                 "data": note
             }
 
@@ -288,14 +323,20 @@ def lambda_handler(event, context):
         # Extract parameters
         params = extract_parameters(event)
 
-        # Get configuration
-        client_id = params.get('client_id', 'default')
+        # Get session attributes (contains client_id, customer_id, bearer token)
+        session_attrs = event.get('sessionAttributes', {})
+
+        # Get configuration - check sessionAttributes first, then params, then default
+        client_id = session_attrs.get('client_id') or params.get('client_id', 'default')
+        logger.info(f"Using client_id: {client_id} (from sessionAttributes: {session_attrs.get('client_id')})")
         config = get_api_config(client_id)
+        logger.info(f"API config: add_note_url={config.get('add_note_url')}")
 
         # Get auth headers (if not using mock)
         auth_headers = {}
         if not USE_MOCK_API:
-            authorization = params.get('authorization', event.get('authorization', ''))
+            # Bearer token from sessionAttributes takes priority
+            authorization = session_attrs.get('pf_bearer_token') or params.get('authorization', event.get('authorization', ''))
             auth_headers = get_auth_headers(authorization, client_id)
 
         # Route to appropriate handler - comprehensive aliases for add/create notes

@@ -29,7 +29,8 @@ from config import (
     get_api_config,
     get_auth_headers,
     ENABLE_REAL_CONFIRM,
-    ENABLE_REAL_CANCEL
+    ENABLE_REAL_CANCEL,
+    DYNAMODB_NOTES_TABLE
 )
 from mock_data import (
     get_mock_projects,
@@ -1674,8 +1675,8 @@ def handle_add_note(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str,
 
     logger.info(f"Adding note to project {project_id} from author {author}")
 
-    # Get DynamoDB table name from config
-    dynamodb_table = config.get('dynamodb_notes_table', 'pf-notes-dev')
+    # Get DynamoDB table name from config (with dynamic default from config module)
+    dynamodb_table = config.get('dynamodb_notes_table', DYNAMODB_NOTES_TABLE)
 
     try:
         # Store in DynamoDB
@@ -1707,8 +1708,8 @@ def handle_list_notes(params: Dict, config: Dict, auth_headers: Dict) -> Dict[st
 
     logger.info(f"Listing notes for project {project_id}")
 
-    # Get DynamoDB table name from config
-    dynamodb_table = config.get('dynamodb_notes_table', 'pf-notes-dev')
+    # Get DynamoDB table name from config (with dynamic default from config module)
+    dynamodb_table = config.get('dynamodb_notes_table', DYNAMODB_NOTES_TABLE)
 
     try:
         # Get notes from DynamoDB

@@ -39,13 +39,17 @@ logger.setLevel(LOG_LEVEL)
 bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
 dynamodb = boto3.resource('dynamodb')
 
-# Environment variables
+# Dynamic resource naming
+RESOURCE_PREFIX = os.environ.get('RESOURCE_PREFIX', 'pf')
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
+
+# Environment variables (with dynamic defaults)
 SUPERVISOR_AGENT_ID = os.environ.get('SUPERVISOR_AGENT_ID')
 SUPERVISOR_AGENT_ALIAS_ID = os.environ.get('SUPERVISOR_AGENT_ALIAS_ID', 'TSTALIASID')
 SCHEDULING_AGENT_ID = os.environ.get('SCHEDULING_AGENT_ID')
 INFORMATION_AGENT_ID = os.environ.get('INFORMATION_AGENT_ID')
 CHITCHAT_AGENT_ID = os.environ.get('CHITCHAT_AGENT_ID')
-DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE', 'pf-sessions-dev')
+DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE', f'{RESOURCE_PREFIX}-sessions-{ENVIRONMENT}')
 USE_SUPERVISOR = os.environ.get('USE_SUPERVISOR', 'false').lower() == 'true'
 MAX_RESPONSE_LENGTH = int(os.environ.get('MAX_VOICE_RESPONSE_LENGTH', '500'))
 ENABLE_SSML = os.environ.get('ENABLE_SSML', 'false').lower() == 'true'

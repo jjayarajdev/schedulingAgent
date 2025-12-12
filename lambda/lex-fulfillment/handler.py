@@ -81,13 +81,17 @@ logger.setLevel(LOG_LEVEL)
 dynamodb = boto3.resource('dynamodb')
 lambda_client = boto3.client('lambda')
 
-# Environment variables
-DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE', 'pf-sessions-dev')
-SCHEDULING_LAMBDA = os.environ.get('SCHEDULING_LAMBDA', 'pf-scheduling-actions')
-INFORMATION_LAMBDA = os.environ.get('INFORMATION_LAMBDA', 'pf-information-actions')
-ORCHESTRATOR_LAMBDA = os.environ.get('ORCHESTRATOR_LAMBDA', 'pf-orchestrator')
-VOICE_BRIDGE_LAMBDA = os.environ.get('VOICE_BRIDGE_LAMBDA', 'pf-voice-bedrock-bridge-dev')
-CUSTOMER_LOOKUP_LAMBDA = os.environ.get('CUSTOMER_LOOKUP_LAMBDA', 'pf-customer-lookup-dev')
+# Dynamic resource naming
+RESOURCE_PREFIX = os.environ.get('RESOURCE_PREFIX', 'pf')
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
+
+# Environment variables (with dynamic defaults)
+DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE', f'{RESOURCE_PREFIX}-sessions-{ENVIRONMENT}')
+SCHEDULING_LAMBDA = os.environ.get('SCHEDULING_LAMBDA', f'{RESOURCE_PREFIX}-scheduling-actions-{ENVIRONMENT}')
+INFORMATION_LAMBDA = os.environ.get('INFORMATION_LAMBDA', f'{RESOURCE_PREFIX}-information-actions-{ENVIRONMENT}')
+ORCHESTRATOR_LAMBDA = os.environ.get('ORCHESTRATOR_LAMBDA', f'{RESOURCE_PREFIX}-orchestrator-{ENVIRONMENT}')
+VOICE_BRIDGE_LAMBDA = os.environ.get('VOICE_BRIDGE_LAMBDA', f'{RESOURCE_PREFIX}-voice-bedrock-bridge-{ENVIRONMENT}')
+CUSTOMER_LOOKUP_LAMBDA = os.environ.get('CUSTOMER_LOOKUP_LAMBDA', f'{RESOURCE_PREFIX}-customer-lookup-{ENVIRONMENT}')
 DEFAULT_CUSTOMER_ID = os.environ.get('DEFAULT_CUSTOMER_ID')
 
 # Feature flag: Use orchestrator for complex voice queries instead of voice-bridge

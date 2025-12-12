@@ -269,13 +269,15 @@ def process_sms_record(record: Dict[str, Any]) -> None:
         logger.info(f"Processing SMS from {phone_number}: {message_body[:50] if message_body else '(empty)'}")
 
         # PHONE-BASED AUTHENTICATION: Authenticate sender via phone numbers
-        # This calls phone-call-login API and stores credentials in Secrets Manager
+        # This calls phone-call-login API and returns fresh credentials
         pf_user_id = None
+        phone_auth_credentials = None  # Store fresh credentials from phone auth
         if PHONE_AUTH_AVAILABLE and phone_number and destination_number:
             try:
                 logger.info(f"[PHONE_AUTH] Authenticating SMS sender {phone_number[-4:]} via {destination_number[-4:]}")
                 credentials = get_or_authenticate(phone_number, destination_number)
                 pf_user_id = credentials.get('user_id')
+                phone_auth_credentials = credentials  # Store fresh credentials for use in invoke_orchestrator
                 logger.info(f"[PHONE_AUTH] Authenticated user {pf_user_id} ({credentials.get('user_name', 'unknown')})")
             except AuthenticationError as auth_err:
                 logger.error(f"[PHONE_AUTH] Authentication failed: {auth_err}")
@@ -312,11 +314,12 @@ def process_sms_record(record: Dict[str, Any]) -> None:
             session_id=session_id
         )
 
-        # Invoke multi-agent orchestrator
+        # Invoke multi-agent orchestrator with fresh credentials from phone auth
         orchestrator_response = invoke_orchestrator(
             message=message_body,
             session_id=session_id,
-            phone_number=phone_number
+            phone_number=phone_number,
+            pf_credentials=phone_auth_credentials  # Pass fresh credentials from phone-sms-login
         )
 
         # Send reply
@@ -655,7 +658,8 @@ def get_or_create_session(phone_number: str) -> str:
 def invoke_orchestrator(
     message: str,
     session_id: str,
-    phone_number: str
+    phone_number: str,
+    pf_credentials: Optional[Dict[str, Any]] = None
 ) -> Optional[str]:
     """
     Invoke multi-agent orchestrator lambda for intelligent response
@@ -664,6 +668,7 @@ def invoke_orchestrator(
         message: Customer message
         session_id: Session ID
         phone_number: Customer phone number (used as customer_id)
+        pf_credentials: Optional fresh credentials from phone-sms-login (preferred)
 
     Returns:
         Orchestrator response or None
@@ -671,8 +676,17 @@ def invoke_orchestrator(
     try:
         logger.info(f"Invoking orchestrator lambda: {ORCHESTRATOR_LAMBDA}")
 
-        # Get ProjectForce credentials from Secrets Manager
-        pf_creds = get_pf_credentials()
+        # Use fresh credentials from phone auth if available, otherwise fall back to Secrets Manager
+        if pf_credentials and pf_credentials.get('bearer_token'):
+            logger.info(f"Using FRESH credentials from phone-sms-login (token length: {len(pf_credentials.get('bearer_token', ''))})")
+            pf_creds = {
+                'bearer_token': pf_credentials.get('bearer_token', ''),
+                'client_id': pf_credentials.get('client_id', ''),
+                'user_id': pf_credentials.get('user_id', '')
+            }
+        else:
+            logger.info(f"Fetching FRESH PF credentials from Secrets Manager (no cache)")
+            pf_creds = get_pf_credentials()
 
         # Prepare payload for orchestrator with real PF credentials
         payload = {
