@@ -21,7 +21,107 @@ LEX_BOT_LOCALE="en_US"
 # Connect BASE configuration (actual name: pf-schedule-voice-${ENV})
 # Note: Connect instance uses simplified naming (pf-{base}-{env}) to match existing resources
 CONNECT_INSTANCE_BASE="schedule-voice"
-VOICE_PHONE_NUMBER="+14702832382"
+
+# =============================================================================
+# PROTECTED PHONE NUMBERS - NEVER DELETE THESE
+# =============================================================================
+# These phone numbers are protected and will NEVER be released by any cleanup
+# script. Add any production phone numbers here to prevent accidental loss.
+# When a Connect instance is deleted, any phone numbers attached to it are
+# PERMANENTLY released back to the carrier pool and cannot be recovered via API.
+# =============================================================================
+PROTECTED_PHONE_NUMBERS=(
+    "+18447845789"   # Production toll-free number - Agentic Solution for PF
+)
+
+# Current voice phone number (must be in PROTECTED_PHONE_NUMBERS for safety)
+VOICE_PHONE_NUMBER="+18447845789"
+
+# =============================================================================
+# Phone Number Protection Functions
+# =============================================================================
+
+# Check if a phone number is protected
+# Usage: if is_phone_number_protected "+18447845789"; then echo "Protected!"; fi
+is_phone_number_protected() {
+    local phone_number="$1"
+    for protected in "${PROTECTED_PHONE_NUMBERS[@]}"; do
+        if [[ "$protected" == "$phone_number" ]]; then
+            return 0  # true - is protected
+        fi
+    done
+    return 1  # false - not protected
+}
+
+# Safe release phone number - REFUSES to release protected numbers
+# Usage: safe_release_phone_number "phone-number-id" "+18447845789"
+safe_release_phone_number() {
+    local phone_number_id="$1"
+    local phone_number="$2"
+
+    # Check protection
+    if is_phone_number_protected "$phone_number"; then
+        log_error "BLOCKED: Cannot release protected phone number $phone_number"
+        log_error "This number is in PROTECTED_PHONE_NUMBERS list and cannot be released."
+        log_error "To release this number, you must first remove it from the protected list in voice.sh"
+        return 1
+    fi
+
+    log_warn "Releasing phone number: $phone_number (ID: $phone_number_id)"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${CYAN}[DRY-RUN]${NC} Would release phone number $phone_number" >&2
+        return 0
+    fi
+
+    aws connect release-phone-number \
+        --phone-number-id "$phone_number_id" \
+        --region "$VOICE_REGION" 2>&1
+}
+
+# Check if any Connect instance has protected phone numbers
+# Returns 0 (success) if safe to delete, 1 if instance has protected numbers
+check_instance_for_protected_numbers() {
+    local instance_id="$1"
+
+    log_info "Checking instance $instance_id for protected phone numbers..."
+
+    local phone_numbers
+    phone_numbers=$(aws connect list-phone-numbers-v2 \
+        --target-arn "arn:aws:connect:${VOICE_REGION}:$(get_account_id):instance/${instance_id}" \
+        --region "$VOICE_REGION" \
+        --query 'ListPhoneNumbersSummaryList[*].PhoneNumber' \
+        --output text 2>/dev/null || echo "")
+
+    if [[ -z "$phone_numbers" ]]; then
+        log_info "  No phone numbers attached to instance"
+        return 0
+    fi
+
+    local has_protected=false
+    for phone in $phone_numbers; do
+        if is_phone_number_protected "$phone"; then
+            log_error "  PROTECTED: $phone - Cannot delete this instance!"
+            has_protected=true
+        else
+            log_info "  Unprotected: $phone"
+        fi
+    done
+
+    if [[ "$has_protected" == "true" ]]; then
+        log_error ""
+        log_error "This Connect instance has PROTECTED phone numbers attached!"
+        log_error "Deleting this instance would permanently release these numbers to the carrier."
+        log_error ""
+        log_error "To proceed, you must either:"
+        log_error "  1. Move the phone numbers to another instance first"
+        log_error "  2. Remove the numbers from PROTECTED_PHONE_NUMBERS in voice.sh"
+        log_error ""
+        return 1
+    fi
+
+    return 0
+}
 
 # DynamoDB table BASE names for Voice
 VOICE_DYNAMODB_TABLE_BASES=(
@@ -907,9 +1007,22 @@ configure_voice_phone_number() {
     phone_number_id=$(get_connect_phone_number_id "$VOICE_PHONE_NUMBER")
 
     if [[ -z "$phone_number_id" || "$phone_number_id" == "None" ]]; then
-        log_error "Phone number not found in Connect: $VOICE_PHONE_NUMBER"
-        log_info "Ensure the phone number is claimed in the Connect instance"
-        return 1
+        log_warn "Phone number not found in Connect: $VOICE_PHONE_NUMBER"
+        log_info "Attempting to claim phone number automatically..."
+
+        # Try to ensure the phone number is claimed
+        if ensure_phone_number_claimed; then
+            # Re-fetch the phone number ID after claiming
+            phone_number_id=$(get_connect_phone_number_id "$VOICE_PHONE_NUMBER")
+            if [[ -z "$phone_number_id" || "$phone_number_id" == "None" ]]; then
+                log_error "Phone number still not found after claim attempt"
+                return 1
+            fi
+        else
+            log_error "Failed to claim phone number: $VOICE_PHONE_NUMBER"
+            log_info "You may need to manually claim the number or set VOICE_PHONE_NUMBER=AUTO"
+            return 1
+        fi
     fi
 
     log_info "Found phone number: $VOICE_PHONE_NUMBER (ID: $phone_number_id)"
@@ -988,6 +1101,265 @@ validate_voice_phone_number() {
     fi
 
     return 0
+}
+
+# Search for available phone numbers in the region
+# Args: country_code (default: US), phone_number_type (default: DID), area_code (optional)
+# Returns: JSON list of available phone numbers
+search_available_phone_numbers() {
+    local country_code="${1:-US}"
+    local phone_number_type="${2:-DID}"
+    local area_code="${3:-}"
+
+    log_info "Searching for available $phone_number_type phone numbers in $country_code..."
+
+    local search_cmd="aws connect search-available-phone-numbers \
+        --target-arn \"arn:aws:connect:${VOICE_REGION}:${EXPECTED_ACCOUNT}:instance/\$(get_connect_instance_id \"\$(connect_instance_alias)\")\" \
+        --phone-number-country-code $country_code \
+        --phone-number-type $phone_number_type \
+        --region $VOICE_REGION \
+        --max-results 10"
+
+    if [[ -n "$area_code" ]]; then
+        search_cmd="$search_cmd --phone-number-prefix \"+1${area_code}\""
+    fi
+
+    eval "$search_cmd" 2>/dev/null
+}
+
+# Claim a phone number for the Connect instance
+# Args: phone_number (e.g., +14702832382)
+# Returns: Phone number ID if successful
+claim_phone_number() {
+    local phone_number="$1"
+    local instance_alias=$(connect_instance_alias)
+    local instance_id
+    instance_id=$(get_connect_instance_id "$instance_alias")
+
+    if [[ -z "$instance_id" || "$instance_id" == "None" ]]; then
+        log_error "Connect instance not found: $instance_alias"
+        return 1
+    fi
+
+    local target_arn="arn:aws:connect:${VOICE_REGION}:${EXPECTED_ACCOUNT}:instance/${instance_id}"
+
+    log_info "Claiming phone number $phone_number for instance $instance_alias..."
+    log_info "  Target ARN: $target_arn"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${CYAN}[DRY-RUN]${NC} Claim phone number: $phone_number" >&2
+        echo -e "${YELLOW}  \$ aws connect claim-phone-number \\\\${NC}" >&2
+        echo -e "${YELLOW}      --target-arn \"$target_arn\" \\\\${NC}" >&2
+        echo -e "${YELLOW}      --phone-number \"$phone_number\" \\\\${NC}" >&2
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}" >&2
+        echo "" >&2
+        return 0
+    fi
+
+    local output
+    output=$(aws connect claim-phone-number \
+        --target-arn "$target_arn" \
+        --phone-number "$phone_number" \
+        --region "$VOICE_REGION" 2>&1)
+
+    local result=$?
+    if [[ $result -eq 0 ]]; then
+        local phone_number_id
+        phone_number_id=$(echo "$output" | jq -r '.PhoneNumberId // empty')
+        log_info "Phone number claimed successfully: $phone_number (ID: $phone_number_id)"
+        echo "$phone_number_id"
+        return 0
+    else
+        if echo "$output" | grep -q "ResourceInUseException\|already claimed"; then
+            log_warn "Phone number $phone_number is already claimed"
+            # Try to get the ID
+            local existing_id
+            existing_id=$(get_connect_phone_number_id "$phone_number")
+            if [[ -n "$existing_id" && "$existing_id" != "None" ]]; then
+                echo "$existing_id"
+                return 0
+            fi
+        fi
+        log_error "Failed to claim phone number: $output"
+        return 1
+    fi
+}
+
+# Release a phone number from Connect
+# Args: phone_number_id
+release_phone_number() {
+    local phone_number_id="$1"
+
+    log_info "Releasing phone number ID: $phone_number_id..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${CYAN}[DRY-RUN]${NC} Release phone number ID: $phone_number_id" >&2
+        echo -e "${YELLOW}  \$ aws connect release-phone-number \\\\${NC}" >&2
+        echo -e "${YELLOW}      --phone-number-id \"$phone_number_id\" \\\\${NC}" >&2
+        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}" >&2
+        echo "" >&2
+        return 0
+    fi
+
+    local output
+    output=$(aws connect release-phone-number \
+        --phone-number-id "$phone_number_id" \
+        --region "$VOICE_REGION" 2>&1)
+
+    local result=$?
+    if [[ $result -eq 0 ]]; then
+        log_info "Phone number released successfully"
+        return 0
+    else
+        log_error "Failed to release phone number: $output"
+        return 1
+    fi
+}
+
+# Ensure the configured phone number is claimed for the Connect instance
+# If not claimed and VOICE_PHONE_NUMBER is specific, try to claim it
+# If VOICE_PHONE_NUMBER is "AUTO", search and claim an available number
+ensure_phone_number_claimed() {
+    log_section "Ensuring Phone Number is Claimed"
+
+    local instance_alias=$(connect_instance_alias)
+    local instance_id
+    instance_id=$(get_connect_instance_id "$instance_alias")
+
+    if [[ -z "$instance_id" || "$instance_id" == "None" ]]; then
+        log_error "Connect instance not found: $instance_alias"
+        return 1
+    fi
+
+    local target_arn="arn:aws:connect:${VOICE_REGION}:${EXPECTED_ACCOUNT}:instance/${instance_id}"
+
+    # Check if phone number is already claimed for this instance
+    local phone_number_id
+    phone_number_id=$(get_connect_phone_number_id "$VOICE_PHONE_NUMBER")
+
+    if [[ -n "$phone_number_id" && "$phone_number_id" != "None" ]]; then
+        # Phone number exists, check if it's for our instance
+        local current_target
+        current_target=$(aws connect describe-phone-number \
+            --phone-number-id "$phone_number_id" \
+            --region "$VOICE_REGION" \
+            --query 'ClaimedPhoneNumberSummary.TargetArn' \
+            --output text 2>/dev/null)
+
+        if [[ "$current_target" == "$target_arn" ]]; then
+            log_info "Phone number $VOICE_PHONE_NUMBER is already claimed for this instance"
+            return 0
+        else
+            log_warn "Phone number $VOICE_PHONE_NUMBER is claimed by a different instance: $current_target"
+            log_warn "You may need to release it from the other instance first"
+            return 1
+        fi
+    fi
+
+    # Phone number not claimed, try to claim it
+    log_info "Phone number $VOICE_PHONE_NUMBER is not claimed"
+
+    if [[ "$VOICE_PHONE_NUMBER" == "AUTO" ]]; then
+        # Search for available numbers and claim the first one
+        log_info "Searching for available phone numbers..."
+        local available
+        available=$(aws connect search-available-phone-numbers \
+            --target-arn "$target_arn" \
+            --phone-number-country-code US \
+            --phone-number-type DID \
+            --region "$VOICE_REGION" \
+            --max-results 5 \
+            --query 'AvailableNumbersList[0].PhoneNumber' \
+            --output text 2>/dev/null)
+
+        if [[ -z "$available" || "$available" == "None" ]]; then
+            log_error "No available phone numbers found"
+            return 1
+        fi
+
+        log_info "Found available number: $available"
+        VOICE_PHONE_NUMBER="$available"
+    fi
+
+    # Try to claim the specific phone number
+    phone_number_id=$(claim_phone_number "$VOICE_PHONE_NUMBER")
+    local result=$?
+
+    if [[ $result -eq 0 && -n "$phone_number_id" ]]; then
+        log_info "Successfully claimed phone number: $VOICE_PHONE_NUMBER"
+        return 0
+    else
+        log_error "Failed to claim phone number: $VOICE_PHONE_NUMBER"
+        log_info "The phone number may need to be released from another instance first"
+        log_info "Or you can set VOICE_PHONE_NUMBER=AUTO to claim a new available number"
+        return 1
+    fi
+}
+
+# Release and reclaim a phone number for the current instance
+# This is useful when migrating a number between instances
+# Args: phone_number (optional, defaults to VOICE_PHONE_NUMBER)
+release_and_reclaim_phone_number() {
+    local phone_number="${1:-$VOICE_PHONE_NUMBER}"
+
+    log_section "Release and Reclaim Phone Number"
+    log_info "Phone number: $phone_number"
+
+    # Step 1: Find the phone number
+    local phone_number_id
+    phone_number_id=$(get_connect_phone_number_id "$phone_number")
+
+    if [[ -z "$phone_number_id" || "$phone_number_id" == "None" ]]; then
+        log_warn "Phone number $phone_number not found - attempting to claim directly"
+        ensure_phone_number_claimed
+        return $?
+    fi
+
+    # Step 2: Check current target
+    local current_target
+    current_target=$(aws connect describe-phone-number \
+        --phone-number-id "$phone_number_id" \
+        --region "$VOICE_REGION" \
+        --query 'ClaimedPhoneNumberSummary.TargetArn' \
+        --output text 2>/dev/null)
+
+    local instance_alias=$(connect_instance_alias)
+    local instance_id
+    instance_id=$(get_connect_instance_id "$instance_alias")
+    local target_arn="arn:aws:connect:${VOICE_REGION}:${EXPECTED_ACCOUNT}:instance/${instance_id}"
+
+    if [[ "$current_target" == "$target_arn" ]]; then
+        log_info "Phone number is already claimed for this instance"
+        return 0
+    fi
+
+    log_info "Phone number currently assigned to: $current_target"
+    log_info "Will reassign to: $target_arn"
+
+    # Step 3: Release the phone number
+    log_info "Releasing phone number..."
+    if ! release_phone_number "$phone_number_id"; then
+        log_error "Failed to release phone number"
+        return 1
+    fi
+
+    # Wait for release to complete
+    log_info "Waiting for phone number release to complete..."
+    sleep 10
+
+    # Step 4: Reclaim for our instance
+    log_info "Reclaiming phone number for target instance..."
+    local new_phone_id
+    new_phone_id=$(claim_phone_number "$phone_number")
+
+    if [[ $? -eq 0 && -n "$new_phone_id" ]]; then
+        log_info "Successfully reclaimed phone number: $phone_number (ID: $new_phone_id)"
+        return 0
+    else
+        log_error "Failed to reclaim phone number"
+        log_error "The number may have been claimed by another account"
+        return 1
+    fi
 }
 
 # =============================================================================

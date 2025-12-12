@@ -13,6 +13,7 @@
 #     cleanup     Remove AWS resources
 #     validate    Validate deployed resources
 #     status      Show current resource status
+#     phone       Manage voice phone numbers (claim, release, reclaim)
 #
 # Resource Options:
 #     --all       Apply to all components (lambda, voice, sms)
@@ -79,6 +80,7 @@ fi
 # =============================================================================
 
 COMMAND=""
+PHONE_ACTION=""
 COMPONENT_LAMBDA=false
 COMPONENT_VOICE=false
 COMPONENT_SMS=false
@@ -97,6 +99,17 @@ parse_args() {
             deploy|cleanup|validate|status)
                 COMMAND="$1"
                 shift
+                ;;
+            phone)
+                COMMAND="$1"
+                shift
+                # Phone subcommand: claim, release, reclaim, status
+                if [[ -n "$1" && "$1" != --* ]]; then
+                    PHONE_ACTION="$1"
+                    shift
+                else
+                    PHONE_ACTION="status"
+                fi
                 ;;
             --all)
                 COMPONENT_ALL=true
@@ -349,6 +362,65 @@ cmd_status() {
 }
 
 # =============================================================================
+# Phone Command
+# =============================================================================
+
+# Manage voice phone numbers
+cmd_phone() {
+    log_section "Phone Number Management"
+
+    case "$PHONE_ACTION" in
+        status)
+            log_info "Checking phone number status..."
+            validate_voice_phone_number
+            ;;
+        claim)
+            log_info "Claiming phone number: $VOICE_PHONE_NUMBER"
+            ensure_phone_number_claimed
+            ;;
+        release)
+            log_info "Releasing phone number: $VOICE_PHONE_NUMBER"
+            local phone_id
+            phone_id=$(get_connect_phone_number_id "$VOICE_PHONE_NUMBER")
+            if [[ -n "$phone_id" && "$phone_id" != "None" ]]; then
+                release_phone_number "$phone_id"
+            else
+                log_error "Phone number not found: $VOICE_PHONE_NUMBER"
+                return 1
+            fi
+            ;;
+        reclaim)
+            log_info "Releasing and reclaiming phone number: $VOICE_PHONE_NUMBER"
+            release_and_reclaim_phone_number "$VOICE_PHONE_NUMBER"
+            ;;
+        search)
+            log_info "Searching for available phone numbers..."
+            search_available_phone_numbers
+            ;;
+        *)
+            log_error "Unknown phone action: $PHONE_ACTION"
+            echo "Usage: ./pf-manage.sh phone <action> [options]"
+            echo ""
+            echo "Actions:"
+            echo "  status   Show current phone number status (default)"
+            echo "  claim    Claim the configured phone number for Connect instance"
+            echo "  release  Release the phone number from Connect"
+            echo "  reclaim  Release and reclaim phone number (migrate between instances)"
+            echo "  search   Search for available phone numbers to claim"
+            echo ""
+            echo "Options:"
+            echo "  --env <env>   Target environment (dev, qa, prod)"
+            echo ""
+            echo "Examples:"
+            echo "  ./pf-manage.sh phone status --env prod"
+            echo "  ./pf-manage.sh phone claim --env prod"
+            echo "  ./pf-manage.sh phone reclaim --env prod"
+            return 1
+            ;;
+    esac
+}
+
+# =============================================================================
 # Main Entry Point
 # =============================================================================
 
@@ -396,6 +468,9 @@ main() {
             ;;
         status)
             cmd_status
+            ;;
+        phone)
+            cmd_phone
             ;;
         *)
             log_error "Unknown command: $COMMAND"
