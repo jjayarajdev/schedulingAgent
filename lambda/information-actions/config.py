@@ -26,7 +26,7 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
 API_BASE_URLS = {
     "dev": "https://api-cx-portal.dev.projectsforce.com",
     "staging": "https://api-cx-portal.staging.projectsforce.com",
-    "prod": "https://api-cx-portal.projectsforce.com"
+    "prod": "https://api-cx-portal.apps.projectsforce.com"
 }
 CUSTOMER_SCHEDULER_BASE_API_URL = os.getenv(
     "CUSTOMER_SCHEDULER_API_URL",

@@ -27,7 +27,7 @@ AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
 API_BASE_URLS = {
     "dev": "https://api-cx-portal.dev.projectsforce.com",
     "staging": "https://api-cx-portal.staging.projectsforce.com",
-    "prod": "https://api-cx-portal.projectsforce.com"
+    "prod": "https://api-cx-portal.apps.projectsforce.com"
 }
 PF_API_BASE = API_BASE_URLS.get(ENVIRONMENT, API_BASE_URLS["dev"])
 logger.info(f"🌍 Environment: {ENVIRONMENT} | Region: {AWS_REGION} | API Base: {PF_API_BASE}")

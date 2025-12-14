@@ -18,7 +18,7 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
 API_BASE_URLS = {
     "dev": "https://api-cx-portal.dev.projectsforce.com",
     "staging": "https://api-cx-portal.staging.projectsforce.com",
-    "prod": "https://api-cx-portal.projectsforce.com"
+    "prod": "https://api-cx-portal.apps.projectsforce.com"
 }
 AUTH_BASE_URLS = {
     "dev": "https://auth.dev.projectsforce.com",
