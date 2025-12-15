@@ -5,12 +5,16 @@ Reads REFRESH_TOKEN flag from AWS Secrets Manager for modular control
 """
 import json
 import logging
+import os
 import requests
 import boto3
 from typing import Dict, Optional, Tuple
 import time
 
 logger = logging.getLogger()
+
+# Get secrets region from environment (supports multi-region architecture)
+SECRETS_REGION = os.environ.get('SECRETS_REGION', os.environ.get('AWS_REGION', 'us-east-2'))
 
 class TokenRefreshManager:
     """
@@ -23,15 +27,16 @@ class TokenRefreshManager:
     - Thread-safe with error handling
     """
 
-    def __init__(self, region: str = 'us-east-1'):
+    def __init__(self, region: str = None):
         """
         Initialize Token Refresh Manager
 
         Args:
-            region: AWS region for Secrets Manager
+            region: AWS region for Secrets Manager (defaults to SECRETS_REGION env var)
         """
-        self.region = region
-        self.secrets_client = boto3.client('secretsmanager', region_name=region)
+        self.region = region or SECRETS_REGION
+        self.secrets_client = boto3.client('secretsmanager', region_name=self.region)
+        logger.info(f"TokenRefreshManager using region: {self.region}")
         self.secret_name = 'projectforce/api/credentials'
 
         # Regenerate token API endpoints by environment
@@ -240,9 +245,9 @@ class TokenRefreshManager:
 _refresh_manager = None
 
 def get_refresh_manager() -> TokenRefreshManager:
-    """Get or create singleton TokenRefreshManager instance"""
+    """Get or create singleton TokenRefreshManager instance using SECRETS_REGION"""
     global _refresh_manager
     if _refresh_manager is None:
-        _refresh_manager = TokenRefreshManager()
-        logger.info("TokenRefreshManager initialized")
+        _refresh_manager = TokenRefreshManager()  # Uses SECRETS_REGION env var
+        logger.info(f"TokenRefreshManager initialized with region: {_refresh_manager.region}")
     return _refresh_manager

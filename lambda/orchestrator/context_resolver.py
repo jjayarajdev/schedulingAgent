@@ -145,15 +145,15 @@ def _extract_project_ids_from_content(content: str) -> List[str]:
             logger.debug(f"Failed to parse JSON block: {e}")
 
     # Strategy 4: Find all JSON-like structures with regex (in non-code-block content)
-    # Look for {"id":"7751741"} or {"id": "7751741"} patterns
-    id_pattern = r'"id":\s*"?(\d{7})"?'
+    # Look for {"id":"7751741"} or {"id": "60000716"} patterns (7-8 digit IDs)
+    id_pattern = r'"id":\s*"?(\d{7,8})"?'
     regex_ids = re.findall(id_pattern, content)
     project_ids.extend(regex_ids)
 
     # Strategy 5: ONLY extract IDs that have explicit # prefix (intentional references)
-    # This avoids picking up random 7-digit numbers that LLM may have hallucinated
-    # Pattern: #7751741 or Project #7751741 or (Project #7751741)
-    hash_prefixed_ids = re.findall(r'#(\d{7})\b', content)
+    # This avoids picking up random 7-8 digit numbers that LLM may have hallucinated
+    # Pattern: #7751741 or #60000716 or Project #60000716
+    hash_prefixed_ids = re.findall(r'#(\d{7,8})\b', content)
     project_ids.extend(hash_prefixed_ids)
 
     # REMOVED: Strategy that extracted standalone 7-digit numbers
@@ -231,7 +231,7 @@ def _extract_ids_from_data(data: Any) -> List[str]:
         # Check for direct 'id' field
         if 'id' in data:
             id_val = str(data['id'])
-            if id_val.isdigit() and len(id_val) == 7:
+            if id_val.isdigit() and len(id_val) in (7, 8):
                 ids.append(id_val)
 
         # Check for 'projects' array
@@ -239,14 +239,14 @@ def _extract_ids_from_data(data: Any) -> List[str]:
             for project in data['projects']:
                 if isinstance(project, dict) and 'id' in project:
                     id_val = str(project['id'])
-                    if id_val.isdigit() and len(id_val) == 7:
+                    if id_val.isdigit() and len(id_val) in (7, 8):
                         ids.append(id_val)
 
         # Check for 'project' object
         if 'project' in data and isinstance(data['project'], dict):
             if 'id' in data['project']:
                 id_val = str(data['project']['id'])
-                if id_val.isdigit() and len(id_val) == 7:
+                if id_val.isdigit() and len(id_val) in (7, 8):
                     ids.append(id_val)
 
         # Recursively check all dict values
@@ -532,8 +532,8 @@ def extract_entities_from_message(message: str) -> Dict[str, Any]:
     """
     entities = {}
 
-    # Extract project IDs
-    project_id_matches = re.findall(r'\b(\d{7})\b', message)
+    # Extract project IDs (7-8 digits for both old and new ID formats)
+    project_id_matches = re.findall(r'\b(\d{7,8})\b', message)
     if project_id_matches:
         entities['project_id'] = project_id_matches[0]
 

@@ -1770,7 +1770,8 @@ def orchestrate_intelligent_workflow(
         logger.info(f"[ORDINAL] Detected ordinal reference: index={ordinal_index}")
 
         # Get project_ids from workflow state (stored when projects were listed)
-        project_ids = workflow_state.get('context', {}).get('project_ids', [])
+        # Handle None workflow_state (e.g., fresh SMS session without prior project list)
+        project_ids = (workflow_state or {}).get('context', {}).get('project_ids', [])
 
         if project_ids:
             try:
