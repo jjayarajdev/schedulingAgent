@@ -1671,8 +1671,11 @@ update_contact_flow_lex_bot() {
     updated_content=$(echo "$updated_content" | sed -E "s|arn:aws:lex:[^:]+:[0-9]+:bot-alias/[A-Z0-9]+/[A-Z0-9]+|${target_lex_arn}|g")
 
     # Also update the metadata bot name references
+    # Handle all possible bot name patterns (dev/prod, with/without -syn- prefix)
     updated_content=$(echo "$updated_content" | sed "s/pf-scheduling-assistant-dev/${bot_name}/g")
+    updated_content=$(echo "$updated_content" | sed "s/pf-scheduling-assistant-prod/${bot_name}/g")
     updated_content=$(echo "$updated_content" | sed "s/pf-syn-scheduling-assistant-dev/${bot_name}/g")
+    updated_content=$(echo "$updated_content" | sed "s/pf-syn-scheduling-assistant-prod/${bot_name}/g")
 
     # Apply the update
     local output
