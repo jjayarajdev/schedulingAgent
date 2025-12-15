@@ -128,6 +128,10 @@ docs/**/*.pdf
 !docs/MONITORING_SETUP_GUIDE.md
 !docs/phase3/README.md
 
+# Sensitive infrastructure documentation (contains AWS account IDs, ARNs, secrets)
+docs/PF_SYN_PROD_DEPLOYMENT.md
+docs/*_DEPLOYMENT.md
+
 # Ignore root-level temporary MD files
 /*.md
 !README.md
