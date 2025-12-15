@@ -538,11 +538,13 @@ validate_pinpoint_two_way_sms() {
 
 # =============================================================================
 # SMS DynamoDB Tables
+# NOTE: SMS DynamoDB tables are deployed to CORE_REGION (us-east-2), not VOICE_REGION
+# This is consistent with all other DynamoDB tables in the system
 # =============================================================================
 
 # Deploy SMS-related DynamoDB tables
 deploy_sms_dynamodb_tables() {
-    log_info "Deploying DynamoDB tables for SMS..."
+    log_info "Deploying DynamoDB tables for SMS to CORE_REGION (${CORE_REGION})..."
 
     for base in "${SMS_DYNAMODB_TABLE_BASES[@]}"; do
         local full_table_name=$(table_name "$base")
@@ -552,19 +554,20 @@ deploy_sms_dynamodb_tables() {
 
 # Deploy a single SMS DynamoDB table
 # Tables have different key schemas:
-#   - sms-sessions: phone_number (HASH) + phone-index GSI
+#   - sms-sessions: session_id (HASH) + phone-index GSI on phone_number
 #   - sms-consent, opt-out-tracking: phone_number (HASH)
 #   - sms-messages: message_id (HASH)
+# NOTE: All DynamoDB tables are deployed to CORE_REGION (us-east-2)
 deploy_sms_dynamodb_table() {
     local tbl_name="$1"
     local base_name="$2"  # Optional: base name to determine key schema
 
-    if aws dynamodb describe-table --table-name "$tbl_name" --region "$VOICE_REGION" &>/dev/null; then
-        log_debug "Table $tbl_name already exists"
+    if aws dynamodb describe-table --table-name "$tbl_name" --region "$CORE_REGION" &>/dev/null; then
+        log_debug "Table $tbl_name already exists in $CORE_REGION"
         # Check if sms-sessions table needs phone-index GSI
         if [[ "$base_name" == "sms-sessions" || "$tbl_name" == *"sms-sessions"* ]]; then
             local has_gsi
-            has_gsi=$(aws dynamodb describe-table --table-name "$tbl_name" --region "$VOICE_REGION" \
+            has_gsi=$(aws dynamodb describe-table --table-name "$tbl_name" --region "$CORE_REGION" \
                 --query "Table.GlobalSecondaryIndexes[?IndexName=='phone-index'].IndexName" --output text 2>/dev/null)
             if [[ -z "$has_gsi" || "$has_gsi" == "None" ]]; then
                 log_info "Adding phone-index GSI to $tbl_name..."
@@ -573,50 +576,73 @@ deploy_sms_dynamodb_table() {
                     --attribute-definitions AttributeName=phone_number,AttributeType=S \
                     --global-secondary-index-updates \
                     "[{\"Create\":{\"IndexName\":\"phone-index\",\"KeySchema\":[{\"AttributeName\":\"phone_number\",\"KeyType\":\"HASH\"}],\"Projection\":{\"ProjectionType\":\"ALL\"}}}]" \
-                    --region "$VOICE_REGION" &>/dev/null || true
+                    --region "$CORE_REGION" &>/dev/null || true
+                # Wait for GSI to become active
+                log_info "Waiting for phone-index GSI to become active..."
+                local max_wait=300  # 5 minutes max
+                local wait_count=0
+                while [[ $wait_count -lt $max_wait ]]; do
+                    local gsi_status
+                    gsi_status=$(aws dynamodb describe-table --table-name "$tbl_name" --region "$CORE_REGION" \
+                        --query "Table.GlobalSecondaryIndexes[?IndexName=='phone-index'].IndexStatus" --output text 2>/dev/null)
+                    if [[ "$gsi_status" == "ACTIVE" ]]; then
+                        log_info "phone-index GSI is now ACTIVE"
+                        break
+                    fi
+                    sleep 10
+                    ((wait_count+=10))
+                done
             fi
         fi
         return 0
     fi
 
     # Determine key attribute based on table type
+    # sms-sessions uses session_id as primary key with phone-index GSI
     local key_attr="phone_number"
     local key_type="S"
     if [[ "$base_name" == "sms-messages" || "$tbl_name" == *"sms-messages"* ]]; then
         key_attr="message_id"
+    elif [[ "$base_name" == "sms-sessions" || "$tbl_name" == *"sms-sessions"* ]]; then
+        key_attr="session_id"
     fi
 
     # Check if sms-sessions table needs GSI
-    local gsi_option=""
+    local needs_gsi=false
     if [[ "$base_name" == "sms-sessions" || "$tbl_name" == *"sms-sessions"* ]]; then
-        gsi_option='--global-secondary-indexes [{"IndexName":"phone-index","KeySchema":[{"AttributeName":"phone_number","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}}]'
+        needs_gsi=true
     fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        echo -e "${CYAN}[DRY-RUN]${NC} Create DynamoDB table: $tbl_name"
+        echo -e "${CYAN}[DRY-RUN]${NC} Create DynamoDB table: $tbl_name (region: $CORE_REGION)"
         echo -e "${YELLOW}  \$ aws dynamodb create-table \\\\${NC}"
         echo -e "${YELLOW}      --table-name \"$tbl_name\" \\\\${NC}"
-        echo -e "${YELLOW}      --attribute-definitions AttributeName=$key_attr,AttributeType=$key_type \\\\${NC}"
+        if [[ "$needs_gsi" == "true" ]]; then
+            echo -e "${YELLOW}      --attribute-definitions AttributeName=$key_attr,AttributeType=$key_type AttributeName=phone_number,AttributeType=S \\\\${NC}"
+        else
+            echo -e "${YELLOW}      --attribute-definitions AttributeName=$key_attr,AttributeType=$key_type \\\\${NC}"
+        fi
         echo -e "${YELLOW}      --key-schema AttributeName=$key_attr,KeyType=HASH \\\\${NC}"
-        if [[ -n "$gsi_option" ]]; then
-            echo -e "${YELLOW}      $gsi_option \\\\${NC}"
+        if [[ "$needs_gsi" == "true" ]]; then
+            echo -e "${YELLOW}      --global-secondary-indexes '[{\"IndexName\":\"phone-index\",\"KeySchema\":[{\"AttributeName\":\"phone_number\",\"KeyType\":\"HASH\"}],\"Projection\":{\"ProjectionType\":\"ALL\"}}]' \\\\${NC}"
         fi
         echo -e "${YELLOW}      --billing-mode PAY_PER_REQUEST \\\\${NC}"
-        echo -e "${YELLOW}      --region \"$VOICE_REGION\"${NC}"
+        echo -e "${YELLOW}      --region \"$CORE_REGION\"${NC}"
         echo ""
         return 0
     fi
 
-    log_info "Creating DynamoDB table: $tbl_name (key: $key_attr)"
+    log_info "Creating DynamoDB table: $tbl_name (key: $key_attr) in $CORE_REGION"
 
-    if [[ -n "$gsi_option" ]]; then
+    if [[ "$needs_gsi" == "true" ]]; then
+        # sms-sessions: session_id as primary key, phone_number as GSI
         aws dynamodb create-table \
             --table-name "$tbl_name" \
-            --attribute-definitions "AttributeName=$key_attr,AttributeType=$key_type" \
+            --attribute-definitions "AttributeName=$key_attr,AttributeType=$key_type" "AttributeName=phone_number,AttributeType=S" \
             --key-schema "AttributeName=$key_attr,KeyType=HASH" \
             --global-secondary-indexes '[{"IndexName":"phone-index","KeySchema":[{"AttributeName":"phone_number","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}}]' \
             --billing-mode PAY_PER_REQUEST \
-            --region "$VOICE_REGION" \
+            --region "$CORE_REGION" \
             --output text &>/dev/null
     else
         aws dynamodb create-table \
@@ -624,12 +650,12 @@ deploy_sms_dynamodb_table() {
             --attribute-definitions "AttributeName=$key_attr,AttributeType=$key_type" \
             --key-schema "AttributeName=$key_attr,KeyType=HASH" \
             --billing-mode PAY_PER_REQUEST \
-            --region "$VOICE_REGION" \
+            --region "$CORE_REGION" \
             --output text &>/dev/null
     fi
 
     # Wait for table to be active
-    aws dynamodb wait table-exists --table-name "$tbl_name" --region "$VOICE_REGION" 2>/dev/null
+    aws dynamodb wait table-exists --table-name "$tbl_name" --region "$CORE_REGION" 2>/dev/null
 }
 
 # =============================================================================
@@ -822,19 +848,20 @@ cleanup_sns_topic() {
 }
 
 # Cleanup SMS DynamoDB tables
+# NOTE: SMS DynamoDB tables are in CORE_REGION (us-east-2)
 cleanup_sms_dynamodb_tables() {
-    log_info "Cleaning up SMS DynamoDB tables..."
+    log_info "Cleaning up SMS DynamoDB tables from CORE_REGION (${CORE_REGION})..."
 
     for base in "${SMS_DYNAMODB_TABLE_BASES[@]}"; do
         local full_table_name=$(table_name "$base")
-        if aws dynamodb describe-table --table-name "$full_table_name" --region "$VOICE_REGION" &>/dev/null; then
+        if aws dynamodb describe-table --table-name "$full_table_name" --region "$CORE_REGION" &>/dev/null; then
             if [[ "$DRY_RUN" == "true" ]]; then
-                echo -e "${CYAN}[DRY-RUN]${NC} Delete DynamoDB table: $full_table_name"
-                echo -e "${YELLOW}  \$ aws dynamodb delete-table --table-name \"$full_table_name\" --region \"$VOICE_REGION\"${NC}"
+                echo -e "${CYAN}[DRY-RUN]${NC} Delete DynamoDB table: $full_table_name (region: $CORE_REGION)"
+                echo -e "${YELLOW}  \$ aws dynamodb delete-table --table-name \"$full_table_name\" --region \"$CORE_REGION\"${NC}"
                 echo ""
             else
-                log_info "Deleting table: $full_table_name"
-                aws dynamodb delete-table --table-name "$full_table_name" --region "$VOICE_REGION" 2>/dev/null
+                log_info "Deleting table: $full_table_name from $CORE_REGION"
+                aws dynamodb delete-table --table-name "$full_table_name" --region "$CORE_REGION" 2>/dev/null
             fi
         fi
     done
@@ -931,13 +958,13 @@ validate_sms() {
         ((failed++))
     fi
 
-    # Validate DynamoDB tables
+    # Validate DynamoDB tables (in CORE_REGION)
     for base in "${SMS_DYNAMODB_TABLE_BASES[@]}"; do
         local full_table_name=$(table_name "$base")
-        if aws dynamodb describe-table --table-name "$full_table_name" --region "$VOICE_REGION" &>/dev/null; then
-            log_info "Table $full_table_name: EXISTS"
+        if aws dynamodb describe-table --table-name "$full_table_name" --region "$CORE_REGION" &>/dev/null; then
+            log_info "Table $full_table_name: EXISTS (${CORE_REGION})"
         else
-            log_error "Table $full_table_name: NOT FOUND"
+            log_error "Table $full_table_name: NOT FOUND in $CORE_REGION"
             ((failed++))
         fi
     done

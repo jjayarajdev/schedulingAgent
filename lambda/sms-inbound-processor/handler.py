@@ -40,10 +40,14 @@ PF_SECRET_NAME = os.environ.get('PF_SECRET_NAME', 'projectforce/api/credentials'
 SMS_CONFIGURATION_SET = os.environ.get('SMS_CONFIGURATION_SET', f'scheduling-agent-sms-config-{ENVIRONMENT}')
 
 # Multi-region configuration
-# VOICE_REGION (us-east-1): Where this Lambda runs - for SMS, DynamoDB sessions, Secrets Manager
-# CORE_REGION (us-east-2): Where orchestrator and Bedrock run
-VOICE_REGION = os.environ.get('AWS_REGION', 'us-east-1')
+# VOICE_REGION (us-east-1): Where this Lambda runs - for SMS/Pinpoint
+# CORE_REGION (us-east-2): Where orchestrator, Bedrock, and DynamoDB tables are
+# DYNAMODB_REGION: Explicit setting for DynamoDB tables (defaults to CORE_REGION)
+# SECRETS_REGION: Explicit setting for Secrets Manager (defaults to CORE_REGION)
+VOICE_REGION = os.environ.get('REGION', os.environ.get('AWS_REGION', 'us-east-1'))
 CORE_REGION = os.environ.get('ORCHESTRATOR_REGION', 'us-east-2')
+DYNAMODB_REGION = os.environ.get('DYNAMODB_REGION', CORE_REGION)
+SECRETS_REGION = os.environ.get('SECRETS_REGION', CORE_REGION)
 
 # Configuration constants
 MAX_MESSAGE_LENGTH = 1600  # SMS character limit (10 segments)
@@ -52,14 +56,14 @@ MAX_RETRY_ATTEMPTS = 3
 ORCHESTRATOR_TIMEOUT_SECONDS = 30
 
 # AWS clients - with appropriate regions for multi-region architecture
-# DynamoDB SMS tables are in VOICE_REGION (co-located with SMS Lambda)
-dynamodb = boto3.resource('dynamodb', region_name=VOICE_REGION)
+# DynamoDB SMS tables are in DYNAMODB_REGION (CORE_REGION: us-east-2)
+dynamodb = boto3.resource('dynamodb', region_name=DYNAMODB_REGION)
 # SMS client in VOICE_REGION where phone numbers are provisioned
 sms_client = boto3.client('pinpoint-sms-voice-v2', region_name=VOICE_REGION)
 # Lambda client for orchestrator calls - CORE_REGION for cross-region invocation
 lambda_client = boto3.client('lambda', region_name=CORE_REGION)
-# Secrets Manager in CORE_REGION where credentials are stored
-secrets_client = boto3.client('secretsmanager', region_name=CORE_REGION)
+# Secrets Manager in SECRETS_REGION where credentials are stored
+secrets_client = boto3.client('secretsmanager', region_name=SECRETS_REGION)
 
 # Cache for PF credentials (avoids repeated Secrets Manager calls)
 _pf_credentials_cache = None
