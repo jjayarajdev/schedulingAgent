@@ -42,7 +42,56 @@ echo "════════════════════════�
 echo "🚀 ProjectForce Web Application Launcher (OS: $OS, Python: $PYTHON)"
 echo "════════════════════════════════════════════════════════════════════════════"
 echo ""
- 
+
+# Environment Selection
+echo "🌍 Environment Selection:"
+echo "────────────────────────────────────────────────────────────────────────────"
+echo "  1) dev  - Development (us-east-1)"
+echo "  2) prod - Production  (us-east-2 core, us-east-1 voice)"
+echo ""
+
+# Check for command line argument first
+if [ -n "$1" ]; then
+    case "$1" in
+        dev|1)   ENVIRONMENT="dev" ;;
+        prod|2)  ENVIRONMENT="prod" ;;
+        *)       ENVIRONMENT="dev" ;;
+    esac
+    echo "  Using environment from argument: $ENVIRONMENT"
+else
+    read -p "  Select environment [1/2] (default: 1 - dev): " env_choice
+    case "$env_choice" in
+        2|prod)  ENVIRONMENT="prod" ;;
+        *)       ENVIRONMENT="dev" ;;
+    esac
+fi
+
+# Set region and API Gateway based on environment
+if [ "$ENVIRONMENT" = "prod" ]; then
+    AWS_REGION="us-east-2"
+    API_BASE="https://api-cx-portal.apps.projectsforce.com"
+    API_GATEWAY_ID="2buu0358i0"
+    API_GATEWAY_URL="https://2buu0358i0.execute-api.us-east-2.amazonaws.com/prod"
+else
+    AWS_REGION="us-east-1"
+    API_BASE="https://api-cx-portal.dev.projectsforce.com"
+    API_GATEWAY_ID="4e4680oc2h"
+    API_GATEWAY_URL="https://4e4680oc2h.execute-api.us-east-1.amazonaws.com/dev"
+fi
+
+export ENVIRONMENT
+export AWS_REGION
+export API_GATEWAY_ID
+export API_GATEWAY_URL
+
+echo ""
+echo "  ✅ Environment:  $ENVIRONMENT"
+echo "  ✅ AWS Region:   $AWS_REGION"
+echo "  ✅ API Base:     $API_BASE"
+echo "  ✅ API Gateway:  $API_GATEWAY_URL"
+echo "────────────────────────────────────────────────────────────────────────────"
+echo ""
+
 # Display AWS Account Information
 echo "☁️  AWS Account Information:"
 echo "────────────────────────────────────────────────────────────────────────────"
@@ -52,7 +101,6 @@ if command -v aws &> /dev/null; then
     if [ $? -eq 0 ]; then
         AWS_ACCOUNT=$(echo "$AWS_IDENTITY" | grep -o '"Account": "[^"]*"' | cut -d'"' -f4)
         AWS_USER=$(echo "$AWS_IDENTITY" | grep -o '"Arn": "[^"]*"' | cut -d'"' -f4 | awk -F'/' '{print $NF}')
-        AWS_REGION=$(aws configure get region 2>/dev/null || echo "us-east-1")
         AWS_PROFILE_NAME="${AWS_PROFILE:-default}"
  
         echo "  • Account ID: $AWS_ACCOUNT"
@@ -171,8 +219,10 @@ open_browser "http://localhost:8000/index.local.html"
  
 echo ""
 echo "════════════════════════════════════════════════════════════════════════════"
-echo "✅ Web Application is running!"
+echo "✅ Web Application is running! [Environment: $ENVIRONMENT]"
 echo "════════════════════════════════════════════════════════════════════════════"
+echo ""
+echo "🌍 Environment: $ENVIRONMENT | Region: $AWS_REGION | Gateway: $API_GATEWAY_ID"
 echo ""
 echo "📡 Services:"
 echo "  • CORS Proxy: http://localhost:5003 (PID: $PROXY_PID)"

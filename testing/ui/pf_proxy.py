@@ -208,31 +208,41 @@ def extract_location_from_history(conversation_history):
 
 # Load agent configuration dynamically
 def load_agent_config():
-    """Load agent configuration from config/agent_config.dev.json"""
+    """Load agent configuration based on ENVIRONMENT variable"""
+    env = ENVIRONMENT  # Use the environment set at module load time
+    config_filename = f"agent_config.{env}.json"
+
+    logger.info(f"🔍 Looking for config: {config_filename} (ENVIRONMENT={env})")
+
     # Try multiple possible paths (from testing/ui to bedrock/config)
     possible_paths = [
-        Path(__file__).parent / "../../config/agent_config.dev.json",               # bedrock/testing/ui -> bedrock/config
-        Path(__file__).resolve().parent.parent.parent / "config" / "agent_config.dev.json",  # Absolute path
-        Path(__file__).parent.parent / "config" / "agent_config.dev.json",          # Alternative
+        Path(__file__).parent / f"../../config/{config_filename}",               # bedrock/testing/ui -> bedrock/config
+        Path(__file__).resolve().parent.parent.parent / "config" / config_filename,  # Absolute path
+        Path(__file__).parent.parent / "config" / config_filename,          # Alternative
     ]
 
     for config_path in possible_paths:
         try:
             resolved_path = config_path.resolve()
+            logger.debug(f"🔍 Checking path: {resolved_path}")
             if resolved_path.exists():
                 logger.info(f"✅ Loading agent config from: {resolved_path}")
                 with open(resolved_path, 'r') as f:
-                    return json.load(f)
+                    config = json.load(f)
+                    logger.info(f"📋 Config environment: {config.get('environment')}, orchestrator: {config.get('orchestrator_function')}")
+                    return config
         except Exception as e:
             logger.debug(f"Could not load from {config_path}: {e}")
             continue
 
     # Fallback to hardcoded values if config not found
-    logger.warning("⚠️  Could not find agent_config.dev.json, using hardcoded values")
+    logger.warning(f"⚠️  Could not find {config_filename}, using hardcoded values")
     logger.warning(f"⚠️  Tried paths: {[str(p) for p in possible_paths]}")
     return {
         "supervisor_id": "76VIQYAT6R",
-        "supervisor_alias": "TSTALIASID"
+        "supervisor_alias": "TSTALIASID",
+        "orchestrator_function": f"pf-syn-orchestrator-{env}",
+        "region": AWS_REGION
     }
 
 # Load configuration at startup
@@ -1271,11 +1281,15 @@ def invoke_agent():
 
         # ALWAYS route through orchestrator (no direct Lambda calls from proxy)
         # Orchestrator handles: Direct Lambda optimization + context resolution + formatting
-        logger.info(f"🎯 Routing ALL requests to LAMBDA ORCHESTRATOR: pf-orchestrator")
+        orchestrator_fn = AGENT_CONFIG.get('orchestrator_function', 'pf-orchestrator')
+        logger.info(f"🎯 Routing ALL requests to LAMBDA ORCHESTRATOR: {orchestrator_fn}")
 
         try:
             lambda_start = time.time()
-            lambda_client = boto3.client('lambda', region_name=AWS_REGION)
+            # Use region from config if available, otherwise fall back to AWS_REGION
+            config_region = AGENT_CONFIG.get('region', AWS_REGION)
+            lambda_client = boto3.client('lambda', region_name=config_region)
+            logger.info(f"🔌 Lambda client using region: {config_region}")
 
             # Prepare orchestrator event (API Gateway format)
             request_body = {
@@ -1293,12 +1307,10 @@ def invoke_agent():
                 }
             }
 
-            logger.info(f"📤 Invoking pf-orchestrator for message: '{message[:50]}...'")
-
             # Invoke Lambda orchestrator (use function name without version qualifier)
-            orchestrator_function = AGENT_CONFIG.get('orchestrator_function', 'pf-orchestrator')
+            logger.info(f"📤 Invoking {orchestrator_fn} for message: '{message[:50]}...'")
             response = lambda_client.invoke(
-                FunctionName=orchestrator_function,
+                FunctionName=orchestrator_fn,
                 InvocationType='RequestResponse',
                 Payload=json.dumps(orchestrator_event)
             )

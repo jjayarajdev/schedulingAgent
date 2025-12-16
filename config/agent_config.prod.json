@@ -2,6 +2,8 @@
   "environment": "prod",
   "supervisor_id": "SQRXPIXRFY",
   "supervisor_alias": "TSTALIASID",
+  "orchestrator_arn": "arn:aws:lambda:us-east-2:772634497954:function:pf-syn-orchestrator-prod",
+  "orchestrator_function": "pf-syn-orchestrator-prod",
   "agents": {
     "scheduling": {
       "agent_id": "NMJD4Q7WTT",
@@ -22,7 +24,7 @@
     "use_supervisor": true,
     "classifier_model": "anthropic.claude-3-haiku-20240307-v1:0"
   },
-  "region": "us-east-1",
+  "region": "us-east-2",
   "prefix": "pf_",
   "customer_context": {
     "injection_method": "prompt_augmentation_and_session_attributes",
