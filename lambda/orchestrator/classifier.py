@@ -111,6 +111,7 @@ The user may use contractor/customer industry slang. Map these to the correct ac
 
 PROJECT SYNONYMS (all refer to projects):
 - "job/jobs" = projects (e.g., "show my jobs" = "show my projects")
+- "order/orders" = projects (e.g., "what orders can I schedule" = "what projects can I schedule")
 - "install/installs" = projects, often type=Installation
 - "work order/work orders" = projects
 - "ticket/tickets" = projects
@@ -219,8 +220,9 @@ get_weather:
 
 list_projects:
 - Examples: "show my projects", "list projects", "what projects do I have", "display projects"
-- ALSO RECOGNIZES (industry terms): "show my jobs", "list my installs", "what work orders do I have",
-  "my appointments", "my service calls", "show my floor jobs", "my deck work", "what's on the books"
+- ALSO RECOGNIZES (industry terms): "show my jobs", "show my orders", "what orders can I schedule",
+  "list my installs", "what work orders do I have", "my appointments", "my service calls",
+  "show my floor jobs", "my deck work", "what's on the books"
 - MUST be pure queries (show/list/get/display/what)
 - NO action verbs allowed
 - IMPORTANT: Extract filter parameters if mentioned:
@@ -376,6 +378,11 @@ Example 13 - Industry term "jobs" (Direct Lambda):
 For "show my jobs":
 {{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":null}}
 Reasoning: "jobs" = "projects" in industry terminology -> list_projects
+
+Example 13b - Industry term "orders" (Direct Lambda):
+For "what orders can I schedule":
+{{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":{{"status":"New"}}}}
+Reasoning: "orders" = "projects", "can I schedule" implies unscheduled/New status -> list_projects with filter
 
 Example 14 - Industry term with category (Direct Lambda):
 For "my hardwood installs":

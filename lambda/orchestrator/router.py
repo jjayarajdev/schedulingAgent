@@ -363,6 +363,20 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
         elif action == 'get_available_dates':
+            # Check if project is already scheduled - offer reschedule instead of error
+            if response_body.get('already_scheduled'):
+                project_id = response_body.get('project_id', '')
+                # Build response that offers reschedule
+                result = {
+                    "message": "This project is already scheduled.",
+                    "already_scheduled": True,
+                    "project_id": project_id,
+                    "offer_reschedule": True
+                }
+                if channel == 'voice':
+                    return "This project is already scheduled. Would you like to reschedule it instead?"
+                return f"This project is already scheduled. Would you like to reschedule it?\n\n```json\n{json.dumps(result, indent=2)}\n```"
+
             dates = response_body.get('available_dates', [])
             if not dates:
                 return "No available dates found for this project."

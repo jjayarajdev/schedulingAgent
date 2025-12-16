@@ -205,11 +205,93 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
     if not workflow_state:
         return None
 
+    # Defensive check: ensure workflow_state is a dict, not a string
+    if not isinstance(workflow_state, dict):
+        logger.warning(f"[CONTINUATION] workflow_state is {type(workflow_state).__name__}, expected dict. Skipping continuation.")
+        return None
+
     current_stage = workflow_state.get('current_stage')
     context = workflow_state.get('context', {})
     workflow_type = workflow_state.get('workflow_type', '')
 
     logger.info(f"[CONTINUATION] Checking continuation: stage={current_stage}, workflow_type={workflow_type}")
+
+    # ========================================================================
+    # CONTEXT SWITCH DETECTION: Check if user mentions a DIFFERENT project
+    # If so, skip continuation and process the new request fresh
+    # This prevents workflow state contamination when user switches context
+    # Detects context switch by: project_id, category, status, or type
+    # ========================================================================
+    context_project_id = context.get('project_id')
+    context_category = context.get('category', '').lower()
+    # Check both top-level (after context switch) AND inside context (normal flow)
+    project_mapping = workflow_state.get('project_mapping', {}) or context.get('project_mapping', {})
+
+    if context_project_id:
+        import re
+        message_lower = message.lower()
+
+        # 1. Check for explicit project_id mention
+        project_patterns = [
+            r'project\s*#?\s*(\d{6,8})',  # "project #7751746" or "project 7751746"
+            r'#(\d{6,8})',                 # "#7751746"
+            r'\b(\d{7})\b',                # standalone 7-digit number (common project ID format)
+        ]
+
+        message_project_id = None
+        for pattern in project_patterns:
+            match = re.search(pattern, message_lower)
+            if match:
+                message_project_id = match.group(1)
+                break
+
+        # If user mentioned a different project ID, signal context switch
+        if message_project_id and str(message_project_id) != str(context_project_id):
+            logger.info(f"[CONTINUATION] CONTEXT SWITCH DETECTED (by ID): User mentioned project {message_project_id}, but workflow has project {context_project_id}. Clearing workflow state.")
+            return {'context_switch': True, 'clear_state': True}
+
+        # 2. Check for category-based context switch (e.g., "show the dishwasher project")
+        # Only check if user didn't mention a specific project_id
+        if not message_project_id and context_category and project_mapping:
+            # Common project categories to detect
+            category_keywords = [
+                'decking', 'storm door', 'storm', 'dishwasher', 'sink', 'kitchen sink',
+                'oven', 'ovens', 'washer dryer', 'washer', 'dryer', 'cooktop', 'electric cooktop',
+                'exterior door', 'exterior doors', 'exterior', 'windows', 'doors', 'electric'
+            ]
+
+            # Check if message contains a category different from current project
+            for category_kw in category_keywords:
+                if category_kw in message_lower:
+                    # Find project with this category in project_mapping
+                    for pid, proj_info in project_mapping.items():
+                        proj_category = (proj_info.get('category', '') or '').lower()
+                        if category_kw in proj_category and str(pid) != str(context_project_id):
+                            logger.info(f"[CONTINUATION] CONTEXT SWITCH DETECTED (by category): User mentioned '{category_kw}', found project {pid}, but workflow has project {context_project_id}. Clearing workflow state.")
+                            return {'context_switch': True, 'clear_state': True}
+
+                    # Also check if mentioned category differs from current project's category
+                    if category_kw not in context_category:
+                        logger.info(f"[CONTINUATION] CONTEXT SWITCH DETECTED (category mismatch): User mentioned '{category_kw}', but current project category is '{context_category}'. Clearing workflow state.")
+                        return {'context_switch': True, 'clear_state': True}
+
+        # 3. Check for status-based context switch (e.g., "show the scheduled project")
+        if not message_project_id and project_mapping:
+            status_keywords = {
+                'scheduled': ['scheduled', 'tentatively scheduled'],
+                'ready to schedule': ['ready to schedule', 'ready'],
+                'completed': ['completed', 'done', 'finished'],
+                'cancelled': ['cancelled', 'canceled']
+            }
+
+            for status_term, status_variants in status_keywords.items():
+                if any(sv in message_lower for sv in status_variants):
+                    # Find project with this status in project_mapping
+                    for pid, proj_info in project_mapping.items():
+                        proj_status = (proj_info.get('status', '') or '').lower()
+                        if any(sv in proj_status for sv in status_variants) and str(pid) != str(context_project_id):
+                            logger.info(f"[CONTINUATION] CONTEXT SWITCH DETECTED (by status): User mentioned '{status_term}', found project {pid}, but workflow has project {context_project_id}. Clearing workflow state.")
+                            return {'context_switch': True, 'clear_state': True}
 
     # ========================================================================
     # ABORT HANDLING: Check if user wants to go back / cancel / never mind
@@ -821,7 +903,8 @@ def intelligent_classify(
     workflow_context = ""
     if current_workflow_state:
         context = current_workflow_state.get('context', {})
-        project_mapping = context.get('project_mapping', {})
+        project_mapping = current_workflow_state.get('project_mapping', {}) or context.get('project_mapping', {})
+        viewed_projects = current_workflow_state.get('viewed_projects', [])
 
         # Format project_mapping for clear display
         project_mapping_str = ""
@@ -838,6 +921,23 @@ IMPORTANT: When user says "schedule the X" where X is a category name (e.g., "st
 find the project_id that has a matching category and return that project_id in entities.
 """
 
+        # Format viewed_projects history for context awareness
+        viewed_projects_str = ""
+        if viewed_projects:
+            viewed_lines = []
+            for i, vp in enumerate(viewed_projects):
+                viewed_lines.append(f"  {i+1}. #{vp.get('project_id')} - {vp.get('category', 'Unknown')} ({vp.get('status', 'Unknown')})")
+            viewed_projects_str = f"""
+
+RECENTLY VIEWED PROJECTS (projects the user has looked at in this session - most recent first):
+{chr(10).join(viewed_lines)}
+IMPORTANT: User can reference these by saying things like:
+- "the Decking project" -> find project with matching category in this list
+- "the first project I looked at" -> use the oldest viewed project
+- "go back to the other project" -> use the previous project in this list
+- "that project" or "it" -> use the most recently viewed project
+"""
+
         workflow_context = f"""
 
 Current workflow state:
@@ -845,7 +945,7 @@ Current workflow state:
 - Stage: {current_workflow_state.get('current_stage', 'start')}
 - Context: {json.dumps(context, indent=2)}
 - Summary: {current_workflow_state.get('conversation_summary', 'No summary')}
-{project_mapping_str}"""
+{project_mapping_str}{viewed_projects_str}"""
 
     prompt = f"""You are an intelligent orchestrator for a property management scheduling system.
 
@@ -1260,6 +1360,24 @@ Determine the next step:
 
 CATEGORY-BASED PROJECT LOOKUP: When user refers to a project by category (e.g., "storm door project", "kitchen sink", "decking project"), check the project_mapping in workflow context to find the exact project_id that matches that category. Do NOT call list_projects if you already have project_mapping - just use it to resolve the project_id directly.
 
+CRITICAL RULES - RESPECT THE CLASSIFICATION:
+
+1. NEVER AUTO-SELECT DATES:
+   When classification.action == "get_available_dates", you MUST call get_available_dates Lambda.
+   DO NOT skip to get_time_slots even if there are available_dates in workflow context!
+   User says "let's schedule it" -> ALWAYS call get_available_dates (NOT get_time_slots)
+   Only call get_time_slots when user explicitly selects a date like "December 17" or "the 8th".
+
+2. NEVER OVERRIDE get_project_details:
+   When classification.action == "get_project_details", you MUST call get_project_details Lambda.
+   DO NOT change it to get_available_dates or any scheduling action!
+   Even if there's an active scheduling workflow, respect the user's explicit request for project details.
+   User says "show details for X" -> ALWAYS call get_project_details.
+
+3. GENERAL RULE - TRUST THE CLASSIFICATION:
+   The classification already analyzed what the user wants. Your job is to EXECUTE that action, not re-interpret it.
+   Only change the action when absolutely necessary (e.g., schedule_project -> get_available_dates because that's the first step).
+
 2. If we can call Lambda:
    - Specify which action and what parameters
    - IMPORTANT: Only include parameters that have actual values - do NOT include parameters with None/null values
@@ -1475,6 +1593,33 @@ def orchestrate_intelligent_workflow(
     # This prevents "5th Dec" from being interpreted as "5th project"
     # ========================================================================
     continuation = check_workflow_continuation(message, workflow_state)
+
+    # Handle CONTEXT SWITCH: User mentioned a different project
+    # Preserve viewed_projects history while switching to new project context
+    context_switch_handled = False  # Flag to skip decision step after context switch
+    if continuation and continuation.get('context_switch'):
+        logger.info("[CONTEXT_SWITCH] Preserving project history during context switch")
+        # Get current state to preserve viewed_projects and project_mapping
+        current_state = workflow_state or {}
+        viewed_projects = current_state.get('viewed_projects', [])
+        project_mapping = current_state.get('project_mapping', {})
+
+        # Reset workflow state but preserve project history
+        # The new project context will be set when we process the request
+        new_state = {
+            'workflow_type': 'browsing',
+            'current_stage': 'viewing',
+            'context': {},  # Will be updated with new project
+            'viewed_projects': viewed_projects,
+            'project_mapping': project_mapping,
+            'conversation_summary': 'User switched to a different project',
+            'last_action': 'context_switch'
+        }
+        state_manager.save_state(session_id, new_state)
+        workflow_state = new_state  # Update local variable
+        continuation = None  # Skip continuation processing - process fresh
+        context_switch_handled = True  # Mark that we just handled a context switch
+
     if continuation and continuation.get('continue_workflow'):
         logger.info(f"[CONTINUATION] Bypassing classification - user provided data at stage '{workflow_state.get('current_stage')}'")
 
@@ -1736,6 +1881,10 @@ def orchestrate_intelligent_workflow(
                             }
                     if project_ids:
                         logger.info(f"[VOICE-PRECHECK] Saving {len(project_ids)} project_ids and project_mapping to workflow state")
+                        # Get existing state to preserve viewed_projects
+                        existing_state = state_manager.get_state(session_id) or {}
+                        viewed_projects = existing_state.get('viewed_projects', [])
+
                         state_manager.save_state(session_id, {
                             'workflow_type': 'view_projects',
                             'current_stage': 'showing_projects',
@@ -1743,7 +1892,9 @@ def orchestrate_intelligent_workflow(
                                 'project_ids': project_ids,
                                 'project_mapping': project_mapping,
                                 'customer_id': customer_id
-                            }
+                            },
+                            'viewed_projects': viewed_projects,
+                            'project_mapping': project_mapping
                         })
 
                 timing['total'] = time.time() - start_time
@@ -1899,6 +2050,21 @@ def orchestrate_intelligent_workflow(
                     response_text = format_lambda_response('get_project_details', response_body, message, channel)
 
                 timing['response_generation'] = time.time() - response_gen_start
+
+                # Track this project in viewed_projects history
+                try:
+                    address_info = project_data.get('address', {})
+                    state_manager.add_viewed_project(session_id, {
+                        'project_id': resolved_project_id,
+                        'category': project_data.get('category', ''),
+                        'status': project_data.get('status', ''),
+                        'city': address_info.get('city', ''),
+                        'state': address_info.get('state', ''),
+                        'address': address_info.get('address', '')
+                    })
+                    logger.info(f"[ORDINAL] Added project {resolved_project_id} to viewed_projects history")
+                except Exception as track_err:
+                    logger.warning(f"[ORDINAL] Failed to track viewed project (non-critical): {track_err}")
 
                 timing['total'] = time.time() - start_time
                 return {
@@ -2537,7 +2703,7 @@ What would you like to do?"""
     # Category can be in entities.search_criteria.category OR entities.category (Sonnet varies)
     category_to_resolve = search_criteria.get('category') or entities.get('category')
 
-    if (classified_action in ['get_project_details', 'get_available_dates', 'reschedule_appointment', 'cancel_appointment']
+    if (classified_action in ['get_project_details', 'get_available_dates', 'schedule_project', 'reschedule_appointment', 'cancel_appointment']
         and not entities.get('project_id')
         and category_to_resolve):
 
@@ -2545,9 +2711,10 @@ What would you like to do?"""
         logger.info(f"[CATEGORY-RESOLVE] Need to resolve category '{search_category}' to project_id")
 
         # Get project_mapping from workflow_state
+        # Check both top level (after context switch) AND inside context (normal flow)
         project_mapping = {}
         if workflow_state:
-            project_mapping = workflow_state.get('context', {}).get('project_mapping', {})
+            project_mapping = workflow_state.get('project_mapping', {}) or workflow_state.get('context', {}).get('project_mapping', {})
 
         if project_mapping:
             # Find matching project by category (case-insensitive, partial match)
@@ -2640,15 +2807,32 @@ What would you like to do?"""
                 logger.error(f"[CATEGORY-RESOLVE] Error fetching projects: {fetch_err}")
 
     # Step 2: Intelligent decision using Sonnet 3.7
-    logger.info("[DECISION] Step 2: Intelligent decision-making with Sonnet 3.7")
+    # CONTEXT SWITCH FIX: When context switch just happened, skip the decision step
+    # and use classification directly. This prevents the decision step from being
+    # confused by conversation history (e.g., time slots from previous workflow)
     decision_start = time.time()
 
-    decision = intelligent_decide_next_action(
-        message,
-        classification,
-        workflow_state,
-        conversation_history
-    )
+    if context_switch_handled and classification.get('action'):
+        # Build decision directly from classification - don't call Sonnet decision
+        logger.info(f"[DECISION] CONTEXT SWITCH: Skipping decision step, using classification directly: action={classification.get('action')}")
+        decision = {
+            'should_call_lambda': True,
+            'lambda_action': classification.get('action'),
+            'lambda_params': classification.get('entities', {}),
+            'update_workflow_state': {
+                'workflow_type': classification.get('workflow_type', 'browsing'),
+                'current_stage': 'viewing',
+                'context': classification.get('entities', {})
+            }
+        }
+    else:
+        logger.info("[DECISION] Step 2: Intelligent decision-making with Sonnet 3.7")
+        decision = intelligent_decide_next_action(
+            message,
+            classification,
+            workflow_state,
+            conversation_history
+        )
 
     timing['decision'] = time.time() - decision_start
 
@@ -2747,6 +2931,7 @@ What would you like to do?"""
         # because old workflow_state had workflow_type='reschedule_appointment'
         WORKFLOW_ACTIONS = {
             'schedule_appointment': 'schedule_appointment',
+            'schedule_project': 'schedule_appointment',  # Alias for schedule_appointment
             'get_available_dates': 'schedule_appointment',
             'get_time_slots': 'schedule_appointment',
             'reschedule_appointment': 'reschedule_appointment',
@@ -2941,6 +3126,13 @@ What would you like to do?"""
             'client_id': client_id,
             'pf_bearer_token': pf_bearer_token
         })
+
+        # Convert schedule_project to get_available_dates (schedule_project is the classifier action,
+        # but the Lambda only understands get_available_dates)
+        if lambda_action == 'schedule_project':
+            logger.info(f"[ACTION CONVERT] Converting schedule_project -> get_available_dates")
+            lambda_action = 'get_available_dates'
+            decision['lambda_action'] = 'get_available_dates'
 
         logger.info(f"[LAMBDA] Calling Lambda: {lambda_action} with params: {lambda_params}")
         lambda_start = time.time()

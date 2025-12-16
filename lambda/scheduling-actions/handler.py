@@ -814,9 +814,25 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
 
             # Handle specific error codes
             if status_code == 400:
-                # Check for "Job already requested" - means project already scheduled
-                if "already requested" in error_body.lower() or "already scheduled" in error_body.lower():
-                    raise ValueError("This project is already scheduled. To reschedule, please cancel the existing appointment first.")
+                # Check for various "already scheduled" error patterns from the API
+                error_lower = error_body.lower()
+                if ("already requested" in error_lower or
+                    "already scheduled" in error_lower or
+                    "already contains a technician" in error_lower or
+                    "technician already assigned" in error_lower):
+                    # Return structured response indicating project is already scheduled
+                    # This allows the orchestrator to offer reschedule instead of showing an error
+                    logger.info(f"[ALREADY_SCHEDULED] Project {project_id} is already scheduled: {error_body}")
+                    return {
+                        "action": "get_available_dates",
+                        "project_id": project_id,
+                        "already_scheduled": True,
+                        "error_message": "This project is already scheduled.",
+                        "available_dates": [],
+                        "dates": [],
+                        "dateCount": 0,
+                        "mock_mode": USE_MOCK_API
+                    }
                 raise ValueError(f"Invalid project: {error_body}")
             elif status_code == 404:
                 raise ValueError("No available dates for this project")

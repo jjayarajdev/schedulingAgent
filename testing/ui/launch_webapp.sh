@@ -89,6 +89,17 @@ echo "  ✅ Environment:  $ENVIRONMENT"
 echo "  ✅ AWS Region:   $AWS_REGION"
 echo "  ✅ API Base:     $API_BASE"
 echo "  ✅ API Gateway:  $API_GATEWAY_URL"
+if [ "$ENVIRONMENT" = "prod" ]; then
+    echo ""
+    echo "  🔐 Production Credentials:"
+    echo "     Username: jay.jayakeerthy@syntegreti.com"
+    echo "     Password: \$2b\$10\$QAoM3vlGAF30S603UTBAbOF2fHTMZEQ3i5CXAB6Sssj4.mjYxzTqq"
+else
+    echo ""
+    echo "  🔐 Dev Credentials:"
+    echo "     Username: jay@mailinator.com"
+    echo "     Password: U2FsdGVkX197AQMdkqthasfRGWLh41rhHVaw9Q9Q8cE="
+fi
 echo "────────────────────────────────────────────────────────────────────────────"
 echo ""
 
