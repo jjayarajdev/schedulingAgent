@@ -19,6 +19,53 @@ from voice_formatter import format_for_voice
 logger = logging.getLogger()
 
 # ============================================================================
+# Retry configuration for Bedrock calls
+# ============================================================================
+MAX_RETRIES = 3
+INITIAL_BACKOFF = 0.5  # seconds
+
+
+def retry_with_backoff(func, max_retries=MAX_RETRIES, initial_backoff=INITIAL_BACKOFF):
+    """
+    Execute a function with exponential backoff retry logic.
+
+    Args:
+        func: Callable to execute
+        max_retries: Maximum number of retry attempts
+        initial_backoff: Initial wait time in seconds
+
+    Returns:
+        Result of successful function call
+
+    Raises:
+        Last exception if all retries fail
+    """
+    last_exception = None
+
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except Exception as e:
+            last_exception = e
+            error_str = str(e).lower()
+
+            # Don't retry on auth errors or invalid requests
+            if 'accessdenied' in error_str or 'validationexception' in error_str:
+                logger.error(f"Non-retryable error: {e}")
+                raise
+
+            # Retry on throttling, timeout, or transient errors
+            if attempt < max_retries - 1:
+                wait_time = initial_backoff * (2 ** attempt)
+                logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"All {max_retries} attempts failed. Last error: {e}")
+
+    raise last_exception
+
+
+# ============================================================================
 # DynamoDB client for notes lookup
 # ============================================================================
 _dynamodb_resource = None
@@ -72,14 +119,16 @@ NEXT_ACTION_SUGGESTIONS = {
 }
 
 # ============================================================================
-# ERROR RESPONSES - Better messages with recovery paths
+# ERROR RESPONSES - Natural, helpful messages with recovery paths
 # ============================================================================
 ERROR_RESPONSES = {
-    'invalid_project': "I couldn't find that project. Say 'list projects' to see your options.",
-    'no_dates': "No dates available right now. Try 'check next week' or 'show different project'.",
-    'api_error': "Something went wrong on my end. Try again, or say 'help' for other options.",
-    'unknown_input': "I didn't catch that. You can say 'help' to see what I can do.",
-    'timeout': "The system is taking a while to respond. Please try again in a moment.",
+    'invalid_project': "Hmm, I don't see that project in your account. Want me to show you your project list?",
+    'no_dates': "No openings this week, unfortunately. I can check next week if you'd like.",
+    'api_error': "Oops, something hiccuped on my end. Mind trying that again?",
+    'unknown_input': "Sorry, I didn't quite get that. What would you like help with?",
+    'timeout': "Taking longer than usual - give me one more try?",
+    'bedrock_error': "I'm having trouble processing that right now. Let me try a simpler approach.",
+    'no_context': "I need a bit more info. Which project are you asking about?",
 }
 
 
@@ -154,7 +203,8 @@ def get_bedrock_runtime_client():
 
 def generate_conversational_response(action: str, user_message: str, structured_data: Dict[str, Any], channel: str = 'chat') -> str:
     """
-    Use Claude via Bedrock Converse API to generate conversational response
+    Use Claude via Bedrock Converse API to generate conversational response.
+    Includes retry logic with exponential backoff for reliability.
 
     Args:
         action: The action performed (list_projects, get_project_details, etc.)
@@ -165,12 +215,11 @@ def generate_conversational_response(action: str, user_message: str, structured_
     Returns:
         Conversational response from Claude
     """
-    try:
-        client = get_bedrock_runtime_client()
+    client = get_bedrock_runtime_client()
 
-        # VOICE-SPECIFIC PROMPT: Ultra-concise for phone calls
-        if channel == 'voice':
-            system_prompt = """You're on a PHONE CALL. Be ULTRA concise - max 1-2 SHORT sentences.
+    # VOICE-SPECIFIC PROMPT: Ultra-concise for phone calls
+    if channel == 'voice':
+        system_prompt = """You're on a PHONE CALL. Be ULTRA concise - max 1-2 SHORT sentences.
 
 RULES:
 1. MAX 2 sentences total
@@ -190,82 +239,59 @@ Examples:
 "5 dates available. December tenth through the fifteenth. Which works?"
 "Got 3 morning slots: 8 AM, 9 AM, and 10 AM. Which time?"
 """
-            user_prompt = f"""User asked: "{user_message}"
+        user_prompt = f"""User asked: "{user_message}"
 Data: {json.dumps(structured_data, indent=2)}
 
 Give a 1-2 sentence voice response. NO addresses, NO project IDs. End with a simple question if user needs to choose."""
 
-            max_tokens = 150  # Much shorter for voice
-        else:
-            # CHAT PROMPT: Original behavior
-            system_prompt = """You help customers with scheduling. Be DIRECT. No filler.
+        max_tokens = 150  # Much shorter for voice
+    else:
+        # CHAT PROMPT: Natural, conversational - like texting a helpful friend
+        system_prompt = """You're a friendly assistant helping someone manage their home projects.
+Write like you're texting a friend - warm, casual, helpful. Not corporate. Not robotic.
 
-BANNED PHRASES - NEVER USE THESE:
-- "Let me check" / "Let me look" / "Let me find"
-- "One moment" / "Just a moment" / "Give me a second"
-- "I'm checking" / "I'm looking" / "I'm searching"
-- "Hold on" / "Bear with me" / "Just a sec"
-- "Sure thing" / "Absolutely" / "Of course"
-- "I'd be happy to" / "I can help with that"
-- "Here's what I found" / "Here's what I see"
+TONE:
+- Like a helpful neighbor, not a call center script
+- Warm but efficient - get to the point
+- Use "you" and "your" naturally
+- It's okay to show personality
 
-RULES:
-1. Start with the answer, not filler
-2. Max 1-2 sentences
-3. Use contractions (you've, it's, don't)
+NEVER SAY:
+- "Let me check/look/find" (you already have the info!)
+- "One moment" / "Hold on" (no delays in chat)
+- "I'd be happy to" / "Certainly" / "Absolutely" (too formal)
+- "Here's what I found" (just say it)
 
-Examples:
-USER: "Show my projects"
-WRONG: "Let me check on that for you. One moment. Okay, so you've got 8 projects."
-RIGHT: "You've got 8 projects. Which one?"
+GOOD EXAMPLES:
+"You've got 3 projects lined up - a kitchen remodel, deck work, and some plumbing. What should we tackle?"
+"Good news - your deck install is all set for the 15th, morning slot. Jake will be there around 8."
+"Got 5 open dates next week. Tuesday and Thursday look best weather-wise."
 
-USER: "Schedule for next week"
-WRONG: "Sure thing! Let me look that up. I found 5 available dates."
-RIGHT: "5 dates available next week. Which day?"
+BAD EXAMPLES (don't do this):
+"I have retrieved your project information. You currently have 3 projects in our system."
+"Let me check on that for you. One moment please. I found 5 available dates."
 
-Weather Warning Guidelines:
-- If data contains 'weatherWarning', warn about bad weather conditions in simple terms
-- Use phrases like "rain and snow" instead of "precipitation"
-- Explain why it matters: "That's not ideal for outdoor work"
-- If 'betterDates' are provided, suggest them as alternatives
-- Be helpful, not alarming - respect their choice if they still want that date
-- Tone: like a helpful neighbor giving advice
+Weather notes:
+- If there are weather concerns, mention them casually: "Heads up - Wednesday might be rainy"
+- Suggest better dates if available: "Thursday looks clearer if that works"
+- Don't be alarming, just helpful
 
-IMPORTANT - When 'allDatesHaveWeatherConcerns' is true:
-- Tell the user: "Unfortunately, all available dates this week have similar weather concerns"
-- Explain briefly what the weather issue is (cold, snow, rain)
-- Give them clear options: "You can proceed anyway and our crew will do their best, or wait for new dates to open up"
-- Do NOT keep suggesting they pick a different day - there are no better options right now
+Keep it to 2-3 sentences max. Be helpful, not verbose."""
 
-Proactive Weather Indicators in Available Dates:
-- If dates have 'weatherIndicator' fields ([OK], [WARNING], or [ERROR]), mention which dates look good vs concerning
-- For [WARNING] or [ERROR] dates, briefly mention the concern (e.g., "cold weather", "snow expected")
-- If 'weatherSummary' shows weather concerns, mention: "A few of these dates have weather to consider"
-- Show the weather-suitable dates as good options: "Nov 28 and Nov 29 look great weather-wise"
-- Present ALL dates but help user make informed choice
-- Keep it brief - just highlight the key info, don't explain every date's weather"""
+        user_prompt = f"""User said: "{user_message}"
 
-            user_prompt = f"""The user asked: "{user_message}"
-
-I retrieved the following data from our system:
+Here's the data:
 {json.dumps(structured_data, indent=2)}
 
-Please write a friendly, conversational response that:
-1. Acknowledges their request
-2. Presents the information in a natural, easy-to-understand way
-3. Simply states the facts without asking follow-up questions
+Write a natural response - like you're texting them back.
+Don't end with questions unless they need to make a choice.
+Skip the JSON - that'll show separately."""
 
-IMPORTANT: Do NOT end with questions like "Would you like...", "Do you need...", "Can I help with...". Just present the information.
+        max_tokens = 300  # Reduced from 500 - encourages brevity
 
-Example of good response:
-"Just letting you know that your service appointment is all set. Your project (#7751746) is scheduled for November 26, 2025, from 8:00 AM to 9:00 AM. Our technician, Jay Installer1, will be visiting your place at 401 Chicago Avenue, Minneapolis, MN 55415."
-
-Keep your response concise (3-5 sentences) and friendly. Do NOT include the raw JSON data - I'll show that separately."""
-
-            max_tokens = 500
-
-        # Call Claude via Bedrock Converse API (using cross-region inference profile)
-        response = client.converse(
+    def make_bedrock_call():
+        """Inner function for retry wrapper"""
+        return client.converse(
             modelId="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
             messages=[
                 {
@@ -281,6 +307,10 @@ Keep your response concise (3-5 sentences) and friendly. Do NOT include the raw 
             }
         )
 
+    try:
+        # Use retry logic for reliability
+        response = retry_with_backoff(make_bedrock_call)
+
         # Extract conversational text
         conversational_text = response['output']['message']['content'][0]['text']
         logger.info(f"[OK] Generated conversational response for {channel} ({len(conversational_text)} chars)")
@@ -288,9 +318,20 @@ Keep your response concise (3-5 sentences) and friendly. Do NOT include the raw 
         return conversational_text.strip()
 
     except Exception as e:
-        logger.error(f"Failed to generate conversational response: {e}")
-        # Fallback to simple message if Claude fails
-        return f"Here's the information you requested about {action.replace('_', ' ')}:"
+        logger.error(f"Failed to generate conversational response after retries: {e}")
+
+        # Smart fallback based on action type
+        fallback_messages = {
+            'list_projects': f"Here are your {structured_data.get('projects', []).__len__()} projects.",
+            'get_project_details': "Here are the project details.",
+            'get_available_dates': f"Found {len(structured_data.get('dates', []))} available dates.",
+            'get_time_slots': f"Found {len(structured_data.get('timeSlots', []))} time slots.",
+            'confirm_appointment': "Your appointment is confirmed!",
+            'cancel_appointment': "Your appointment has been cancelled.",
+            'reschedule_appointment': "Your appointment has been rescheduled.",
+        }
+
+        return fallback_messages.get(action, "Here's what I found:")
 
 
 def format_lambda_response(action: str, response_body: Dict[str, Any], user_message: str = "", channel: str = 'chat') -> str:
@@ -311,7 +352,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
         if action == 'list_projects':
             projects = response_body.get('projects', [])
             if not projects:
-                return "You have no projects matching your criteria."
+                return "Hmm, I don't see any projects in your account yet. Once you have some, I can help you schedule them!"
 
             # Prepare structured data
             result = {
@@ -332,7 +373,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
         elif action == 'get_project_details':
             project = response_body.get('project', {})
             if not project:
-                return "Project details not found."
+                return "I couldn't find that project. Could you double-check the project number or tell me more about which one you're looking for?"
 
             # Fetch notes for this project from DynamoDB
             project_id = project.get('id')
@@ -379,7 +420,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
 
             dates = response_body.get('available_dates', [])
             if not dates:
-                return "No available dates found for this project."
+                return "Hmm, no open dates for this project right now. Want me to check again in a few days, or should we look at a different project?"
 
             # Check for weather-enriched dates (proactive weather warnings)
             dates_with_weather = response_body.get('dates_with_weather', [])
@@ -515,7 +556,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
 
             # Otherwise show available dates
             if not dates:
-                return "No available dates found for rescheduling this project."
+                return "No openings for rescheduling right now. Would you like me to keep the current appointment, or should I check again later?"
 
             # Check for weather-enriched dates (same as get_available_dates)
             dates_with_weather = response_body.get('dates_with_weather', [])
@@ -590,7 +631,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             # Try multiple field names for compatibility
             slots = response_body.get('available_slots') or response_body.get('timeSlots') or response_body.get('time_slots', [])
             if not slots:
-                return "No available time slots found for this date."
+                return "That day's pretty booked up. Want to try a different date?"
 
             # Format times nicely (convert 24h to 12h with AM/PM)
             formatted_slots = []
@@ -1015,6 +1056,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
 def generate_welcome_greeting(user_name: str, projects: list) -> str:
     """
     Use Claude to generate a personalized welcome greeting with project summary.
+    Includes retry logic for reliability.
 
     Designed for simple, conversational English suitable for ages 20-80.
 
@@ -1025,61 +1067,57 @@ def generate_welcome_greeting(user_name: str, projects: list) -> str:
     Returns:
         Friendly welcome message mentioning their projects
     """
-    try:
-        client = get_bedrock_runtime_client()
+    client = get_bedrock_runtime_client()
 
-        # Build project summary for the prompt
-        if projects:
-            project_summary = []
-            for p in projects:
-                status = p.get('status', 'Unknown')
-                category = p.get('category', 'Project')
-                proj_id = p.get('id', '')
-                scheduled_date = p.get('scheduledDate', '')
+    # Build project summary for the prompt
+    if projects:
+        project_summary = []
+        for p in projects:
+            status = p.get('status', 'Unknown')
+            category = p.get('category', 'Project')
+            proj_id = p.get('id', '')
+            scheduled_date = p.get('scheduledDate', '')
 
-                if scheduled_date:
-                    project_summary.append(f"- {category} (#{proj_id}): {status}, scheduled for {scheduled_date}")
-                else:
-                    project_summary.append(f"- {category} (#{proj_id}): {status}")
+            if scheduled_date:
+                project_summary.append(f"- {category} (#{proj_id}): {status}, scheduled for {scheduled_date}")
+            else:
+                project_summary.append(f"- {category} (#{proj_id}): {status}")
 
-            project_data = "\n".join(project_summary)
-        else:
-            project_data = "No projects found"
+        project_data = "\n".join(project_summary)
+    else:
+        project_data = "No projects found"
 
-        system_prompt = """You are a friendly assistant for a home services company.
-Write a warm welcome message following these EXACT rules:
+    system_prompt = """You're welcoming someone to their home services account.
+Be warm and natural - like a friendly neighbor, not a corporate script.
 
-STRICT RULES:
-1. If user name is provided, ALWAYS start with "Hello, [Name]!" - NEVER skip the name
-2. If no name provided, start with just "Hello!"
-3. State the EXACT project count: "You have X projects" (use the actual number)
-4. List project types with their statuses naturally (e.g., "a Decking installation that's ready to schedule, plus 2 Flooring projects")
-5. Keep it brief: 2-4 sentences MAXIMUM
-6. End with ONE simple offer: "Let me know which one you'd like to work on" or "I'm here to help"
-7. NO emojis, NO multiple questions, NO jargon
+GUIDELINES:
+- Use their name if provided: "Hey John!" or "Hi Sarah!"
+- No name? Just "Hey there!" or "Hi!"
+- Mention what they have going on (projects, appointments)
+- Keep it SHORT - 2-3 sentences max
+- End with something helpful, not salesy
 
-EXAMPLES TO FOLLOW:
+GOOD EXAMPLES:
+"Hey John! Good to see you. You've got 3 projects going - your deck's ready to schedule whenever you are."
+"Hi there! You have a roofing appointment coming up on the 26th. Need to make any changes?"
+"Hey Sarah! Looks like your kitchen remodel is all scheduled. Anything else I can help with?"
 
-With name, multiple projects:
-"Hello, John! Welcome back. You have 3 projects with us - a Decking installation that's ready to schedule, plus 2 Flooring projects. Let me know which one you'd like to work on, or just ask me anything."
+AVOID:
+- "Welcome back to ProjectForce" (too formal)
+- "I'm here to assist you" (robotic)
+- Long lists of everything they could do
+- Multiple questions at the end"""
 
-With name, 1 scheduled project:
-"Hello, Sarah! Welcome back. You have a Roofing project (#7751746) that's scheduled for November 26th. I'm here if you need to make changes or have questions."
-
-With name, no projects:
-"Hello, Mike! Welcome to ProjectForce. You don't have any projects set up yet. When you're ready to get started, I'm here to help."
-
-No name, multiple projects:
-"Hello! Welcome back. You have 3 projects with us - a Decking installation that's ready to schedule, plus 2 Flooring projects. Let me know which one you'd like to work on." """
-
-        user_prompt = f"""User name: {user_name if user_name else '(none provided)'}
-Total projects: {len(projects)}
-Project details:
+    user_prompt = f"""Name: {user_name if user_name else 'none'}
+Projects: {len(projects)}
+Details:
 {project_data}
 
-Write the welcome greeting following the EXACT format shown in the examples. Use the actual project count and types from the data above."""
+Write a brief, friendly welcome. Be conversational."""
 
-        response = client.converse(
+    def make_bedrock_call():
+        """Inner function for retry wrapper"""
+        return client.converse(
             modelId="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
             messages=[
                 {
@@ -1089,24 +1127,30 @@ Write the welcome greeting following the EXACT format shown in the examples. Use
             ],
             system=[{"text": system_prompt}],
             inferenceConfig={
-                "maxTokens": 300,
+                "maxTokens": 200,
                 "temperature": 0.7,
                 "topP": 0.9
             }
         )
+
+    try:
+        # Use retry logic for reliability
+        response = retry_with_backoff(make_bedrock_call)
 
         greeting = response['output']['message']['content'][0]['text']
         logger.info(f"[OK] Generated welcome greeting ({len(greeting)} chars)")
         return greeting.strip()
 
     except Exception as e:
-        logger.error(f"Failed to generate welcome greeting: {e}")
-        # Fallback greeting
-        name_part = f", {user_name}" if user_name else ""
+        logger.error(f"Failed to generate welcome greeting after retries: {e}")
+        # Fallback greeting - still friendly
+        name_part = f" {user_name}" if user_name else ""
         if projects:
-            return f"Hello{name_part}! Welcome back. You have {len(projects)} project(s) with us. Let me know how I can help you today."
+            project_types = list(set(p.get('category', 'project') for p in projects[:3]))
+            types_str = ", ".join(project_types[:2])
+            return f"Hey{name_part}! You've got {len(projects)} project(s) with us - {types_str}. What can I help you with?"
         else:
-            return f"Hello{name_part}! Welcome to ProjectForce. You don't have any projects set up yet. I'm here when you're ready to get started."
+            return f"Hey{name_part}! Welcome. No projects set up yet, but I'm here when you're ready."
 
 
 def handle_welcome_request(

@@ -1091,6 +1091,17 @@ IMPORTANT RULES:
    - No matches -> return search criteria for error message
    - NEVER hallucinate project IDs - only use IDs from conversation history
 
+   CRITICAL - EXPLICIT CATEGORY vs CONTEXT LOOKUPS:
+   - When user EXPLICITLY names a category like "Washer Dryer", "Ovens", "Kitchen Sink", etc.:
+     -> ALWAYS search for and return the project with THAT EXACT CATEGORY
+     -> DO NOT assume it's the "recently discussed project" from context
+     -> The user is asking about a DIFFERENT project, not the one being discussed
+   - ONLY use "recently discussed project" when user uses PRONOUNS like:
+     -> "this", "that", "it", "this one", "this project", "this appointment"
+   - Example: User just discussed Kitchen Sink project, then says "details for Washer Dryer"
+     -> This is asking about the Washer Dryer project, NOT the Kitchen Sink
+     -> Search for project with category "Washer Dryer" and return THAT project ID
+
    SEARCH CONVERSATION HISTORY for project data containing:
    - Project IDs (7-digit numbers like 7751741)
    - Addresses (street names, cities, neighborhoods)
@@ -2746,63 +2757,66 @@ What would you like to do?"""
                     'pf_bearer_token': pf_bearer_token
                 })
 
-                if list_response.get('statusCode') == 200:
-                    list_body = list_response.get('body', '{}')
-                    if isinstance(list_body, str):
-                        list_data = json.loads(list_body)
-                    else:
-                        list_data = list_body
+                # Parse Bedrock agent format response (response.functionResponse.responseBody.TEXT.body)
+                list_data = list_response.get('response', {})
+                list_func = list_data.get('functionResponse', {})
+                list_body_wrapper = list_func.get('responseBody', {})
+                list_text = list_body_wrapper.get('TEXT', {})
+                list_body_str = list_text.get('body', '{}')
 
-                    projects = list_data.get('projects', [])
-                    if projects:
-                        # Build project_mapping from fetched projects
-                        fetched_mapping = {}
-                        for p in projects:
-                            pid = str(p.get('id', ''))
-                            if pid:
-                                fetched_mapping[pid] = {
-                                    'category': p.get('category', ''),
-                                    'address': p.get('address', ''),
-                                    'status': p.get('status', '')
-                                }
-
-                        logger.info(f"[CATEGORY-RESOLVE] Fetched {len(fetched_mapping)} projects, searching for '{search_category}'")
-
-                        # Now resolve category from fetched projects
-                        resolved_project_id = None
-                        for pid, info in fetched_mapping.items():
-                            cat = info.get('category', '').lower().strip()
-                            if search_category in cat or cat in search_category:
-                                resolved_project_id = pid
-                                logger.info(f"[CATEGORY-RESOLVE] Matched '{search_category}' to project #{pid} (category: {info.get('category')})")
-                                break
-
-                        if resolved_project_id:
-                            # Update classification with resolved project_id
-                            if 'entities' not in classification:
-                                classification['entities'] = {}
-                            classification['entities']['project_id'] = resolved_project_id
-                            logger.info(f"[CATEGORY-RESOLVE] Updated classification with project_id={resolved_project_id}")
-
-                            # Also save project_mapping to workflow_state for future use
-                            project_ids = list(fetched_mapping.keys())
-                            state_manager.save_state(session_id, {
-                                'workflow_type': 'category_resolved',
-                                'current_stage': 'resolved',
-                                'context': {
-                                    'project_ids': project_ids,
-                                    'project_mapping': fetched_mapping,
-                                    'resolved_project_id': resolved_project_id,
-                                    'category': search_category
-                                }
-                            })
-                            logger.info(f"[CATEGORY-RESOLVE] Saved project_mapping to workflow state")
-                        else:
-                            logger.warning(f"[CATEGORY-RESOLVE] Could not find project matching category '{search_category}' in fetched projects")
-                    else:
-                        logger.warning(f"[CATEGORY-RESOLVE] No projects returned from list_projects")
+                if isinstance(list_body_str, str):
+                    projects_data = json.loads(list_body_str)
                 else:
-                    logger.error(f"[CATEGORY-RESOLVE] list_projects failed: {list_response}")
+                    projects_data = list_body_str
+
+                projects = projects_data.get('projects', [])
+                if projects:
+                    # Build project_mapping from fetched projects
+                    fetched_mapping = {}
+                    for p in projects:
+                        pid = str(p.get('id', ''))
+                        if pid:
+                            fetched_mapping[pid] = {
+                                'category': p.get('category', ''),
+                                'address': p.get('address', ''),
+                                'status': p.get('status', '')
+                            }
+
+                    logger.info(f"[CATEGORY-RESOLVE] Fetched {len(fetched_mapping)} projects, searching for '{search_category}'")
+
+                    # Now resolve category from fetched projects
+                    resolved_project_id = None
+                    for pid, info in fetched_mapping.items():
+                        cat = info.get('category', '').lower().strip()
+                        if search_category in cat or cat in search_category:
+                            resolved_project_id = pid
+                            logger.info(f"[CATEGORY-RESOLVE] Matched '{search_category}' to project #{pid} (category: {info.get('category')})")
+                            break
+
+                    if resolved_project_id:
+                        # Update classification with resolved project_id
+                        if 'entities' not in classification:
+                            classification['entities'] = {}
+                        classification['entities']['project_id'] = resolved_project_id
+                        logger.info(f"[CATEGORY-RESOLVE] Updated classification with project_id={resolved_project_id}")
+
+                        # Also save project_mapping to workflow_state for future use
+                        project_ids = list(fetched_mapping.keys())
+                        state_manager.save_state(session_id, {
+                            'workflow_type': 'category_resolved',
+                            'current_stage': 'resolved',
+                            'context': {
+                                'project_ids': project_ids,
+                                'project_mapping': fetched_mapping,
+                                'resolved_project_id': resolved_project_id,
+                                'category': search_category
+                            }
+                        })
+                        logger.info(f"[CATEGORY-RESOLVE] Saved project_mapping to workflow state")
+                    else:
+                        logger.warning(f"[CATEGORY-RESOLVE] Could not find project matching category '{search_category}' in fetched projects")
+                else:
+                    logger.warning(f"[CATEGORY-RESOLVE] No projects returned from list_projects")
             except Exception as fetch_err:
                 logger.error(f"[CATEGORY-RESOLVE] Error fetching projects: {fetch_err}")
 
@@ -3860,7 +3874,16 @@ What would you like to do?"""
 
         except Exception as e:
             logger.error(f"Lambda call failed: {e}")
-            response_text = f"I encountered an error: {str(e)}. Please try again."
+            # Provide a natural, helpful error message instead of exposing error details
+            error_str = str(e).lower()
+            if 'timeout' in error_str or 'timed out' in error_str:
+                response_text = "That's taking longer than expected. Mind trying again?"
+            elif 'token' in error_str or 'auth' in error_str or 'expired' in error_str:
+                response_text = "Looks like your session may have expired. Could you refresh and try again?"
+            elif 'project' in error_str and 'not found' in error_str:
+                response_text = "I couldn't find that project. Want me to show you your project list?"
+            else:
+                response_text = "Oops, something went sideways. Mind trying that again?"
 
     else:
         # Use Sonnet's direct response
