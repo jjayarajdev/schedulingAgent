@@ -122,9 +122,16 @@ PROJECT SYNONYMS (all refer to projects):
 CATEGORY KEYWORDS (map to category filter):
 - Flooring: "floor", "flooring", "hardwood", "carpet", "LVP", "luxury vinyl", "vinyl", "tile", "laminate"
 - Decking: "deck", "decking", "patio", "composite", "outdoor", "pergola"
-- Kitchen: "cabinet", "cabinets", "countertop", "granite", "quartz", "kitchen reno", "kitchen remodel", "backsplash"
-- Windows: "window", "windows", "door", "doors", "patio door", "sliding door", "entry door", "replacement"
+- Kitchen: "cabinet", "cabinets", "countertop", "granite", "quartz", "kitchen reno", "kitchen remodel", "backsplash", "sink", "kitchen sink"
+- Windows: "window", "windows", "patio door", "sliding door", "replacement window"
+- Door: "door", "doors", "entry door", "storm door", "screen door", "exterior door", "interior door"
 - Bathroom: "bathroom", "bath", "bathroom remodel"
+- Dishwasher: "dishwasher"
+- Ovens: "oven", "ovens", "range", "stove"
+- Washer Dryer: "washer", "dryer", "washer dryer", "laundry"
+- Cooktop: "cooktop", "electric cooktop", "stovetop", "burner"
+- Millwork: "millwork", "trim", "molding", "moulding", "baseboard", "crown molding", "wainscoting", "mantel", "mantle", "staircase", "stairs", "railing", "custom woodwork", "wood trim"
+- Floor Installation: "floor installation", "floor install" (maps to Flooring)
 
 SCHEDULING PHRASES:
 - "book me in" / "get me booked" / "get me scheduled" = schedule_project
@@ -426,9 +433,16 @@ Step 3: Extract ANY filters mentioned in the message:
    CATEGORY FILTERS (industry terms):
    - "decking" / "deck" / "patio" / "composite" -> {{"category":"Decking"}}
    - "flooring" / "floor" / "hardwood" / "carpet" / "LVP" / "tile" / "laminate" / "vinyl" -> {{"category":"Flooring"}}
-   - "kitchen" / "cabinet" / "countertop" / "granite" / "quartz" -> {{"category":"Kitchen"}}
-   - "window" / "windows" / "door" / "doors" / "replacement" -> {{"category":"Windows"}}
+   - "kitchen" / "cabinet" / "countertop" / "granite" / "quartz" / "sink" / "kitchen sink" -> {{"category":"Kitchen"}}
+   - "window" / "windows" / "replacement window" / "patio door" / "sliding door" -> {{"category":"Windows"}}
+   - "door" / "doors" / "entry door" / "storm door" / "screen door" / "exterior door" / "interior door" -> {{"category":"Door"}}
    - "bathroom" / "bath" -> {{"category":"Bathroom"}}
+   - "dishwasher" -> {{"category":"Dishwasher"}}
+   - "oven" / "ovens" / "range" / "stove" -> {{"category":"Ovens"}}
+   - "washer" / "dryer" / "washer dryer" / "laundry" -> {{"category":"Washer Dryer"}}
+   - "cooktop" / "electric cooktop" / "stovetop" / "burner" -> {{"category":"ELECTRIC COOKTOP"}}
+   - "millwork" / "trim" / "molding" / "moulding" / "baseboard" / "crown molding" / "wainscoting" / "mantel" / "staircase" / "stairs" / "railing" / "custom woodwork" / "wood trim" -> {{"category":"Millwork"}}
+   - "floor installation" / "floor install" -> {{"category":"Flooring"}}
 
    PROJECT TYPE FILTERS:
    - "call back" / "callback" -> {{"projectType":"Call Back"}}

@@ -645,11 +645,13 @@ def extract_project_data_from_history(conversation_history: List[Dict], classifi
     # Get project reference from classification if available
     target_project_id = None
     target_project_index = None
+    target_category = None
     if classification and classification.get('entities'):
         entities = classification['entities']
         target_project_id = entities.get('project_id')
         target_project_index = entities.get('project_index')
-        logger.info(f"[CONTEXT] Looking for project_id={target_project_id}, project_index={target_project_index}")
+        target_category = entities.get('category')
+        logger.info(f"[CONTEXT] Looking for project_id={target_project_id}, project_index={target_project_index}, category={target_category}")
 
     logger.info(f"[CONTEXT] Extracting from {len(conversation_history)} messages in history")
 
@@ -766,6 +768,18 @@ def extract_project_data_from_history(conversation_history: List[Dict], classifi
                             logger.info(f"[CONTEXT] Matched project by index: {target_project_index} -> project #{actual_id}")
                         except IndexError:
                             logger.warning(f"[CONTEXT] Index {target_project_index} out of range for {len(projects_list)} projects")
+                    elif target_category:
+                        # Match by category - use fuzzy matching for variations like "storm door" vs "Storm Door"
+                        target_cat_lower = target_category.lower().strip()
+                        for p in projects_list:
+                            proj_cat = (p.get('category', '') or '').lower().strip()
+                            # Exact match or substring match (e.g., "storm door" in "Storm Door")
+                            if target_cat_lower == proj_cat or target_cat_lower in proj_cat or proj_cat in target_cat_lower:
+                                target_proj = p
+                                logger.info(f"[CONTEXT] Matched project by category: '{target_category}' -> project #{p.get('id')} ({p.get('category')})")
+                                break
+                        if not target_proj:
+                            logger.warning(f"[CONTEXT] No project found with category matching '{target_category}'")
                     elif len(projects_list) == 1:
                         # Only one project, use it
                         target_proj = projects_list[0]
@@ -1146,12 +1160,21 @@ IMPORTANT RULES:
    - "Main Street" / "main" / "the main one" -> matches "789 Main St"
 
    CATEGORY variations - match synonyms and related terms:
+   IMPORTANT: Match MORE SPECIFIC terms first! "storm door" should match "Storm Door" category, NOT generic "Door"!
    - "windows" / "window" / "the window job" / "window replacement" -> category "Windows"
    - "deck" / "decking" / "deck project" / "the deck" -> category "Decking"
    - "siding" / "side" / "siding work" -> category "Siding"
    - "roof" / "roofing" / "roof job" / "the roof one" -> category "Roofing"
-   - "door" / "doors" / "door replacement" -> category "Doors"
+   - "storm door" / "storm doors" / "the storm door" -> category "Storm Door" (MUST match BEFORE generic "door")
+   - "entry door" / "entry doors" / "front door" -> category "Entry Door" or "Door"
+   - "exterior door" / "exterior doors" -> category "Exterior Door" or "Door"
+   - "door" / "doors" / "door replacement" -> category "Door" (generic - match ONLY if no compound match)
    - "gutter" / "gutters" / "gutter work" -> category "Gutters"
+   - "dishwasher" / "dish washer" -> category "Dishwasher"
+   - "oven" / "ovens" / "range" / "stove" -> category "Ovens"
+   - "washer" / "dryer" / "washer dryer" / "laundry" -> category "Washer Dryer"
+   - "cooktop" / "electric cooktop" / "stovetop" -> category "ELECTRIC COOKTOP" or "Cooktop"
+   - "kitchen sink" / "sink" (when kitchen context) -> category "Kitchen" or "Kitchen Sink"
 
    STATUS variations:
    - "scheduled" / "the scheduled one" / "already scheduled" -> status "Scheduled"

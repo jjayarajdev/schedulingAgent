@@ -10,7 +10,7 @@ from typing import Dict, Optional, Any
 import boto3
 from botocore.config import Config as BotoConfig
 
-from config import get_config
+from config import get_config, ENVIRONMENT
 from classifier import classify_intent_and_action
 from context_extraction import extract_location_from_history, extract_pronoun_reference
 from context_resolver import resolve_context_references
@@ -289,10 +289,14 @@ Skip the JSON - that'll show separately."""
 
         max_tokens = 300  # Reduced from 500 - encourages brevity
 
+    # Use Haiku for response generation (faster, ~2s vs ~4s with Sonnet)
+    response_model = "us.anthropic.claude-3-haiku-20240307-v1:0"
+    logger.info(f"[PERF] Using Haiku for response generation")
+
     def make_bedrock_call():
         """Inner function for retry wrapper"""
         return client.converse(
-            modelId="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+            modelId=response_model,
             messages=[
                 {
                     "role": "user",
@@ -1565,6 +1569,68 @@ def route_request(
         'client_id': client_id,
         'pf_bearer_token': pf_bearer_token
     }
+
+    # ========================================================================
+    # VOICE FAST PATH: Skip Decision step for voice channel when Classification
+    # is confident (can_call_direct=true). This reduces response time by ~60%.
+    # Flow: Classification -> Lambda -> Response (skip intelligent orchestrator)
+    # ========================================================================
+    if channel == 'voice' and can_call_direct and action:
+        logger.info(f"[VOICE_FAST_PATH] Skipping Decision step for voice: action={action}, can_call_direct={can_call_direct}")
+
+        try:
+            lambda_start = time.time()
+
+            # Prepare Lambda parameters
+            lambda_params = {
+                'customer_id': customer_id,
+                'client_id': client_id,
+                'pf_bearer_token': pf_bearer_token,
+                **merged_params
+            }
+
+            # Call Lambda directly
+            lambda_response = call_lambda_directly(action, lambda_params)
+            timing['lambda_direct'] = time.time() - lambda_start
+
+            # Extract response body
+            response_data = lambda_response.get('response', {})
+            function_response = response_data.get('functionResponse', {})
+            response_body_wrapper = function_response.get('responseBody', {})
+            text_wrapper = response_body_wrapper.get('TEXT', {})
+            response_body_str = text_wrapper.get('body', '{}')
+
+            if isinstance(response_body_str, str):
+                response_body = json.loads(response_body_str)
+            else:
+                response_body = response_body_str
+
+            # Format response for voice (already uses Haiku in DEV)
+            formatted_response = format_lambda_response(action, response_body, message, channel)
+
+            # Apply voice formatting (SSML, natural dates)
+            formatted_response = format_for_voice(formatted_response, intent)
+
+            timing['total'] = time.time() - start_time
+
+            logger.info(f"[VOICE_FAST_PATH] Complete! Total={timing['total']:.2f}s | "
+                        f"Classification={timing['classification']:.3f}s | "
+                        f"Lambda={timing['lambda_direct']:.2f}s")
+
+            return {
+                'response': formatted_response,
+                'intent': intent,
+                'action': action,
+                'agent_name': 'Voice Fast Path',
+                'direct_call': True,
+                'timing': timing,
+                'channel': channel,
+                'fast_path': True
+            }
+
+        except Exception as e:
+            logger.warning(f"[VOICE_FAST_PATH] Failed: {e}, falling back to intelligent orchestration")
+            # Fall through to intelligent orchestration on error
 
     # INTELLIGENT ORCHESTRATION: Use Sonnet 3.5 for ALL workflow decisions
     # NO hardcoding, NO regex - pure intelligence!
