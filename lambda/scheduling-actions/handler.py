@@ -495,9 +495,9 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
             api_duration = (time.time() - api_start) * 1000
             logger.error(f"HTTP error fetching projects after {api_duration:.2f}ms: {e}")
             if e.response.status_code == 401:
-                raise ValueError("Authentication failed - token expired and auto-refresh failed")
+                raise ValueError("SESSION_EXPIRED: Your session has expired. Please log out and log back in to continue.")
             elif e.response.status_code == 403:
-                raise ValueError("Access denied - insufficient permissions")
+                raise ValueError("SESSION_EXPIRED: Your session has expired. Please log out and log back in to continue.")
             else:
                 raise ValueError(f"Failed to fetch projects: HTTP {e.response.status_code}")
 
@@ -756,9 +756,9 @@ Store: {store_display}
         if e.response.status_code == 404:
             raise ValueError(f"Project {project_id} not found")
         elif e.response.status_code == 401:
-            raise ValueError("Authentication failed - invalid or expired token")
+            raise ValueError("SESSION_EXPIRED: Your session has expired. Please log out and log back in to continue.")
         elif e.response.status_code == 403:
-            raise ValueError("Access denied - insufficient permissions for this project")
+            raise ValueError("SESSION_EXPIRED: Your session has expired. Please log out and log back in to continue.")
         else:
             logger.error(f"HTTP error fetching project details: {str(e)}")
             raise ValueError(f"Failed to fetch project details: {e.response.status_code}")

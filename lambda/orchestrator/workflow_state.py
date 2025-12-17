@@ -329,6 +329,60 @@ class WorkflowStateManager:
 
         return None
 
+    def find_project_by_partial_id(self, session_id: str, partial_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Find a project by partial ID match (e.g., "ending in 717" matches "7751717").
+        Searches both viewed_projects and project_mapping.
+
+        Args:
+            session_id: Session ID
+            partial_id: The partial ID to match (e.g., "717", "60000")
+
+        Returns:
+            Project info dict if exactly one match found, None otherwise
+        """
+        if not partial_id or not partial_id.isdigit():
+            return None
+
+        state = self.get_state(session_id)
+        if not state:
+            return None
+
+        matches = []
+
+        # Search in viewed_projects (has full project info)
+        viewed_projects = state.get('viewed_projects', [])
+        for project in viewed_projects:
+            project_id = str(project.get('project_id', ''))
+            if project_id.endswith(partial_id) or project_id.startswith(partial_id):
+                matches.append(project)
+
+        # If no matches in viewed_projects, search project_mapping
+        if not matches:
+            project_mapping = state.get('project_mapping', {})
+            for project_id, project_info in project_mapping.items():
+                if str(project_id).endswith(partial_id) or str(project_id).startswith(partial_id):
+                    # Convert mapping entry to full project info format
+                    matches.append({
+                        'project_id': project_id,
+                        'category': project_info.get('category', ''),
+                        'status': project_info.get('status', ''),
+                        'city': project_info.get('city', ''),
+                        'state': project_info.get('state', ''),
+                        'address': project_info.get('address', '')
+                    })
+
+        if len(matches) == 1:
+            logger.info(f"[PARTIAL_ID] Found unique match for partial ID '{partial_id}': {matches[0].get('project_id')}")
+            return matches[0]
+        elif len(matches) > 1:
+            # Multiple matches - return None (ambiguous)
+            logger.warning(f"[PARTIAL_ID] Multiple matches for partial ID '{partial_id}': {[m.get('project_id') for m in matches]}")
+            return None
+        else:
+            logger.info(f"[PARTIAL_ID] No matches found for partial ID '{partial_id}'")
+            return None
+
     def update_project_mapping(self, session_id: str, project_mapping: Dict[str, Any]) -> bool:
         """
         Update the project_mapping with all customer's projects.

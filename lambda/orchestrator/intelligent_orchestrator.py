@@ -153,6 +153,43 @@ def extract_ordinal_project_reference(message: str) -> Optional[int]:
     return None
 
 
+def extract_partial_id_reference(message: str) -> Optional[str]:
+    """
+    Extract partial project ID reference from message.
+    Returns the partial ID digits or None if no partial reference found.
+
+    Examples:
+        "project ending in 717" -> "717"
+        "ending 717" -> "717"
+        "the one ending with 60000" -> "60000"
+        "project starting with 775" -> "775"
+    """
+    msg = message.lower().strip()
+
+    # Pattern 1: "ending in/with 717", "ends in 717", "ending 717"
+    ending_match = re.search(r'(?:ending|ends)\s*(?:in|with)?\s*(\d{3,})', msg)
+    if ending_match:
+        partial = ending_match.group(1)
+        logger.info(f"[PARTIAL_ID] Detected 'ending' pattern: {partial}")
+        return partial
+
+    # Pattern 2: "starting with 775", "starts with 775", "beginning with 775"
+    starting_match = re.search(r'(?:starting|starts|beginning|begins)\s*(?:with)?\s*(\d{3,})', msg)
+    if starting_match:
+        partial = starting_match.group(1)
+        logger.info(f"[PARTIAL_ID] Detected 'starting' pattern: {partial}")
+        return partial
+
+    # Pattern 3: "last 3 digits 717", "last digits 717"
+    last_digits_match = re.search(r'last\s*(?:\d+\s*)?digits?\s*(\d{3,})', msg)
+    if last_digits_match:
+        partial = last_digits_match.group(1)
+        logger.info(f"[PARTIAL_ID] Detected 'last digits' pattern: {partial}")
+        return partial
+
+    return None
+
+
 def extract_time_from_message(message: str) -> Optional[str]:
     """
     Extract time from message without LLM - simple patterns only.
@@ -244,6 +281,20 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
             if match:
                 message_project_id = match.group(1)
                 break
+
+        # 1b. Check for PARTIAL ID references like "ending in 717", "ending 717"
+        if not message_project_id:
+            partial_id = extract_partial_id_reference(message)
+            if partial_id:
+                # Try to resolve partial ID using workflow state
+                state_manager = get_state_manager()
+                # We need session_id - get it from workflow_state if available
+                session_id = workflow_state.get('session_id')
+                if session_id:
+                    matched_project = state_manager.find_project_by_partial_id(session_id, partial_id)
+                    if matched_project:
+                        message_project_id = matched_project.get('project_id')
+                        logger.info(f"[CONTINUATION] Resolved partial ID '{partial_id}' to project {message_project_id}")
 
         # If user mentioned a different project ID, signal context switch
         if message_project_id and str(message_project_id) != str(context_project_id):
@@ -481,6 +532,38 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                 'next_stage': 'complete',
                 'preserve_context': context,
                 'workflow_type': workflow_type
+            }
+
+    # ========================================================================
+    # IMPLICIT SCHEDULING: Handle "schedule it", "book it", "schedule this"
+    # when we have a project in context (after viewing project details)
+    # This ensures "schedule it" uses the currently viewed project
+    # ========================================================================
+    context_project_id = context.get('project_id')
+    if context_project_id:
+        implicit_schedule_patterns = [
+            'schedule it', 'schedule this', 'book it', 'book this',
+            'schedule that', 'book that', "let's schedule", "lets schedule",
+            'want to schedule', 'like to schedule', 'schedule the project',
+            'schedule my', 'book my', 'i want to schedule', 'can you schedule'
+        ]
+        if any(pattern in message_lower for pattern in implicit_schedule_patterns):
+            logger.info(f"[CONTINUATION] IMPLICIT SCHEDULE: Detected scheduling request with context project {context_project_id}")
+            return {
+                'continue_workflow': True,
+                'action': 'fetch_available_dates',
+                'params': {
+                    'project_id': context_project_id
+                },
+                'next_stage': 'awaiting_date_selection',
+                'preserve_context': {
+                    'project_id': context_project_id,
+                    'category': context.get('category'),
+                    'city': context.get('city'),
+                    'state': context.get('state'),
+                    'address': context.get('address')
+                },
+                'workflow_type': 'schedule_appointment'
             }
 
     # Not a continuation - proceed with normal classification
@@ -3712,6 +3795,22 @@ What would you like to do?"""
                         }
                         logger.info(f"[PROJECT] Created workflow state with project_id={viewed_project_id}")
 
+                    # TRACK VIEWED PROJECT: Add to viewed_projects history for ordinal references
+                    # This enables "2nd project" after user has viewed multiple projects
+                    try:
+                        address_info = single_project.get('address', {})
+                        state_manager.add_viewed_project(session_id, {
+                            'project_id': viewed_project_id,
+                            'category': single_project.get('category', ''),
+                            'status': single_project.get('status', ''),
+                            'city': address_info.get('city', '') if isinstance(address_info, dict) else '',
+                            'state': address_info.get('state', '') if isinstance(address_info, dict) else '',
+                            'address': address_info.get('address', '') if isinstance(address_info, dict) else str(address_info)
+                        })
+                        logger.info(f"[VIEWED] Added project #{viewed_project_id} to viewed_projects history")
+                    except Exception as track_err:
+                        logger.warning(f"[VIEWED] Failed to track viewed project (non-critical): {track_err}")
+
             # BATCH SCHEDULING: Auto-advance to next project after confirm_appointment
             if lambda_action == 'confirm_appointment':
                 batch_context = workflow_state.get('context', {}) if workflow_state else {}
@@ -3876,14 +3975,54 @@ What would you like to do?"""
             logger.error(f"Lambda call failed: {e}")
             # Provide a natural, helpful error message instead of exposing error details
             error_str = str(e).lower()
+
+            # ERROR RECOVERY: Clear corrupted workflow state on serious errors
+            # This prevents subsequent requests from failing due to stale/corrupt state
+            should_clear_state = False
+
             if 'timeout' in error_str or 'timed out' in error_str:
                 response_text = "That's taking longer than expected. Mind trying again?"
             elif 'token' in error_str or 'auth' in error_str or 'expired' in error_str:
                 response_text = "Looks like your session may have expired. Could you refresh and try again?"
+                should_clear_state = True  # Auth errors often corrupt state
+            elif '403' in error_str or 'forbidden' in error_str:
+                response_text = "There was an access issue. Let me start fresh - what would you like to do?"
+                should_clear_state = True  # 403 errors indicate session/auth issues
             elif 'project' in error_str and 'not found' in error_str:
                 response_text = "I couldn't find that project. Want me to show you your project list?"
             else:
                 response_text = "Oops, something went sideways. Mind trying that again?"
+
+            # Clear workflow state on serious errors to allow recovery
+            if should_clear_state:
+                try:
+                    # Preserve project_ids and project_mapping if they exist (for list recovery)
+                    existing_state = workflow_state or {}
+                    preserved_mapping = existing_state.get('project_mapping', {})
+                    preserved_ids = existing_state.get('context', {}).get('project_ids', [])
+
+                    if preserved_mapping or preserved_ids:
+                        # Reset to clean state but preserve project list info
+                        state_manager.save_state(session_id, {
+                            'workflow_type': 'error_recovery',
+                            'current_stage': 'clean',
+                            'context': {
+                                'project_ids': preserved_ids,
+                                'project_mapping': preserved_mapping
+                            },
+                            'project_mapping': preserved_mapping,
+                            'conversation_summary': f'Recovered from error: {str(e)[:100]}'
+                        })
+                        logger.info(f"[ERROR_RECOVERY] Reset workflow state, preserved {len(preserved_ids)} project_ids")
+                    else:
+                        # No project info to preserve, clear completely
+                        state_manager.clear_state(session_id)
+                        logger.info("[ERROR_RECOVERY] Cleared corrupted workflow state")
+                except Exception as clear_err:
+                    logger.warning(f"[ERROR_RECOVERY] Failed to clear state (non-critical): {clear_err}")
+
+            # Prevent state update after error
+            decision['update_workflow_state'] = None
 
     else:
         # Use Sonnet's direct response
