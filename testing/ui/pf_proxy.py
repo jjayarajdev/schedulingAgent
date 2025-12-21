@@ -30,7 +30,7 @@ API_BASE_URLS = {
     "prod": "https://api-cx-portal.apps.projectsforce.com"
 }
 PF_API_BASE = API_BASE_URLS.get(ENVIRONMENT, API_BASE_URLS["dev"])
-logger.info(f"🌍 Environment: {ENVIRONMENT} | Region: {AWS_REGION} | API Base: {PF_API_BASE}")
+logger.info(f"Environment: {ENVIRONMENT} | Region: {AWS_REGION} | API Base: {PF_API_BASE}")
 
 # ============================================================================
 # Conversation History Management
@@ -187,7 +187,7 @@ def extract_location_from_history(conversation_history):
                     logger.debug(f"Address type: {type(addr)}, keys: {addr.keys() if isinstance(addr, dict) else 'N/A'}")
                     if isinstance(addr, dict) and 'city' in addr:
                         city = addr['city']
-                        logger.info(f"✅ Extracted city from project address: {city}")
+                        logger.info(f"Extracted city from project address: {city}")
                         return city
                     elif isinstance(addr, str):
                         parts = addr.split(',')
@@ -196,7 +196,7 @@ def extract_location_from_history(conversation_history):
                             city_match = re.search(r'^([A-Za-z\s]+)-\d+', city_part)
                             if city_match:
                                 city = city_match.group(1).strip()
-                                logger.info(f"✅ Extracted city from address string: {city}")
+                                logger.info(f"Extracted city from address string: {city}")
                                 return city
 
         except (json.JSONDecodeError, KeyError, IndexError) as e:
@@ -212,7 +212,7 @@ def load_agent_config():
     env = ENVIRONMENT  # Use the environment set at module load time
     config_filename = f"agent_config.{env}.json"
 
-    logger.info(f"🔍 Looking for config: {config_filename} (ENVIRONMENT={env})")
+    logger.info(f"Looking for config: {config_filename} (ENVIRONMENT={env})")
 
     # Try multiple possible paths (from testing/ui to bedrock/config)
     possible_paths = [
@@ -226,18 +226,18 @@ def load_agent_config():
             resolved_path = config_path.resolve()
             logger.debug(f"🔍 Checking path: {resolved_path}")
             if resolved_path.exists():
-                logger.info(f"✅ Loading agent config from: {resolved_path}")
+                logger.info(f"Loading agent config from: {resolved_path}")
                 with open(resolved_path, 'r') as f:
                     config = json.load(f)
-                    logger.info(f"📋 Config environment: {config.get('environment')}, orchestrator: {config.get('orchestrator_function')}")
+                    logger.info(f"Config environment: {config.get('environment')}, orchestrator: {config.get('orchestrator_function')}")
                     return config
         except Exception as e:
             logger.debug(f"Could not load from {config_path}: {e}")
             continue
 
     # Fallback to hardcoded values if config not found
-    logger.warning(f"⚠️  Could not find {config_filename}, using hardcoded values")
-    logger.warning(f"⚠️  Tried paths: {[str(p) for p in possible_paths]}")
+    logger.warning(f"Could not find {config_filename}, using hardcoded values")
+    logger.warning(f"Tried paths: {[str(p) for p in possible_paths]}")
     return {
         "supervisor_id": "76VIQYAT6R",
         "supervisor_alias": "TSTALIASID",
@@ -247,8 +247,8 @@ def load_agent_config():
 
 # Load configuration at startup
 AGENT_CONFIG = load_agent_config()
-logger.info(f"📋 Loaded Supervisor Agent: {AGENT_CONFIG.get('supervisor_id')}")
-logger.info(f"📋 Loaded Supervisor Alias: {AGENT_CONFIG.get('supervisor_alias')}")
+logger.info(f"Loaded Supervisor Agent: {AGENT_CONFIG.get('supervisor_id')}")
+logger.info(f"Loaded Supervisor Alias: {AGENT_CONFIG.get('supervisor_alias')}")
 
 
 def format_lambda_response(action: str, response_body: dict) -> str:
@@ -670,7 +670,7 @@ def call_lambda_directly(action, params):
 
     logger.debug(f"Lambda event: {json.dumps(event, indent=2)}")
 
-    logger.info(f"⚡ Calling Lambda directly: {function_name}.{action}")
+    logger.info(f"Calling Lambda directly: {function_name}.{action}")
 
     try:
         response = lambda_client.invoke(
@@ -680,7 +680,7 @@ def call_lambda_directly(action, params):
         )
 
         payload = json.loads(response['Payload'].read())
-        logger.info(f"✅ Lambda direct call successful")
+        logger.info(f"Lambda direct call successful")
         return payload
 
     except Exception as e:
@@ -745,13 +745,13 @@ def login():
             user_id = credentials.get('user_id', '1646085')
             bearer_token = credentials.get('bearer_token', '')
 
-            logger.info(f"✓ Loaded credentials from Secrets Manager: client_id={client_id}, user_id={user_id}")
-            logger.info(f"✓ Bearer token loaded (length: {len(bearer_token)})")
+            logger.info(f"Loaded credentials from Secrets Manager: client_id={client_id}, user_id={user_id}")
+            logger.info(f"Bearer token loaded (length: {len(bearer_token)})")
 
             # Step 2: Validate the token - try to use it against the DASHBOARD API
             # (not auth endpoint, which returns 200 for stale tokens)
             if bearer_token and len(bearer_token) > 100:
-                logger.info("⏳ Validating existing token against dashboard API...")
+                logger.info("Validating existing token against dashboard API...")
                 validation_response = requests.get(
                     f"{PF_API_BASE}/dashboard/get/{client_id}/{user_id}",
                     headers={
@@ -763,7 +763,7 @@ def login():
                 )
 
                 if validation_response.status_code == 200:
-                    logger.info("✓ Token is valid, returning existing token")
+                    logger.info("Token is valid, returning existing token")
                     result = {
                         "accesstoken": bearer_token,  # UI expects "accesstoken" not "token"
                         "user": {
@@ -775,13 +775,13 @@ def login():
                     }
                     return jsonify(result), 200
                 else:
-                    logger.warning(f"⚠️  Token validation failed (status: {validation_response.status_code}), need to refresh")
+                    logger.warning(f"Token validation failed (status: {validation_response.status_code}), need to refresh")
 
         except Exception as load_err:
             logger.warning(f"Could not load/validate existing token: {load_err}")
 
         # Step 3: Token expired or not found - perform fresh login
-        logger.info("🔄 Performing fresh login with password...")
+        logger.info("Performing fresh login with password...")
 
         # Try actual PF360 login API
         login_response = requests.post(
@@ -812,7 +812,7 @@ def login():
 
             # Check if OTP verification is required
             if login_data.get('isOtpVerified') == False and login_data.get('otp_token'):
-                logger.info("🔐 OTP verification required, fetching OTP from Mailinator...")
+                logger.info("OTP verification required, fetching OTP from Mailinator...")
                 otp_token = login_data.get('otp_token')
 
                 # Extract username from email (e.g., "jay@mailinator.com" -> "jay")
@@ -851,7 +851,7 @@ def login():
                                 otp_match = re.search(r'\b(\d{6})\b', body)
                                 if otp_match:
                                     otp_code = otp_match.group(1)
-                                    logger.info(f"✓ Found OTP code from Mailinator: {otp_code}")
+                                    logger.info(f"Found OTP code from Mailinator: {otp_code}")
                 except Exception as mail_err:
                     logger.warning(f"Could not fetch OTP from Mailinator: {mail_err}")
 
@@ -879,7 +879,7 @@ def login():
                             otp_data = otp_response.json()
                             fresh_token = otp_data.get('accesstoken', otp_data.get('access_token', ''))
                             if fresh_token and len(fresh_token) > 100:
-                                logger.info(f"✓ OTP verification successful with code {code}")
+                                logger.info(f"OTP verification successful with code {code}")
                                 login_data = otp_data  # Use OTP response data
                                 verified = True
                                 break
@@ -906,7 +906,7 @@ def login():
                     "details": str(login_data)
                 }), 500
 
-            logger.info(f"✓ Fresh login successful (token length: {len(fresh_token)})")
+            logger.info(f"Fresh login successful (token length: {len(fresh_token)})")
 
             # Step 4: Save fresh token to Secrets Manager
             try:
@@ -953,7 +953,7 @@ def login():
                 "email": email,
                 "success": True
             }
-            logger.info("✓ Login successful, returning fresh token to UI")
+            logger.info("Login successful, returning fresh token to UI")
             return jsonify(result), 200
         else:
             logger.error(f"Login failed: {login_response.status_code}")
@@ -1115,7 +1115,7 @@ def save_token_to_secrets():
         secrets_client = boto3.client('secretsmanager', region_name=AWS_REGION)
         # Use environment-aware URL
         api_url = PF_API_BASE
-        logger.info(f"📝 Using API URL for {ENVIRONMENT}: {api_url}")
+        logger.info(f"Using API URL for {ENVIRONMENT}: {api_url}")
 
         # Helper function to create or update secret
         def save_secret(secret_id, secret_name, secret_data, description):
@@ -1264,7 +1264,7 @@ def invoke_agent():
 
         # Get conversation history for this session
         conversation_history = get_conversation_history(session_id)
-        logger.info(f"📚 Session {session_id} has {len(conversation_history)} messages in history")
+        logger.info(f"Session {session_id} has {len(conversation_history)} messages in history")
 
         # Add user message to history
         add_to_conversation_history(session_id, 'user', message)
@@ -1282,14 +1282,14 @@ def invoke_agent():
         # ALWAYS route through orchestrator (no direct Lambda calls from proxy)
         # Orchestrator handles: Direct Lambda optimization + context resolution + formatting
         orchestrator_fn = AGENT_CONFIG.get('orchestrator_function', 'pf-orchestrator')
-        logger.info(f"🎯 Routing ALL requests to LAMBDA ORCHESTRATOR: {orchestrator_fn}")
+        logger.info(f"Routing ALL requests to LAMBDA ORCHESTRATOR: {orchestrator_fn}")
 
         try:
             lambda_start = time.time()
             # Use region from config if available, otherwise fall back to AWS_REGION
             config_region = AGENT_CONFIG.get('region', AWS_REGION)
             lambda_client = boto3.client('lambda', region_name=config_region)
-            logger.info(f"🔌 Lambda client using region: {config_region}")
+            logger.info(f"Lambda client using region: {config_region}")
 
             # Prepare orchestrator event (API Gateway format)
             request_body = {
@@ -1308,7 +1308,7 @@ def invoke_agent():
             }
 
             # Invoke Lambda orchestrator (use function name without version qualifier)
-            logger.info(f"📤 Invoking {orchestrator_fn} for message: '{message[:50]}...'")
+            logger.info(f"Invoking {orchestrator_fn} for message: '{message[:50]}...'")
             response = lambda_client.invoke(
                 FunctionName=orchestrator_fn,
                 InvocationType='RequestResponse',
@@ -1319,11 +1319,11 @@ def invoke_agent():
             timing['orchestrator_lambda'] = time.time() - lambda_start
             timing['total_request'] = time.time() - request_start
 
-            logger.info(f"⏱️  PERFORMANCE: Total={timing['total_request']:.2f}s | Orchestrator={timing['orchestrator_lambda']:.2f}s")
+            logger.info(f"PERFORMANCE: Total={timing['total_request']:.2f}s | Orchestrator={timing['orchestrator_lambda']:.2f}s")
 
             # Extract response from orchestrator (API Gateway format)
-            # Orchestrator returns: {statusCode: 200, body: "{\"response\": \"...\"}", ...}
-            status_code = payload.get('statusCode', 200)
+            # Orchestrator returns: {status_code: 200, body: "{\"response\": \"...\"}", ...}
+            status_code = payload.get('status_code', 200)
 
             if status_code != 200:
                 # Error response
@@ -1346,7 +1346,11 @@ def invoke_agent():
             action = body.get('action')
             intent = body.get('intent', 'unknown')
 
-            logger.info(f"📝 Orchestrator response: {str(response_text)[:100]}...")
+            logger.info(f"Orchestrator response: {str(response_text)[:100]}...")
+
+            # DEBUG: Log all keys in body to trace pf_status_code
+            logger.info(f"Body keys from Lambda: {list(body.keys())}")
+            logger.info(f"pf_status_code in body: {body.get('pf_status_code', 'NOT FOUND')}")
 
             # Add orchestrator response to conversation history
             add_to_conversation_history(
@@ -1364,9 +1368,11 @@ def invoke_agent():
             # Include projects array if returned by orchestrator (for welcome/list_projects)
             projects = body.get('projects', [])
             if projects:
-                logger.info(f"📋 Returning {len(projects)} projects to UI")
+                logger.info(f"Returning {len(projects)} projects to UI")
 
-            return jsonify({
+            # Build response with conditional pf_status_code
+            response_data = {
+                "status_code": status_code,  # HTTP status from API Gateway
                 "response": str(response_text),
                 "agent_name": agent_name_from_orch,
                 "intent": intent,
@@ -1375,7 +1381,15 @@ def invoke_agent():
                 "performance": timing,
                 "orchestrator": True,
                 "projects": projects  # Pass through projects for UI rendering
-            })
+            }
+
+            # Add pf_status_code if present (only when external PF API calls were made)
+            pf_status_code = body.get('pf_status_code')
+            if pf_status_code is not None:
+                response_data['pf_status_code'] = pf_status_code
+                logger.info(f"PF API status code: {pf_status_code}")
+
+            return jsonify(response_data)
 
         except Exception as e:
             logger.error(f"Lambda Orchestrator error: {e}")
@@ -1390,9 +1404,12 @@ def invoke_agent():
         return jsonify({"error": str(e)}), 500
 
 
+
 if __name__ == '__main__':
+    import sys
+    sys.stdout.reconfigure(encoding='utf-8')
     print("=" * 80)
-    print("🚀 ProjectForce API Proxy Server")
+    print("ProjectForce API Proxy Server")
     print("=" * 80)
     print()
     print("Server running on: http://localhost:5003")

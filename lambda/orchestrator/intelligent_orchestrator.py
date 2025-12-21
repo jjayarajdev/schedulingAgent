@@ -1593,6 +1593,7 @@ def orchestrate_intelligent_workflow(
     """
     timing = {}
     start_time = time.time()
+    captured_pf_status_code = None  # Track pf_status_code from Lambda responses
 
     state_manager = get_state_manager()
 
@@ -1702,6 +1703,10 @@ def orchestrate_intelligent_workflow(
                 response_body = json.loads(body_str)
             else:
                 response_body = body_str
+
+            # Capture pf_status_code if present
+            if 'pf_status_code' in response_body:
+                captured_pf_status_code = response_body['pf_status_code']
 
             # WEATHER ENRICHMENT for reschedule_appointment step 2 (available dates)
             if action == 'reschedule_appointment' and response_body.get('available_dates'):
@@ -1822,7 +1827,7 @@ def orchestrate_intelligent_workflow(
                 logger.info(f"[CONTINUATION] State updated: stage={next_stage}")
 
             timing['total'] = time.time() - start_time
-            return {
+            result = {
                 'response': response_text,
                 'intent': 'scheduling',
                 'action': action,
@@ -1830,6 +1835,11 @@ def orchestrate_intelligent_workflow(
                 'direct_call': True,
                 'timing': timing
             }
+            # Add pf_status_code if captured from Lambda response
+            if captured_pf_status_code is not None:
+                result['pf_status_code'] = captured_pf_status_code
+                logger.info(f"[STATUS] Forwarding pf_status_code={captured_pf_status_code} from continuation Lambda")
+            return result
 
         except Exception as cont_err:
             logger.error(f"[CONTINUATION] Error executing continuation: {cont_err}")
@@ -1909,7 +1919,7 @@ def orchestrate_intelligent_workflow(
                         })
 
                 timing['total'] = time.time() - start_time
-                return {
+                result = {
                     'response': response_text,
                     'intent': 'scheduling',
                     'action': 'list_projects',
@@ -1917,6 +1927,13 @@ def orchestrate_intelligent_workflow(
                     'direct_call': True,
                     'timing': timing
                 }
+
+                # Add pf_status_code if present in Lambda response
+                if 'pf_status_code' in response_body:
+                    result['pf_status_code'] = response_body['pf_status_code']
+                    logger.info(f"[VOICE-PRECHECK] Forwarding pf_status_code={response_body['pf_status_code']}")
+
+                return result
             except Exception as voice_err:
                 logger.warning(f"[VOICE-PRECHECK] Error in voice pre-check: {voice_err}, falling through to normal flow")
                 # Fall through to normal classification
@@ -2005,6 +2022,10 @@ def orchestrate_intelligent_workflow(
                 else:
                     response_body = body_str
 
+                # Capture pf_status_code if present
+                if 'pf_status_code' in response_body:
+                    captured_pf_status_code = response_body['pf_status_code']
+
                 # Generate response using format_lambda_response (same pattern as rest of codebase)
                 project_data = response_body.get('project', response_body)
 
@@ -2078,7 +2099,7 @@ def orchestrate_intelligent_workflow(
                     logger.warning(f"[ORDINAL] Failed to track viewed project (non-critical): {track_err}")
 
                 timing['total'] = time.time() - start_time
-                return {
+                result = {
                     'response': response_text,
                     'intent': 'information',
                     'action': 'get_project_details',
@@ -2087,6 +2108,11 @@ def orchestrate_intelligent_workflow(
                     'timing': timing,
                     'channel': channel
                 }
+                # Add pf_status_code if captured from Lambda response
+                if captured_pf_status_code is not None:
+                    result['pf_status_code'] = captured_pf_status_code
+                    logger.info(f"[STATUS] Forwarding pf_status_code={captured_pf_status_code} from ordinal reference Lambda")
+                return result
 
             except IndexError:
                 logger.warning(f"[ORDINAL] Index {ordinal_index} out of range for {len(project_ids)} projects")
@@ -2560,7 +2586,7 @@ What would you like to do?"""
                         weather_text = f"Here's the weather forecast for your **{category}** project in {location}:\n\n{weather_text}"
 
                 timing['total'] = time.time() - start_time
-                return {
+                result = {
                     'response': weather_text,
                     'intent': 'information',
                     'action': 'get_weather',
@@ -2568,6 +2594,13 @@ What would you like to do?"""
                     'direct_call': True,
                     'timing': timing
                 }
+
+                # Add pf_status_code if present in weather Lambda response
+                if 'pf_status_code' in weather_body:
+                    result['pf_status_code'] = weather_body['pf_status_code']
+                    logger.info(f"[WEATHER] Forwarding pf_status_code={weather_body['pf_status_code']} from weather Lambda")
+
+                return result
 
             except Exception as weather_err:
                 logger.error(f"Weather fetch failed: {weather_err}")
@@ -2628,7 +2661,7 @@ What would you like to do?"""
                     logger.info("[CANCEL] Cancellation complete, workflow state cleared")
 
                     timing['total'] = time.time() - start_time
-                    return {
+                    result = {
                         'response': formatted_cancel,
                         'intent': 'scheduling',
                         'action': 'cancel_appointment',
@@ -2636,6 +2669,13 @@ What would you like to do?"""
                         'direct_call': True,
                         'timing': timing
                     }
+
+                    # Add pf_status_code if present in Lambda response
+                    if 'pf_status_code' in cancel_body:
+                        result['pf_status_code'] = cancel_body['pf_status_code']
+                        logger.info(f"[STATUS] Forwarding pf_status_code={cancel_body['pf_status_code']} from cancel_appointment")
+
+                    return result
 
                 except Exception as cancel_err:
                     logger.error(f"[CANCEL] Cancellation failed: {cancel_err}")
@@ -3257,6 +3297,15 @@ What would you like to do?"""
             else:
                 response_body = response_body_str
 
+            # DEBUG: Log what we got from Lambda to diagnose pf_status_code issue
+            logger.info(f"[DEBUG] response_body keys: {list(response_body.keys()) if isinstance(response_body, dict) else 'NOT_A_DICT'}")
+            logger.info(f"[DEBUG] pf_status_code in response_body: {'pf_status_code' in response_body if isinstance(response_body, dict) else False}")
+
+            # Capture pf_status_code if present
+            if 'pf_status_code' in response_body:
+                captured_pf_status_code = response_body['pf_status_code']
+                logger.info(f"[DEBUG] Captured pf_status_code={captured_pf_status_code}")
+
             # PROACTIVE WEATHER WARNINGS: Add weather indicators when showing available dates
             if lambda_action == 'get_available_dates':
                 available_dates = response_body.get('available_dates', [])
@@ -3574,7 +3623,7 @@ What would you like to do?"""
                 })
 
                 timing['total'] = time.time() - start_time
-                return {
+                result = {
                     'response': response_text,
                     'intent': 'scheduling',
                     'action': wf_type,
@@ -3582,6 +3631,13 @@ What would you like to do?"""
                     'direct_call': True,
                     'timing': timing
                 }
+
+                # Add pf_status_code if present in Lambda response
+                if 'pf_status_code' in response_body:
+                    result['pf_status_code'] = response_body['pf_status_code']
+                    logger.info(f"[STATUS] Forwarding pf_status_code={response_body['pf_status_code']} from {wf_type} confirmation")
+
+                return result
 
             # HANDLE TWO-STEP RESCHEDULE WORKFLOW: When reschedule returns cancelled_awaiting_dates, set workflow state
             if lambda_action == 'reschedule_appointment' and response_body.get('status') == 'cancelled_awaiting_dates':
@@ -3608,7 +3664,7 @@ What would you like to do?"""
                 })
 
                 timing['total'] = time.time() - start_time
-                return {
+                result = {
                     'response': response_text,
                     'intent': 'scheduling',
                     'action': 'reschedule_appointment',
@@ -3616,6 +3672,13 @@ What would you like to do?"""
                     'direct_call': True,
                     'timing': timing
                 }
+
+                # Add pf_status_code if present in Lambda response
+                if 'pf_status_code' in response_body:
+                    result['pf_status_code'] = response_body['pf_status_code']
+                    logger.info(f"[STATUS] Forwarding pf_status_code={response_body['pf_status_code']} from reschedule_appointment")
+
+                return result
 
             # CRITICAL: Extract request_id from Lambda response and add to workflow state
             # request_id is required for get_time_slots and confirm_appointment
@@ -3926,7 +3989,8 @@ What would you like to do?"""
     logger.info(f"[TIMING]  Intelligent Orchestration: Total={timing['total']:.2f}s | Classification={timing.get('classification', 0):.2f}s | Decision={timing.get('decision', 0):.2f}s")
     logger.info(f"[BATCH] FINAL response_text length: {len(response_text)} chars")
 
-    return {
+    # Build result dictionary
+    result = {
         'response': response_text,
         'intent': classification.get('intent', 'unknown'),
         'action': decision.get('lambda_action') or classification.get('action'),
@@ -3934,3 +3998,10 @@ What would you like to do?"""
         'direct_call': True,
         'timing': timing
     }
+
+    # Add pf_status_code if it was captured from any Lambda call
+    if captured_pf_status_code is not None:
+        result['pf_status_code'] = captured_pf_status_code
+        logger.info(f"[STATUS] Forwarding pf_status_code={captured_pf_status_code} from Lambda response")
+
+    return result

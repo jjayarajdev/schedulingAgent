@@ -350,6 +350,12 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
     """
     try:
         if action == 'list_projects':
+            # Check for errors FIRST before checking empty projects
+            if 'error' in response_body:
+                error_message = response_body['error']
+                # Return error message preserving pf_status_code (handled by caller)
+                return f"Unable to retrieve projects: {error_message}"
+
             projects = response_body.get('projects', [])
             if not projects:
                 return "Hmm, I don't see any projects in your account yet. Once you have some, I can help you schedule them!"
@@ -1667,7 +1673,8 @@ def route_request(
                         f"Lambda={timing['lambda_direct']:.2f}s | "
                         f"Classification={timing['classification']:.3f}s")
 
-            return {
+            # Build result dict
+            result = {
                 'response': formatted_response,
                 'intent': intent,
                 'action': action,
@@ -1676,6 +1683,13 @@ def route_request(
                 'timing': timing,
                 'channel': channel
             }
+
+            # Add pf_status_code if present (from scheduling-actions Lambda thread-local storage)
+            if 'pf_status_code' in response_body:
+                result['pf_status_code'] = response_body['pf_status_code']
+                logger.info(f"[STATUS] Forwarding pf_status_code={response_body['pf_status_code']} from Lambda")
+
+            return result
 
         except Exception as e:
             logger.error(f"Direct Lambda call failed: {e}")

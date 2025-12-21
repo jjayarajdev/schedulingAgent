@@ -19,6 +19,7 @@ import json
 import logging
 import requests
 import boto3
+import threading
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from botocore.exceptions import ClientError
@@ -85,6 +86,26 @@ adapter = requests.adapters.HTTPAdapter(
 )
 session.mount('http://', adapter)
 session.mount('https://', adapter)
+
+# ============================================================================
+# Thread-local Storage for PF API Status Code
+# ============================================================================
+
+# Thread-local storage to track last PF API response status code
+_thread_local = threading.local()
+
+def set_pf_status_code(status_code: int):
+    """Store PF API status code in thread-local storage"""
+    _thread_local.pf_status_code = status_code
+
+def get_pf_status_code() -> Optional[int]:
+    """Retrieve PF API status code from thread-local storage"""
+    return getattr(_thread_local, 'pf_status_code', None)
+
+def clear_pf_status_code():
+    """Clear PF API status code from thread-local storage"""
+    if hasattr(_thread_local, 'pf_status_code'):
+        delattr(_thread_local, 'pf_status_code')
 
 # ============================================================================
 # Helper Functions
@@ -206,9 +227,38 @@ def make_api_request_with_retry(
         # OPTIMIZATION: Use session instead of requests directly (reuses TCP connections)
         response = session.request(method, url, headers=headers, **kwargs)
         response.raise_for_status()
+        # Store PF API status code in thread-local storage for generic access by all handlers
+        set_pf_status_code(response.status_code)
         return response
 
     except requests.HTTPError as e:
+        # DEBUG: Store status code BEFORE any refresh attempts
+        logger.info(f"[DEBUG-ENTRY] HTTPError caught, e.response={e.response if hasattr(e, 'response') else 'NO_ATTR'}")
+
+        # Try multiple ways to extract status code
+        status_code = None
+        if hasattr(e, 'response') and e.response is not None:
+            # Method 1: Direct attribute access
+            if hasattr(e.response, 'status_code') and e.response.status_code is not None:
+                status_code = e.response.status_code
+                logger.info(f"[DEBUG-METHOD1] Got status_code from e.response.status_code: {status_code}")
+            # Method 2: Parse from string representation
+            elif hasattr(e.response, '__repr__'):
+                resp_str = repr(e.response)
+                logger.info(f"[DEBUG-METHOD2] Trying to parse from repr: {resp_str}")
+                import re
+                match = re.search(r'\[(\d+)\]', resp_str)
+                if match:
+                    status_code = int(match.group(1))
+                    logger.info(f"[DEBUG-METHOD2] Parsed status_code from repr: {status_code}")
+
+        logger.info(f"[DEBUG-EXTRACT] Final extracted status_code={status_code}")
+        if status_code:
+            set_pf_status_code(status_code)
+            logger.info(f"[DEBUG-STORED] Stored pf_status_code={status_code} from HTTPError before refresh attempt")
+        else:
+            logger.info(f"[DEBUG-SKIPPED] NOT storing because status_code is falsy: {status_code}")
+
         # If 401/403 (Unauthorized/Forbidden), try Phase 2 auto-refresh
         if e.response.status_code in [401, 403]:
             logger.warning(f"Received {e.response.status_code} error, attempting auto-refresh...")
@@ -235,6 +285,8 @@ def make_api_request_with_retry(
                         response = session.request(method, url, headers=headers, **kwargs)
                         response.raise_for_status()
                         logger.info(" Request succeeded after Phase 2 auto-refresh")
+                        # Store PF API status code in thread-local storage for generic access by all handlers
+                        set_pf_status_code(response.status_code)
                         return response
                     except requests.HTTPError as retry_error:
                         logger.error(f" Request failed even after auto-refresh: {retry_error}")
@@ -262,6 +314,8 @@ def make_api_request_with_retry(
                     response = session.request(method, url, headers=headers, **kwargs)
                     response.raise_for_status()
                     logger.info("Request succeeded after Phase 1 token refresh")
+                    # Store PF API status code in thread-local storage for generic access by all handlers
+                    set_pf_status_code(response.status_code)
                     return response
                 except requests.HTTPError as retry_error:
                     logger.error(f"Request failed even after Phase 1 token refresh: {retry_error}")
@@ -311,9 +365,16 @@ def format_success_response(event: Dict, action: str, result: Dict[str, Any]) ->
         }
     }
 
-def format_error_response(event: Dict, action: str, error_message: str, status_code: int = 500) -> Dict[str, Any]:
+def format_error_response(event: Dict, action: str, error_message: str, status_code: int = 500, pf_status_code: Optional[int] = None) -> Dict[str, Any]:
     """Format error response for Bedrock Agent - supports both OpenAPI and Function formats"""
     error_body = {'error': error_message, 'action': action}
+
+    # Add PF API status code if available
+    if pf_status_code is not None:
+        error_body['pf_status_code'] = pf_status_code
+        logger.info(f"[DEBUG] Added pf_status_code={pf_status_code} to error_body in format_error_response")
+    else:
+        logger.info(f"[DEBUG] pf_status_code is None in format_error_response")
 
     # Check if this is function calling format (new format)
     if 'function' in event:
@@ -494,6 +555,13 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
         except requests.HTTPError as e:
             api_duration = (time.time() - api_start) * 1000
             logger.error(f"HTTP error fetching projects after {api_duration:.2f}ms: {e}")
+
+            # CRITICAL: Store pf_status_code from the HTTPError before raising ValueError
+            status_code = e.response.status_code if e.response else None
+            if status_code:
+                set_pf_status_code(status_code)
+                logger.info(f"[DEBUG-LIST-PROJECTS] Stored pf_status_code={status_code} in handle_list_projects HTTPError handler")
+
             if e.response.status_code == 401:
                 raise ValueError("Authentication failed - token expired and auto-refresh failed")
             elif e.response.status_code == 403:
@@ -693,7 +761,7 @@ Store: {store_display}
             }
 
         # Return enhanced response with both legacy and new format
-        return {
+        result = {
             "action": "get_project_details",
             "project": project,
 
@@ -751,6 +819,8 @@ Store: {store_display}
             "client_timezone": "US/Eastern",
             "full_data": project_data
         }
+
+        return result
 
     except requests.HTTPError as e:
         if e.response.status_code == 404:
@@ -1852,34 +1922,52 @@ def lambda_handler(event, context):
         # Execute handler
         result = handler(params, config, auth_headers)
 
+        # Add PF API status code to result if available (from thread-local storage)
+        pf_status_code = get_pf_status_code()
+        if pf_status_code is not None:
+            # Ensure result is a dict before adding pf_status_code
+            if isinstance(result, dict):
+                result['pf_status_code'] = pf_status_code
+                logger.info(f"Added pf_status_code={pf_status_code} to response")
+
         # Return formatted response
         return format_success_response(event, action, result)
 
     except ValueError as e:
         logger.error(f"Validation error: {str(e)}")
+        # Retrieve pf_status_code from thread-local storage if available
+        pf_status_code = get_pf_status_code()
+        logger.info(f"[DEBUG] Retrieved pf_status_code={pf_status_code} in ValueError handler")
         return format_error_response(
             event,
             action if 'action' in locals() else 'unknown',
             f'Validation error: {str(e)}',
-            400
+            400,
+            pf_status_code=pf_status_code
         )
 
     except requests.RequestException as e:
         logger.error(f"API request failed: {str(e)}")
+        # Retrieve pf_status_code from thread-local storage if available
+        pf_status_code = get_pf_status_code()
         return format_error_response(
             event,
             action if 'action' in locals() else 'unknown',
             f'API request failed: {str(e)}',
-            502
+            502,
+            pf_status_code=pf_status_code
         )
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        # Retrieve pf_status_code from thread-local storage if available
+        pf_status_code = get_pf_status_code()
         return format_error_response(
             event,
             action if 'action' in locals() else 'unknown',
             f'Internal error: {str(e)}',
-            500
+            500,
+            pf_status_code=pf_status_code
         )
 
 # For local testing

@@ -967,6 +967,17 @@
                 // Format the complete response with JSON detection
                 contentDiv.innerHTML = formatAgentMessage(fullResponse);
                 contentDiv.classList.remove('streaming');
+
+                // Display pf_status_code if present (PF API status from external calls)
+                if (data.pf_status_code !== undefined) {
+                    const statusBadge = document.createElement('div');
+                    statusBadge.style.cssText = 'margin-top: 8px; font-size: 11px; color: #666; display: flex; gap: 8px; align-items: center;';
+                    const statusColor = data.pf_status_code >= 200 && data.pf_status_code < 300 ? '#28a745' : '#dc3545';
+                    statusBadge.innerHTML = `<span style="background: ${statusColor}; color: white; padding: 2px 6px; border-radius: 4px; font-weight: 500;">PF API: ${data.pf_status_code}</span>`;
+                    contentDiv.appendChild(statusBadge);
+                    console.log('[PF_STATUS] pf_status_code:', data.pf_status_code);
+                }
+
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
             } catch (error) {

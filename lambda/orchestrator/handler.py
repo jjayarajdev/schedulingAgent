@@ -155,7 +155,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         )
 
         # Return successful response
-        return create_success_response({
+        response_data = {
             "response": response_text,
             "agent_name": agent_name,
             "intent": intent,
@@ -163,7 +163,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "session_id": session_id,
             "direct_call": direct_call,
             "performance": timing
-        })
+        }
+
+        # Add pf_status_code if present (only when external PF API calls were made)
+        if 'pf_status_code' in result:
+            response_data['pf_status_code'] = result['pf_status_code']
+            logger.info(f"[HANDLER] Added pf_status_code={result['pf_status_code']} to response_data")
+
+        logger.info(f"[HANDLER] Final response_data keys: {list(response_data.keys())}")
+        logger.info(f"[HANDLER] pf_status_code in response_data: {'pf_status_code' in response_data}")
+
+        return create_success_response(response_data)
 
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON in request body: {e}")
@@ -178,18 +188,19 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return create_error_response(500, f"Internal server error: {str(e)}")
 
 
-def create_success_response(data: Dict[str, Any]) -> Dict[str, Any]:
+def create_success_response(data: Dict[str, Any], status_code: int = 200) -> Dict[str, Any]:
     """
     Create API Gateway success response
 
     Args:
         data: Response data dictionary
+        status_code: HTTP status code (default: 200)
 
     Returns:
-        API Gateway response with statusCode 200
+        API Gateway response with status_code
     """
     return {
-        'statusCode': 200,
+        'status_code': status_code,
         'headers': {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
@@ -212,7 +223,7 @@ def create_error_response(status_code: int, error_message: str) -> Dict[str, Any
         API Gateway response with error status
     """
     return {
-        'statusCode': status_code,
+        'status_code': status_code,
         'headers': {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',

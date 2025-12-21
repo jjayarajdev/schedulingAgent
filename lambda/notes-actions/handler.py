@@ -13,10 +13,27 @@ Note: list_notes API may not exist in PF360, using DynamoDB as fallback
 import json
 import logging
 import requests
+import threading
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import boto3
 from botocore.exceptions import ClientError
+
+# Thread-local storage for pf_status_code
+_thread_local = threading.local()
+
+def set_pf_status_code(status_code: int):
+    """Store pf_status_code in thread-local storage"""
+    _thread_local.pf_status_code = status_code
+
+def get_pf_status_code() -> Optional[int]:
+    """Retrieve pf_status_code from thread-local storage"""
+    return getattr(_thread_local, 'pf_status_code', None)
+
+def clear_pf_status_code():
+    """Clear pf_status_code from thread-local storage"""
+    if hasattr(_thread_local, 'pf_status_code'):
+        delattr(_thread_local, 'pf_status_code')
 
 # Import configuration and mock data
 from config import (
@@ -116,9 +133,14 @@ def format_success_response(event: Dict, action: str, result: Dict[str, Any]) ->
         }
     }
 
-def format_error_response(event: Dict, action: str, error_message: str, status_code: int = 500) -> Dict[str, Any]:
+def format_error_response(event: Dict, action: str, error_message: str, status_code: int = 500, pf_status_code: Optional[int] = None) -> Dict[str, Any]:
     """Format error response for Bedrock Agent - supports both OpenAPI and Function formats"""
     error_body = {'error': error_message, 'action': action}
+
+    # Add pf_status_code if present
+    if pf_status_code is not None:
+        error_body['pf_status_code'] = pf_status_code
+        logger.info(f"[DEBUG] Added pf_status_code={pf_status_code} to error_body")
 
     # Check if this is function calling format (new format used by orchestrator)
     if 'function' in event:
@@ -222,9 +244,13 @@ def handle_add_note(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str,
 
         try:
             res = requests.post(url, headers=auth_headers, json=payload, timeout=30)
+            set_pf_status_code(res.status_code)  # Capture API status code
             res.raise_for_status()
             response = res.json()
         except requests.RequestException as e:
+            # Capture status code from HTTPError if available
+            if hasattr(e, 'response') and e.response is not None:
+                set_pf_status_code(e.response.status_code)
             # If API fails, fallback to DynamoDB
             logger.warning(f"Add note API failed, using DynamoDB fallback: {str(e)}")
             note = store_note_in_dynamodb(config['dynamodb_table'], project_id, note_text, author)
@@ -265,9 +291,13 @@ def handle_list_notes(params: Dict, config: Dict, auth_headers: Dict) -> Dict[st
         try:
             url = f"{config['list_notes_url']}?project_id={project_id}"
             res = requests.get(url, headers=auth_headers, timeout=30)
+            set_pf_status_code(res.status_code)  # Capture API status code
             res.raise_for_status()
             response = res.json()
         except requests.RequestException as e:
+            # Capture status code from HTTPError if available
+            if hasattr(e, 'response') and e.response is not None:
+                set_pf_status_code(e.response.status_code)
             # If API doesn't exist or fails, use DynamoDB
             logger.warning(f"List notes API not available, using DynamoDB: {str(e)}")
             notes = get_notes_from_dynamodb(config['dynamodb_table'], project_id)
@@ -301,6 +331,9 @@ def lambda_handler(event, context):
     Routes to appropriate action handler based on apiPath
     """
     logger.info(f"Received event: {json.dumps(event)}")
+
+    # Clear pf_status_code at the start of each request
+    clear_pf_status_code()
 
     try:
         # Extract action from event
@@ -378,34 +411,46 @@ def lambda_handler(event, context):
         # Execute handler
         result = handler(params, config, auth_headers)
 
+        # Add pf_status_code to result if captured
+        pf_status_code = get_pf_status_code()
+        if pf_status_code is not None:
+            result['pf_status_code'] = pf_status_code
+            logger.info(f"Added pf_status_code={pf_status_code} to response")
+
         # Return formatted response
         return format_success_response(event, action, result)
 
     except ValueError as e:
         logger.error(f"Validation error: {str(e)}")
+        pf_status_code = get_pf_status_code()
         return format_error_response(
             event,
             action if 'action' in locals() else 'unknown',
             f'Validation error: {str(e)}',
-            400
+            400,
+            pf_status_code=pf_status_code
         )
 
     except requests.RequestException as e:
         logger.error(f"API request failed: {str(e)}")
+        pf_status_code = get_pf_status_code()
         return format_error_response(
             event,
             action if 'action' in locals() else 'unknown',
             f'API request failed: {str(e)}',
-            502
+            502,
+            pf_status_code=pf_status_code
         )
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        pf_status_code = get_pf_status_code()
         return format_error_response(
             event,
             action if 'action' in locals() else 'unknown',
             f'Internal error: {str(e)}',
-            500
+            500,
+            pf_status_code=pf_status_code
         )
 
 # For local testing
