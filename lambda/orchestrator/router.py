@@ -1201,6 +1201,7 @@ def handle_welcome_request(
             response_body = response_body_str
 
         projects = response_body.get('projects', [])
+        pf_http_status_code = response_body.get('pf_http_status_code', 200)
         logger.info(f"[INFO] Found {len(projects)} projects for user")
 
         # STORE project_ids AND project_mapping in workflow_state
@@ -1262,12 +1263,34 @@ def handle_welcome_request(
             'session_id': session_id,
             'direct_call': True,
             'projects': projects,  # Include projects for frontend rendering
-            'performance': timing
+            'timing': timing,
+            'pf_http_status_code': pf_http_status_code,
+            'agenticscheduler_http_status_code': 200
         }
 
     except Exception as e:
         logger.error(f"Welcome request failed: {e}")
-        # Return graceful fallback
+        error_str = str(e).lower()
+
+        # Check if this is an auth/session error
+        is_auth_error = any(keyword in error_str for keyword in ['token', 'auth', 'expired', '401', '403', 'unauthorized'])
+
+        if is_auth_error:
+            logger.info(f"[AUTH] Welcome failed due to session expiration - setting pf_http_status_code=401")
+            return {
+                'response': "Your session has expired. Please log in again to continue.",
+                'agent_name': 'Welcome',
+                'intent': 'welcome',
+                'action': 'session_expired',
+                'session_id': session_id,
+                'direct_call': True,
+                'projects': [],
+                'timing': {'total': time.time() - start_time},
+                'pf_http_status_code': 401,
+                'agenticscheduler_http_status_code': 200
+            }
+
+        # Return graceful fallback for non-auth errors
         name_part = f", {user_name}" if user_name else ""
         return {
             'response': f"Hello{name_part}! Welcome to ProjectForce. I'm here to help with your home service projects.",
@@ -1277,7 +1300,9 @@ def handle_welcome_request(
             'session_id': session_id,
             'direct_call': True,
             'projects': [],
-            'performance': {'total': time.time() - start_time}
+            'timing': {'total': time.time() - start_time},
+            'pf_http_status_code': None,
+            'agenticscheduler_http_status_code': 200
         }
 
 
@@ -1680,9 +1705,27 @@ def route_request(
         except Exception as e:
             logger.error(f"Direct Lambda call failed: {e}")
             timing['total'] = time.time() - start_time
-            # Use improved error response
-            error_response = get_error_response('api_error', str(e) if 'timeout' not in str(e).lower() else None)
-            if 'timeout' in str(e).lower():
+            error_str = str(e).lower()
+
+            # Check if this is an auth/session error
+            is_auth_error = any(keyword in error_str for keyword in ['token', 'auth', 'expired', '401', '403', 'unauthorized'])
+
+            if is_auth_error:
+                logger.info(f"[AUTH] Lambda call failed due to session expiration - setting pf_http_status_code=401")
+                return {
+                    'response': "Your session has expired. Please log in again to continue.",
+                    'intent': intent,
+                    'action': action,
+                    'agent_name': 'Direct Lambda',
+                    'direct_call': False,
+                    'timing': timing,
+                    'pf_http_status_code': 401,
+                    'agenticscheduler_http_status_code': 200
+                }
+
+            # Use improved error response for non-auth errors
+            error_response = get_error_response('api_error', str(e) if 'timeout' not in error_str else None)
+            if 'timeout' in error_str:
                 error_response = get_error_response('timeout')
             return {
                 'response': error_response,
@@ -1690,7 +1733,9 @@ def route_request(
                 'action': action,
                 'agent_name': 'Direct Lambda',
                 'direct_call': False,
-                'timing': timing
+                'timing': timing,
+                'pf_http_status_code': 200,
+                'agenticscheduler_http_status_code': 500
             }
 
     # NO BEDROCK FALLBACK - All actions should be handled by direct Lambda or workflow

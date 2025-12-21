@@ -131,6 +131,7 @@ SCHEDULING PHRASES:
 - "when are they coming?" / "when are they coming out?" = get_project_details (asking for scheduled date)
 - "what's my slot?" / "when's my slot?" = get_project_details or get_time_slots
 - "what's on the calendar?" / "what's on the books?" = list_projects with status=Scheduled
+- "do i have any jobs that i can schedule" / "any projects i can schedule" / "jobs available to schedule" = list_projects with status="schedulable" (QUERY, not action!) - matches New or Ready To Schedule
 
 STATUS PHRASES:
 - "ready to go" = status: Ready To Schedule
@@ -381,8 +382,18 @@ Reasoning: "jobs" = "projects" in industry terminology -> list_projects
 
 Example 13b - Industry term "orders" (Direct Lambda):
 For "what orders can I schedule":
-{{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":{{"status":"New"}}}}
-Reasoning: "orders" = "projects", "can I schedule" implies unscheduled/New status -> list_projects with filter
+{{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":{{"status":"schedulable"}}}}
+Reasoning: "orders" = "projects", "can I schedule" implies unscheduled status -> list_projects with "schedulable" filter (matches New or Ready To Schedule)
+
+Example 13c - Schedulable jobs query (Direct Lambda):
+For "do i have any jobs that i can schedule":
+{{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":{{"status":"schedulable"}}}}
+Reasoning: User is ASKING what jobs are available to schedule (query intent) -> list_projects with "schedulable" filter. NOT an action to schedule.
+
+Example 13d - Available to schedule query (Direct Lambda):
+For "any projects available to schedule":
+{{"intent":"scheduling","action":"list_projects","can_call_direct":true,"params":{{"status":"schedulable"}}}}
+Reasoning: "available to schedule" = unscheduled -> list_projects with "schedulable" filter (matches New or Ready To Schedule)
 
 Example 14 - Industry term with category (Direct Lambda):
 For "my hardwood installs":
