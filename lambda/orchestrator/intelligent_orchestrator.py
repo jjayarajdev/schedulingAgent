@@ -1676,6 +1676,7 @@ def orchestrate_intelligent_workflow(
     """
     timing = {}
     start_time = time.time()
+    pf_http_status_code = 200  # Default PF API status code
 
     state_manager = get_state_manager()
 
@@ -3022,6 +3023,18 @@ What would you like to do?"""
         lambda_action = decision['lambda_action']
         lambda_params = decision['lambda_params']
 
+        # FIX: Prevent conversation context bleeding for list_projects
+        # When user says "list my projects", we should ALWAYS fetch ALL projects
+        # from the API, not filter by project_ids extracted from conversation history.
+        # Only preserve 'status' filter if explicitly requested (e.g., "schedulable", "New").
+        if lambda_action == 'list_projects':
+            if 'project_ids' in lambda_params:
+                logger.info(f"[LIST_PROJECTS] Removing conversation project_ids from params - will fetch fresh from API")
+                del lambda_params['project_ids']
+            if 'project_id' in lambda_params:
+                logger.info(f"[LIST_PROJECTS] Removing conversation project_id from params - will fetch fresh from API")
+                del lambda_params['project_id']
+
         # WORKFLOW SWITCH DETECTION (Hybrid Approach):
         # Clear stale workflow state when user starts a DIFFERENT workflow type
         # This prevents issues like "schedule 3rd project" using reschedule API
@@ -3339,6 +3352,25 @@ What would you like to do?"""
                 response_body = json.loads(response_body_str)
             else:
                 response_body = response_body_str
+
+            # Extract PF API HTTP status code from Lambda response
+            # Check both 'pf_http_status_code' and 'pf_status_code' for compatibility
+            pf_http_status_code = response_body.get('pf_http_status_code') or response_body.get('pf_status_code', 200)
+
+            # CHECK FOR AUTH ERRORS: If the API returned 401/403, the session has expired
+            if pf_http_status_code in [401, 403]:
+                logger.info(f"[AUTH] PF API returned {pf_http_status_code} - session expired")
+                response_text = "Your session has expired. Please log in again to continue."
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': response_text,
+                    'intent': classification.get('intent', 'unknown'),
+                    'action': decision.get('lambda_action') or classification.get('action'),
+                    'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                    'direct_call': True,
+                    'timing': timing,
+                    'pf_http_status_code': 401  # Always return 401 for auth errors so frontend can redirect
+                }
 
             # PROACTIVE WEATHER WARNINGS: Add weather indicators when showing available dates
             if lambda_action == 'get_available_dates':
@@ -3982,12 +4014,12 @@ What would you like to do?"""
 
             if 'timeout' in error_str or 'timed out' in error_str:
                 response_text = "That's taking longer than expected. Mind trying again?"
-            elif 'token' in error_str or 'auth' in error_str or 'expired' in error_str:
-                response_text = "Looks like your session may have expired. Could you refresh and try again?"
+            elif 'token' in error_str or 'auth' in error_str or 'expired' in error_str or '401' in error_str or '403' in error_str:
+                # IMPORTANT: Set pf_http_status_code to 401 so frontend knows to prompt re-login
+                pf_http_status_code = 401
+                response_text = "Your session has expired. Please log in again to continue."
                 should_clear_state = True  # Auth errors often corrupt state
-            elif '403' in error_str or 'forbidden' in error_str:
-                response_text = "There was an access issue. Let me start fresh - what would you like to do?"
-                should_clear_state = True  # 403 errors indicate session/auth issues
+                logger.info(f"[AUTH] Session expired - setting pf_http_status_code=401 for frontend re-login prompt")
             elif 'project' in error_str and 'not found' in error_str:
                 response_text = "I couldn't find that project. Want me to show you your project list?"
             else:
@@ -4071,5 +4103,6 @@ What would you like to do?"""
         'action': decision.get('lambda_action') or classification.get('action'),
         'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
         'direct_call': True,
-        'timing': timing
+        'timing': timing,
+        'pf_http_status_code': pf_http_status_code
     }

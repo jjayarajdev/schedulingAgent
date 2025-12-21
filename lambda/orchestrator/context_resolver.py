@@ -436,9 +436,12 @@ def _resolve_pronoun_references(message: str, context: Dict) -> tuple:
     resolved_message = message
 
     # Patterns: "schedule it", "book that", "show this one"
+    # IMPORTANT: Avoid matching relative pronouns like "projects that i can schedule"
+    # Only match "that" when it's a demonstrative pronoun (end of phrase or before "one"/"project")
     pronoun_patterns = [
-        r'\b(it)\b',
-        r'\b(that)\b',
+        r'\b(it)\b(?!\s+(?:is|was|can|will|would|should|could|has|have|had))',  # "schedule it" but not "it is"
+        r'\b(that)\b(?:\s+(?:one|project))?\s*$',  # "schedule that" at end, or "that one", "that project"
+        r'\b(that)\b(?:\s+(?:one|project))',  # "show me that one"
         r'\b(this)(?:\s+one)?\b'
     ]
 

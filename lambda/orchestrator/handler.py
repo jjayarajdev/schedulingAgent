@@ -101,6 +101,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             )
             logger.info(f"[HISTORY] Added welcome response to conversation history")
 
+            # Add status codes to the result
+            result['pf_http_status_code'] = result.get('pf_http_status_code', 200)
+            result['agenticscheduler_http_status_code'] = result.get('agenticscheduler_http_status_code', 200)
+            logger.info(f"[WELCOME] Returning with status codes: pf={result['pf_http_status_code']}, agentic={result['agenticscheduler_http_status_code']}")
             return create_success_response(result)
 
         # Get conversation manager
@@ -131,6 +135,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         agent_name = result['agent_name']
         direct_call = result['direct_call']
         timing = result['timing']
+        # Extract PF API status code if available from Lambda response
+        pf_http_status_code = result.get('pf_http_status_code', 200)
 
         # FORMAT FOR SMS: Apply SMS-safe formatting for SMS channel
         # This strips emojis, markdown, and special unicode characters
@@ -138,7 +144,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             response_text = format_for_sms(response_text)
             logger.info(f"[SMS] Response formatted for SMS delivery")
 
-        logger.info(f"[OK] Response: agent={agent_name}, intent={intent}, direct={direct_call}, timing={timing.get('total', 0):.2f}s")
+        logger.info(f"[OK] Response: agent={agent_name}, intent={intent}, direct={direct_call}, timing={timing.get('total', 0):.2f}s, pf_status={pf_http_status_code}")
 
         # Add assistant response to conversation history
         conversation_manager.add_to_conversation_history(
@@ -154,7 +160,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         )
 
-        # Return successful response
+        # Return successful response with status codes
         return create_success_response({
             "response": response_text,
             "agent_name": agent_name,
@@ -162,7 +168,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "action": action,
             "session_id": session_id,
             "direct_call": direct_call,
-            "performance": timing
+            "performance": timing,
+            "pf_http_status_code": pf_http_status_code,
+            "agenticscheduler_http_status_code": 200
         })
 
     except json.JSONDecodeError as e:
@@ -200,13 +208,14 @@ def create_success_response(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def create_error_response(status_code: int, error_message: str) -> Dict[str, Any]:
+def create_error_response(status_code: int, error_message: str, pf_http_status_code: int = None) -> Dict[str, Any]:
     """
     Create API Gateway error response
 
     Args:
         status_code: HTTP status code
         error_message: Error message
+        pf_http_status_code: ProjectForce API status code (optional)
 
     Returns:
         API Gateway response with error status
@@ -220,7 +229,9 @@ def create_error_response(status_code: int, error_message: str) -> Dict[str, Any
             'Access-Control-Allow-Methods': 'POST,OPTIONS'
         },
         'body': json.dumps({
-            'error': error_message
+            'error': error_message,
+            'pf_http_status_code': pf_http_status_code,
+            'agenticscheduler_http_status_code': status_code
         })
     }
 

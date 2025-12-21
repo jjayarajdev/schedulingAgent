@@ -313,7 +313,7 @@ def format_success_response(event: Dict, action: str, result: Dict[str, Any]) ->
 
 def format_error_response(event: Dict, action: str, error_message: str, status_code: int = 500) -> Dict[str, Any]:
     """Format error response for Bedrock Agent - supports both OpenAPI and Function formats"""
-    error_body = {'error': error_message, 'action': action}
+    error_body = {'error': error_message, 'action': action, 'pf_http_status_code': status_code}
 
     # Check if this is function calling format (new format)
     if 'function' in event:
@@ -406,7 +406,7 @@ def extract_project_minimal(item: Dict) -> Dict[str, Any]:
 
     return project
 
-def format_projects_for_agent(projects: list, customer_id: str = "") -> Dict[str, Any]:
+def format_projects_for_agent(projects: list, customer_id: str = "", pf_http_status_code: int = 200) -> Dict[str, Any]:
     """
     OPTIMIZATION: Pre-format exactly as agent instructions expect
     Agent receives this ready for UI - NO additional formatting needed
@@ -416,7 +416,8 @@ def format_projects_for_agent(projects: list, customer_id: str = "") -> Dict[str
     if project_count == 0:
         return {
             "message": "No projects found for this customer.",
-            "projects": []
+            "projects": [],
+            "pf_http_status_code": pf_http_status_code
         }
 
     # Get address from first project for message
@@ -433,7 +434,8 @@ def format_projects_for_agent(projects: list, customer_id: str = "") -> Dict[str
 
     return {
         "message": f"You have {project_count} {category} {project_type} project{'s' if project_count != 1 else ''}{first_address}:",
-        "projects": projects
+        "projects": projects,
+        "pf_http_status_code": pf_http_status_code
     }
 
 def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
@@ -465,6 +467,9 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
     import time
     start_time = time.time()
 
+    # Track PF API HTTP status code
+    pf_http_status_code = 200  # Default for mock/success
+
     if USE_MOCK_API:
         logger.info(f"[MOCK] Fetching projects for customer {customer_id}")
         response = get_mock_projects(customer_id)
@@ -486,13 +491,15 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
                 timeout=(5, 45)  # (connect timeout, read timeout) - increased to 45s
             )
             api_duration = (time.time() - api_start) * 1000
+            pf_http_status_code = res.status_code
             logger.info(f"API call took {api_duration:.2f}ms")
-            logger.info(f"Response status: {res.status_code}")
+            logger.info(f"Response status: {pf_http_status_code}")
             logger.info(f"Response headers: {dict(res.headers)}")
             logger.info(f"Response text (first 500 chars): {res.text[:500]}")
             response = res.json()
         except requests.HTTPError as e:
             api_duration = (time.time() - api_start) * 1000
+            pf_http_status_code = e.response.status_code
             logger.error(f"HTTP error fetching projects after {api_duration:.2f}ms: {e}")
             if e.response.status_code == 401:
                 raise ValueError("SESSION_EXPIRED: Your session has expired. Please log out and log back in to continue.")
@@ -519,7 +526,13 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
             # Check status filter (simple substring match, case-insensitive)
             if filter_status:
                 project_status = project.get('status', '').lower()
-                if filter_status.lower() not in project_status:
+                filter_status_lower = filter_status.lower()
+
+                # Special handling for "schedulable" - matches "New" or "Ready To Schedule"
+                if filter_status_lower == 'schedulable':
+                    if project_status not in ['new', 'ready to schedule']:
+                        continue
+                elif filter_status_lower not in project_status:
                     continue
 
             # Check category filter
@@ -541,7 +554,7 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
         projects = filtered_projects
 
     # Pre-format exactly as agent expects (no agent work needed)
-    formatted_response = format_projects_for_agent(projects, customer_id)
+    formatted_response = format_projects_for_agent(projects, customer_id, pf_http_status_code)
 
     processing_duration = (time.time() - processing_start) * 1000
     total_duration = (time.time() - start_time) * 1000
@@ -781,6 +794,9 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
     client_id = params.get('client_id')
     customer_id = params.get('customer_id')
 
+    # Track PF API HTTP status code
+    pf_http_status_code = 200  # Default for mock/success
+
     if not project_id:
         raise ValueError("Missing required parameter: project_id")
 
@@ -805,10 +821,12 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
         try:
             # Use retry logic with automatic token refresh on 401
             res = make_api_request_with_retry("GET", url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
+            pf_http_status_code = res.status_code
             response = res.json()
             logger.info(f"Available dates retrieved successfully")
         except requests.HTTPError as e:
             status_code = e.response.status_code
+            pf_http_status_code = status_code
             error_body = e.response.text
             logger.error(f"HTTP {status_code} error fetching available dates: {error_body}")
 
@@ -831,7 +849,8 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
                         "available_dates": [],
                         "dates": [],
                         "dateCount": 0,
-                        "mock_mode": USE_MOCK_API
+                        "mock_mode": USE_MOCK_API,
+                        "pf_http_status_code": pf_http_status_code
                     }
                 raise ValueError(f"Invalid project: {error_body}")
             elif status_code == 404:
@@ -879,7 +898,8 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
         "dates": formatted_dates,  # Enhanced format for UI
         "dateCount": len(raw_dates),
         "request_id": data.get("request_id"),
-        "mock_mode": USE_MOCK_API
+        "mock_mode": USE_MOCK_API,
+        "pf_http_status_code": pf_http_status_code
     }
 
 def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
@@ -894,7 +914,9 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
     date = params.get('date')
     request_id = params.get('request_id')
     customer_id = params.get('customer_id')
-    
+
+    # Track PF API HTTP status code
+    pf_http_status_code = 200  # Default for mock/success
 
     if not all([project_id, date, request_id]):
         raise ValueError("Missing required parameters: project_id, date, request_id")
@@ -917,10 +939,12 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
         try:
             # Use retry logic with automatic token refresh on 401
             res = make_api_request_with_retry("GET", url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
+            pf_http_status_code = res.status_code
             response = res.json()
             logger.info(f"Time slots retrieved successfully: {len(response.get('data', {}).get('slots', []))} slots")
         except requests.HTTPError as e:
             status_code = e.response.status_code
+            pf_http_status_code = status_code
             error_body = e.response.text
             logger.error(f"HTTP {status_code} error fetching time slots: {error_body}")
 
@@ -992,7 +1016,8 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
         "timeSlotsGrouped": time_slots_grouped,  # Grouped format for enhanced UI
         "slotCount": len(raw_slots),
         "request_id": new_request_id,  # IMPORTANT: Return the request_id for confirm_appointment
-        "mock_mode": USE_MOCK_API
+        "mock_mode": USE_MOCK_API,
+        "pf_http_status_code": pf_http_status_code
     }
 
 def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
@@ -1015,6 +1040,9 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
     request_id = params.get('request_id')
     client_id = params.get('client_id')  # Extract client_id from parameters
     customer_id = params.get('customer_id')
+
+    # Track PF API HTTP status code
+    pf_http_status_code = 200  # Default for mock/success
 
     if not all([project_id, date, time, request_id]):
         raise ValueError("Missing required parameters: project_id, date, time, request_id")
@@ -1071,10 +1099,12 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
         try:
             # Use retry logic with automatic token refresh on 401
             res = make_api_request_with_retry("POST", url, auth_headers, client_id=client_id, user_id=customer_id, json=payload, timeout=30)
+            pf_http_status_code = res.status_code
             response = res.json()
             logger.info(f"Confirmation successful: {response}")
         except requests.HTTPError as e:
             status_code = e.response.status_code
+            pf_http_status_code = status_code
             error_body = e.response.text
             logger.error(f"HTTP {status_code} error confirming appointment: {error_body}")
 
@@ -1139,7 +1169,8 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
         "message": response.get("message", "Appointment confirmed successfully"),
         "appointment": appointment,  # Enhanced appointment object for UI
         "confirmation_data": confirmation_details,
-        "mock_mode": use_mock
+        "mock_mode": use_mock,
+        "pf_http_status_code": pf_http_status_code
     }
 
 def handle_reschedule_appointment(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
