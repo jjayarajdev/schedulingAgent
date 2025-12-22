@@ -56,10 +56,23 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         pf_user_id = str(body.get('pf_user_id', ''))
         pf_user_name = body.get('pf_user_name', '')  # User's display name for personalization
         channel = body.get('channel', 'chat')  # 'voice' or 'chat'
+        caller_phone = body.get('caller_phone', '')  # For Vapi voice calls
 
         # Validate required parameters
         if not message:
             return create_error_response(400, "Missing required parameter: message")
+
+        # VOICE/VAPI: If caller_phone is provided, look up credentials from DynamoDB
+        if caller_phone and (not pf_client_id or not pf_user_id):
+            phone_creds = get_phone_credentials(caller_phone)
+            if phone_creds:
+                pf_token = phone_creds.get('bearer_token', pf_token)
+                pf_client_id = phone_creds.get('client_id', pf_client_id)
+                pf_user_id = phone_creds.get('user_id', pf_user_id)
+                pf_user_name = phone_creds.get('user_name', pf_user_name)
+                logger.info(f"[VOICE_AUTH] Retrieved credentials for phone ***{caller_phone[-4:]}: user={pf_user_id}")
+            else:
+                logger.warning(f"[VOICE_AUTH] No credentials found for phone ***{caller_phone[-4:]}")
 
         # Phase 1+2 Architecture: pf_token is now optional (tokens come from Secrets Manager)
         # Only client_id and user_id are required
@@ -234,6 +247,61 @@ def create_error_response(status_code: int, error_message: str, pf_http_status_c
             'agenticscheduler_http_status_code': status_code
         })
     }
+
+
+def get_phone_credentials(phone_number: str) -> Dict[str, Any]:
+    """
+    Retrieve authenticated credentials from DynamoDB by phone number.
+    Used when Vapi passes caller_phone to identify the authenticated user.
+
+    Args:
+        phone_number: Caller's phone number (e.g., "+15104137024" or "5104137024")
+
+    Returns:
+        Dict with bearer_token, client_id, user_id, user_name or None if not found
+    """
+    import boto3
+    import time
+
+    try:
+        # Normalize phone number - strip to digits only
+        phone_clean = ''.join(c for c in phone_number if c.isdigit())
+        # Remove leading 1 for US numbers
+        if len(phone_clean) == 11 and phone_clean.startswith('1'):
+            phone_clean = phone_clean[1:]
+
+        session_id = f"phone:{phone_clean}"
+
+        # Get from DynamoDB
+        dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
+        table = dynamodb.Table(os.environ.get('SESSIONS_TABLE', 'pf-syn-sessions-dev'))
+
+        response = table.get_item(Key={'session_id': session_id})
+
+        if 'Item' in response:
+            item = response['Item']
+            # Check TTL
+            ttl = item.get('ttl', 0)
+            if isinstance(ttl, str):
+                ttl = int(ttl)
+            if ttl > time.time():
+                logger.info(f"[PHONE_AUTH] Found valid session for ***{phone_clean[-4:]}")
+                return {
+                    'bearer_token': item.get('bearer_token', ''),
+                    'client_id': item.get('client_id', ''),
+                    'user_id': item.get('user_id', ''),
+                    'user_name': item.get('user_name', '')
+                }
+            else:
+                logger.info(f"[PHONE_AUTH] Session expired for ***{phone_clean[-4:]}")
+                return None
+        else:
+            logger.info(f"[PHONE_AUTH] No session found for ***{phone_clean[-4:]}")
+            return None
+
+    except Exception as e:
+        logger.error(f"[PHONE_AUTH] Error looking up credentials: {e}")
+        return None
 
 
 def health_check_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:

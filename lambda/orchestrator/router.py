@@ -11,7 +11,7 @@ import boto3
 from botocore.config import Config as BotoConfig
 
 from config import get_config
-from classifier import classify_intent_and_action
+from classifier import classify_intent_and_action, apply_project_filters
 from context_extraction import extract_location_from_history, extract_pronoun_reference
 from context_resolver import resolve_context_references
 from voice_formatter import format_for_voice
@@ -928,22 +928,34 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
 
         elif action == 'get_weather':
             # Format weather data for UI rendering
+            # Handle both nested structure (weather.current) and flat structure (current)
             weather_data = response_body.get('weather', {})
-            location_data = weather_data.get('location', {})
-            current_data = weather_data.get('current', {})
-            forecast_data = weather_data.get('forecast', [])
+
+            # Try nested first, then flat
+            location_data = weather_data.get('location', {}) or response_body.get('location_data', {})
+            current_data = weather_data.get('current', {}) or response_body.get('current', {})
+            forecast_data = weather_data.get('forecast', []) or response_body.get('forecast', [])
 
             # Build location string
-            location_name = location_data.get('name', response_body.get('location', 'Unknown'))
-            admin1 = location_data.get('admin1', '')
-            country = location_data.get('country', '')
+            # Handle both dict location_data and string location
+            raw_location = response_body.get('location', '')
+            if isinstance(raw_location, str) and raw_location:
+                # Flat structure: location is a string like "Minneapolis, MN, United States"
+                location_str = raw_location
+            elif isinstance(location_data, dict):
+                # Nested structure: location_data is a dict
+                location_name = location_data.get('name', 'Unknown')
+                admin1 = location_data.get('admin1', '')
+                country = location_data.get('country', '')
 
-            if admin1 and country:
-                location_str = f"{location_name}, {admin1}, {country}"
-            elif admin1:
-                location_str = f"{location_name}, {admin1}"
+                if admin1 and country:
+                    location_str = f"{location_name}, {admin1}, {country}"
+                elif admin1:
+                    location_str = f"{location_name}, {admin1}"
+                else:
+                    location_str = location_name
             else:
-                location_str = location_name
+                location_str = 'Unknown Location'
 
             # Format forecast with day names
             from datetime import datetime
@@ -1656,6 +1668,12 @@ def route_request(
                 **merged_params  # Add merged params (extracted + resolved entities)
             }
 
+            # CHITCHAT ACTIONS: Always pass the message so chitchat Lambda can do its own intent detection
+            chitchat_actions = ['greet', 'help', 'general', 'chitchat']
+            if action in chitchat_actions:
+                lambda_params['message'] = message  # Pass original message
+                logger.info(f"[CHITCHAT] Passing message to chitchat Lambda: '{message[:50]}...'")
+
             # Call Lambda directly
             lambda_response = call_lambda_directly(action, lambda_params)
             timing['lambda_direct'] = time.time() - lambda_start
@@ -1676,6 +1694,15 @@ def route_request(
                 response_body = json.loads(response_body_str)
             else:
                 response_body = response_body_str
+
+            # POST-FILTER PROJECTS: Apply semantic filters since upstream API doesn't filter
+            # merged_params may contain status, category, projectType from classification
+            if action == 'list_projects' and 'projects' in response_body and isinstance(response_body['projects'], list):
+                original_count = len(response_body['projects'])
+                response_body['projects'] = apply_project_filters(response_body['projects'], merged_params)
+                filtered_count = len(response_body['projects'])
+                if original_count != filtered_count:
+                    logger.info(f"[FILTER] Applied post-filters: {original_count} -> {filtered_count} projects (params={merged_params})")
 
             # Format response for UI - conversational text + structured JSON
             # Pass channel so voice gets concise responses directly from Claude

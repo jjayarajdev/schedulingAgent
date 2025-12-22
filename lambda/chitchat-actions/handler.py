@@ -1,21 +1,252 @@
 """
 Chitchat Actions Lambda Handler
-Handles greetings, small talk, and general conversational queries
-
-Actions:
-1. greet - Respond to greetings (hi, hello, etc.)
-2. help - Provide help information
-3. general - General chitchat responses
+Conversational AI for greetings, small talk, and general queries
+Uses Claude Haiku for natural, engaging responses while staying in domain
 """
 
 import json
 import logging
+import boto3
 from typing import Dict, Any
-import random
+from botocore.config import Config as BotoConfig
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Bedrock client (lazy init)
+_bedrock_client = None
+
+def get_bedrock_client():
+    """Get or create Bedrock runtime client"""
+    global _bedrock_client
+    if _bedrock_client is None:
+        boto_config = BotoConfig(
+            region_name='us-east-1',
+            retries={"max_attempts": 3, "mode": "adaptive"}
+        )
+        _bedrock_client = boto3.client("bedrock-runtime", config=boto_config)
+    return _bedrock_client
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SYSTEM PROMPT - Defines personality and boundaries
+# ═══════════════════════════════════════════════════════════════════════════════
+
+SYSTEM_PROMPT = """You are a fun, friendly scheduling assistant for home improvement projects. Think of yourself as that enthusiastic friend who's really into home improvement and genuinely excited to help people get their projects done!
+
+## Your Personality
+- Upbeat and enthusiastic - you LOVE helping people with their home projects!
+- Warm and personable - use casual, friendly language
+- A bit playful - light humor is welcome, but don't force it
+- Encouraging - make customers feel good about their home improvement journey
+
+## What You Help With
+You're the go-to person for home improvement project scheduling:
+- Kitchen upgrades (dishwashers, cooktops, sinks)
+- Flooring (hardwood, tile, carpet)
+- Decking & outdoor spaces
+- Windows & doors
+- And more!
+
+You help customers:
+- Check on their projects ("show my projects")
+- Find available appointment slots
+- Book installation appointments
+- Reschedule when life happens
+- Cancel if needed
+- Check weather for outdoor projects
+
+## Response Style
+- Be conversational, like texting a helpful friend
+- Keep responses 2-3 sentences max
+- Use expressions like "Awesome!", "Great!", "Let's do this!"
+- NEVER repeat the same response twice in a conversation
+- Each response should feel fresh and unique
+
+## Boundaries
+- You're all about scheduling and projects - that's your jam!
+- If someone asks off-topic stuff, acknowledge with humor then pivot back
+- Don't make up project details you don't have"""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INTENT DETECTION - More granular than before
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def detect_intent(message: str) -> str:
+    """Detect the type of chitchat from message content"""
+    msg_lower = message.lower().strip()
+
+    # Greeting patterns
+    greet_words = ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening', 'howdy', 'hiya', 'yo']
+    if any(msg_lower.startswith(w) or msg_lower == w for w in greet_words):
+        return 'greet'
+
+    # Well-being queries (how are you, how's it going)
+    well_being_patterns = ['how are you', "how's it going", 'how you doing', "what's up", 'whats up', 'sup']
+    if any(p in msg_lower for p in well_being_patterns):
+        return 'well_being'
+
+    # Help/capabilities queries
+    help_patterns = ['what can you do', 'how does this work', 'what do you do', 'how can you help', 'what are you', 'who are you']
+    if any(p in msg_lower for p in help_patterns):
+        return 'help'
+
+    # Follow-up queries (anything else, what else, tell me more)
+    followup_patterns = ['anything else', 'what else', 'tell me more', 'more options', 'other things', 'something else']
+    if any(p in msg_lower for p in followup_patterns):
+        return 'followup'
+
+    # Thanks patterns
+    thanks_patterns = ['thank', 'thanks', 'appreciate', 'thx', 'ty', 'cheers']
+    if any(p in msg_lower for p in thanks_patterns):
+        return 'thanks'
+
+    # Goodbye patterns
+    bye_patterns = ['bye', 'goodbye', 'see you', 'later', 'gotta go', 'talk to you later', 'ttyl', 'cya']
+    if any(p in msg_lower for p in bye_patterns):
+        return 'bye'
+
+    # Affirmative responses
+    affirmative_patterns = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'sounds good', 'let\'s do it', 'go ahead']
+    if msg_lower in affirmative_patterns or any(msg_lower.startswith(p) for p in affirmative_patterns):
+        return 'affirmative'
+
+    # Negative responses
+    negative_patterns = ['no', 'nope', 'nah', 'not now', 'maybe later', 'not interested']
+    if msg_lower in negative_patterns or any(msg_lower.startswith(p) for p in negative_patterns):
+        return 'negative'
+
+    # Questions (ends with ?)
+    if msg_lower.endswith('?'):
+        return 'question'
+
+    # Default to general
+    return 'general'
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONTEXT HINTS - Specific instructions for each intent type
+# ═══════════════════════════════════════════════════════════════════════════════
+
+CONTEXT_HINTS = {
+    'greet': """The user is greeting you! Respond with a warm, enthusiastic greeting.
+- Say hi back in a fun way
+- Show you're excited to help
+- Ask what they'd like to do with their projects
+Example: "Hey there! Great to see you! Ready to tackle some home improvement stuff today?"
+DO NOT just repeat "What can we tackle together" - be creative!""",
+
+    'well_being': """The user is asking how you're doing! This is small talk - engage with it!
+- Share that you're doing great/fantastic
+- Show some personality - maybe mention you've been helping people with cool projects
+- Then offer to help them
+Example: "Doing awesome, thanks for asking! Just helped someone schedule a deck install - so satisfying! How can I help you today?"
+IMPORTANT: Actually answer how you're doing, don't just pivot to projects immediately.""",
+
+    'help': """The user wants to know what you can do. Give them a helpful overview:
+- List your main capabilities in a conversational way
+- Mention: viewing projects, scheduling, rescheduling, canceling, weather checks
+- Make it sound helpful, not like a feature list
+Example: "I can help you see all your projects, find open install dates, book appointments, reschedule if plans change, or even check the weather for outdoor work!"
+Be specific about capabilities but keep it friendly.""",
+
+    'followup': """The user said "anything else" or similar - they want MORE info beyond what you already mentioned.
+- DON'T repeat what you already said
+- Mention additional features or tips they might not know
+- Could mention: checking specific project details, weather for outdoor projects, rescheduling flexibility
+Example: "Oh yeah! I can also tell you about specific project details like who your installer is, or check if the weather looks good for outdoor work. And if you ever need to reschedule, I'm super flexible with that!"
+IMPORTANT: This is a follow-up - give NEW information, not the same thing again.""",
+
+    'thanks': """The user is thanking you! Be genuinely appreciative.
+- Express that you're happy to help
+- Maybe add a light, friendly comment
+- Remind them you're here whenever they need you
+Example: "Aw, you're the best! Happy I could help. Holler anytime you need project help - I'm always here!"
+Make it feel warm and genuine.""",
+
+    'bye': """The user is leaving. Send them off with good vibes!
+- Say goodbye warmly
+- Wish them well with their projects
+- Keep the door open for future chats
+Example: "Take care! Good luck with those home projects - can't wait to hear how they turn out! Come back anytime!"
+Be warm and encouraging.""",
+
+    'affirmative': """The user said yes/sure/ok - they're agreeing to something.
+- Acknowledge their confirmation enthusiastically
+- Ask what they'd like to do or guide them to next step
+Example: "Awesome! So what would you like to tackle first - want to see your projects or schedule something?"
+Keep the momentum going.""",
+
+    'negative': """The user said no or not now - respect that!
+- Acknowledge without being pushy
+- Leave the door open
+- Be understanding
+Example: "No worries at all! Whenever you're ready, I'll be here. Just say hi when you want to check on those projects!"
+Don't be pushy.""",
+
+    'question': """The user asked a question. Try to be helpful!
+- If it's about projects/scheduling, offer to help with that
+- If it's off-topic, acknowledge with humor and redirect
+- Be helpful and engaging
+Example (off-topic): "Ha! That's a great question, but I'm more of a project scheduling expert than a general knowledge guru. Speaking of which, got any home improvement projects I can help with?"
+Stay in your lane but be friendly about it.""",
+
+    'general': """Respond naturally to whatever the user said.
+- Be friendly and conversational
+- If you're not sure what they need, ask a clarifying question
+- Gently steer toward project scheduling if appropriate
+Example: "Hmm, interesting! Not quite sure what you're looking for there - are you trying to check on a project or schedule something?"
+Be helpful and guide them."""
+}
+
+
+def call_llm(user_message: str, action_type: str) -> str:
+    """Call Claude Haiku for natural response generation"""
+
+    context = CONTEXT_HINTS.get(action_type, CONTEXT_HINTS['general'])
+
+    prompt = f"""IMPORTANT: Generate a UNIQUE response. Do not use generic phrases.
+
+Context: {context}
+
+User message: "{user_message}"
+
+Generate a natural, friendly response (2-3 sentences). Be specific and engaging - avoid generic responses!"""
+
+    try:
+        bedrock = get_bedrock_client()
+        response = bedrock.invoke_model(
+            modelId="anthropic.claude-3-haiku-20240307-v1:0",
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 150,
+                "temperature": 0.8,  # Slightly higher for more variety
+                "system": SYSTEM_PROMPT,
+                "messages": [{"role": "user", "content": prompt}]
+            })
+        )
+
+        response_body = json.loads(response["body"].read())
+        return response_body["content"][0]["text"].strip()
+
+    except Exception as e:
+        logger.error(f"LLM call failed: {e}")
+        # Fallback responses - varied and specific to each intent
+        fallbacks = {
+            'greet': "Hey there! So good to see you! What home improvement adventure can we tackle today?",
+            'well_being': "Doing fantastic, thanks for asking! Been helping folks get their projects scheduled all day. What can I do for you?",
+            'help': "I'm your home improvement scheduling buddy! I can show you your projects, help you book install dates, reschedule appointments, or even check the weather for outdoor work. What sounds good?",
+            'followup': "Oh there's more! I can also pull up details on specific projects, check installer info, or see if weather looks good for outdoor installs. What interests you?",
+            'thanks': "You're so welcome! It's what I'm here for. Come back anytime you need help with those projects!",
+            'bye': "See ya! Best of luck with all your home improvement plans. I'll be here whenever you need me!",
+            'affirmative': "Perfect! So what would you like to do - check on some projects or get something scheduled?",
+            'negative': "Totally get it! I'll be here whenever you're ready. Just say the word!",
+            'question': "That's an interesting one! I'm best at helping with project scheduling stuff though - got any home improvement projects I can help with?",
+            'general': "I'm all about those home improvement projects! Want to see what you've got going on or schedule something new?"
+        }
+        return fallbacks.get(action_type, fallbacks['general'])
 
 
 def extract_parameters(event: Dict) -> Dict[str, Any]:
@@ -26,7 +257,6 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
         elif 'requestBody' in event:
             content = event['requestBody'].get('content', {})
             app_json = content.get('application/json', {})
-
             if isinstance(app_json, dict) and 'properties' in app_json:
                 params = {p['name']: p['value'] for p in app_json['properties']}
             elif isinstance(app_json, str):
@@ -35,11 +265,9 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
                 params = app_json
         else:
             body = event.get('body', '{}')
-            if isinstance(body, str):
-                params = json.loads(body)
-            else:
-                params = body
+            params = json.loads(body) if isinstance(body, str) else body
 
+        # Resolve session attribute references
         session_attrs = event.get('sessionAttributes', {})
         for key, value in params.items():
             if isinstance(value, str) and value.startswith('$'):
@@ -51,78 +279,6 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error extracting parameters: {e}")
         return {}
-
-
-def handle_greet(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle greeting messages"""
-    greetings = [
-        "Hello!  Great to see you! I'm here to help you manage your projects - whether you need to check project details, view available dates, or schedule appointments. Just let me know how I can assist you!",
-        "Hi there! Welcome back! I'm your ProjectForce scheduling assistant. I can help you view your projects, find available dates, and get appointments scheduled. Feel free to ask me anything!",
-        "Hey!  I'm happy to help you today! I can show you your projects, check scheduling availability, and help you book appointments. Let me know what you'd like to start with!",
-        "Hello! Thanks for stopping by! I'm here to make managing your projects easy. I can help you explore your current projects, find open dates, and schedule appointments. How can I help you today?"
-    ]
-
-    response_text = random.choice(greetings)
-
-    return {
-        "message": response_text,
-        "action": "greet"
-    }
-
-
-def handle_help(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Provide help information"""
-    help_text = """I can help you with:
-- View your projects (list my projects)
-- Get project details (details for project 7751744)
-- Check available dates (what dates are available for project 7751744)
-- View time slots (show me time slots for Nov 25)
-- Schedule appointments (schedule project 7751744)
-
-Just ask me what you'd like to do!"""
-
-    return {
-        "message": help_text,
-        "action": "help"
-    }
-
-
-def handle_general(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle general chitchat"""
-    message = params.get('message', '').lower()
-
-    responses = {
-        'thanks': [
-            "You're very welcome!  I'm always here if you need anything else with your projects!",
-            "My pleasure! Happy to help! Feel free to ask me anything about your projects or scheduling.",
-            "Absolutely! Glad I could help! Let me know if there's anything else you'd like to do."
-        ],
-        'bye': [
-            "Goodbye!  Feel free to come back anytime you need help with your projects. Have a great day!",
-            "Take care! I'm here whenever you need assistance with scheduling or projects. See you soon!",
-            "Bye! Have a wonderful day! Come back anytime you need help managing your projects! "
-        ],
-        'default': [
-            "I'm here to help you with your projects! I can show you project details, check availability, and schedule appointments. Let me know what you'd like to do!",
-            "I specialize in making project scheduling easy for you! I can help you view projects, find available dates, and book appointments. How can I assist you today?",
-            "I'm your ProjectForce scheduling assistant! I can help with viewing projects, checking availability, and scheduling appointments. Feel free to ask me anything! "
-        ]
-    }
-
-    # Determine response type
-    if any(word in message for word in ['thank', 'thanks', 'appreciate']):
-        response_list = responses['thanks']
-    elif any(word in message for word in ['bye', 'goodbye', 'see you', 'later']):
-        response_list = responses['bye']
-    else:
-        response_list = responses['default']
-
-    response_text = random.choice(response_list)
-
-    return {
-        "message": response_text,
-        "action": "general_chitchat"
-    }
 
 
 def create_response(body: Dict[str, Any]) -> Dict[str, Any]:
@@ -149,28 +305,51 @@ def lambda_handler(event, context):
         logger.info(f"Received event: {json.dumps(event)}")
 
         # Extract function name and parameters
-        function = event.get('function', event.get('apiPath', 'greet'))
+        function = event.get('function', event.get('apiPath', 'general'))
         params = extract_parameters(event)
+        user_message = params.get('message', '')
 
-        logger.info(f"Function: {function}, Params: {params}")
+        # Also try to get message from other locations in the event
+        if not user_message:
+            # Try inputText (Bedrock Agent format)
+            user_message = event.get('inputText', '')
+        if not user_message:
+            # Try messageContent
+            user_message = event.get('messageContent', '')
+        if not user_message:
+            # Try agent.inputText
+            agent = event.get('agent', {})
+            user_message = agent.get('inputText', '')
 
-        # Route to appropriate handler
-        if function in ['greet', 'greeting', 'hello']:
-            result = handle_greet(params)
+        logger.info(f"Function: {function}, Message: {user_message}")
+
+        # ALWAYS detect intent from message if available - don't trust upstream classification
+        if user_message:
+            action_type = detect_intent(user_message)
+        elif function in ['greet', 'greeting', 'hello']:
+            action_type = 'greet'
         elif function in ['help', 'assistance']:
-            result = handle_help(params)
+            action_type = 'help'
         else:
-            # Default to general chitchat
-            result = handle_general(params)
+            action_type = 'general'
+
+        logger.info(f"Detected intent: {action_type} (from message: '{user_message[:50]}...' if len(user_message) > 50 else user_message)")
+
+        # Generate natural response using LLM
+        response_text = call_llm(user_message or "hello", action_type)
+
+        result = {
+            "message": response_text,
+            "action": action_type
+        }
 
         logger.info(f"Response: {result}")
-
         return create_response(result)
 
     except Exception as e:
         logger.error(f"Error in lambda_handler: {e}", exc_info=True)
         error_response = {
-            "message": "I'm here to help with scheduling. What would you like to do?",
+            "message": "Hey! Something went a bit sideways there. What can I help you with?",
             "action": "error_recovery"
         }
         return create_response(error_response)
