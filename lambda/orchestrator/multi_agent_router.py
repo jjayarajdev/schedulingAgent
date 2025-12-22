@@ -14,7 +14,7 @@ from context_resolver import resolve_context_references
 from parallel_executor import execute_agents_in_parallel, execute_agents_sequentially
 from result_combiner import combine_agent_results
 from voice_formatter import format_response_for_channel
-from classifier import classify_intent_and_action
+from classifier import classify_intent_and_action, apply_project_filters
 from router import call_lambda_directly, invoke_bedrock_agent
 
 logger = logging.getLogger()
@@ -216,6 +216,15 @@ def _route_single_agent(
                     response_body = json.loads(response_body_str)
                 else:
                     response_body = response_body_str
+
+                # POST-FILTER PROJECTS: Apply semantic filters since upstream API doesn't filter
+                # lambda_params may contain status, category, projectType from classification
+                if action == 'list_projects' and 'projects' in response_body and isinstance(response_body['projects'], list):
+                    original_count = len(response_body['projects'])
+                    response_body['projects'] = apply_project_filters(response_body['projects'], lambda_params)
+                    filtered_count = len(response_body['projects'])
+                    if original_count != filtered_count:
+                        logger.info(f"[FILTER] Applied post-filters: {original_count} -> {filtered_count} projects (params={lambda_params})")
 
                 formatted_response = json.dumps(response_body, separators=(',', ':'))
 

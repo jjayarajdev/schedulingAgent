@@ -13,8 +13,10 @@ Supports both MOCK and REAL API modes via USE_MOCK_API environment variable
 
 import json
 import logging
+import re
 import requests
 from typing import Dict, Any
+from urllib.parse import quote
 
 # Import configuration and mock data
 from config import (
@@ -195,9 +197,25 @@ WEATHER_CODES = {
 # Helper Functions for Weather
 # ============================================================================
 
+# US State abbreviation to full name mapping
+US_STATES = {
+    'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas', 'CA': 'California',
+    'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware', 'FL': 'Florida', 'GA': 'Georgia',
+    'HI': 'Hawaii', 'ID': 'Idaho', 'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa',
+    'KS': 'Kansas', 'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
+    'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi', 'MO': 'Missouri',
+    'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada', 'NH': 'New Hampshire', 'NJ': 'New Jersey',
+    'NM': 'New Mexico', 'NY': 'New York', 'NC': 'North Carolina', 'ND': 'North Dakota', 'OH': 'Ohio',
+    'OK': 'Oklahoma', 'OR': 'Oregon', 'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina',
+    'SD': 'South Dakota', 'TN': 'Tennessee', 'TX': 'Texas', 'UT': 'Utah', 'VT': 'Vermont',
+    'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia', 'WI': 'Wisconsin', 'WY': 'Wyoming',
+    'DC': 'District of Columbia'
+}
+
 def geocode_location(location: str) -> Dict[str, Any]:
     """
     Geocode a city name to get coordinates using Open-Meteo Geocoding API
+    Handles duplicate city names by filtering by state when available.
 
     Args:
         location: City name, zip code, or location string
@@ -208,18 +226,44 @@ def geocode_location(location: str) -> Dict[str, Any]:
     Raises:
         ValueError: If location not found
     """
-    from urllib.parse import quote
-
     logger.info(f"Geocoding location: {location}")
 
-    # Extract city name from "City, State" format
-    # Open-Meteo geocoding API works better with just the city name
-    city_name = location.split(',')[0].strip()
-    logger.info(f"Using city name for geocoding: {city_name}")
+    # Smart extraction of city name AND state from various formats:
+    # - "Canterbury Park, Minneapolis, MN 55379" → city="Minneapolis", state="Minnesota"
+    # - "401 Chicago Avenue, Minneapolis, MN 55415" → city="Minneapolis", state="Minnesota"
+    # - "Minneapolis, MN" → city="Minneapolis", state="Minnesota"
+    # - "Springfield, IL" → city="Springfield", state="Illinois"
+    # - "Minneapolis" → city="Minneapolis", state=None
 
-    # URL encode the city name parameter
+    parts = [p.strip() for p in location.split(',')]
+    city_name = location  # Default
+    state_name = None  # State to filter results by
+
+    if len(parts) >= 3:
+        # Format: "Street/Neighborhood, City, State ZIP"
+        city_name = parts[-2].strip()
+        state_part = parts[-1].strip()
+        # Extract state abbreviation (e.g., "MN 55379" → "MN")
+        state_match = re.match(r'^([A-Z]{2})\s*\d*', state_part)
+        if state_match:
+            state_abbr = state_match.group(1)
+            state_name = US_STATES.get(state_abbr)
+    elif len(parts) == 2:
+        # Format: "City, State" or "City, State ZIP"
+        city_name = parts[0].strip()
+        state_part = parts[1].strip()
+        state_match = re.match(r'^([A-Z]{2})\s*\d*', state_part)
+        if state_match:
+            state_abbr = state_match.group(1)
+            state_name = US_STATES.get(state_abbr)
+    # else: single part, use as-is
+
+    logger.info(f"Geocoding: city='{city_name}', state='{state_name}'")
+
+    # URL encode and request multiple results to handle duplicate city names
     encoded_location = quote(city_name)
-    url = f"https://geocoding-api.open-meteo.com/v1/search?name={encoded_location}&count=1&language=en&format=json"
+    count = 10 if state_name else 1  # Get more results if we need to filter by state
+    url = f"https://geocoding-api.open-meteo.com/v1/search?name={encoded_location}&count={count}&language=en&format=json"
 
     logger.info(f"Geocoding URL: {url}")
 
@@ -228,17 +272,36 @@ def geocode_location(location: str) -> Dict[str, Any]:
         res.raise_for_status()
         data = res.json()
 
-        logger.info(f"Geocoding response: {data}")
+        logger.info(f"Geocoding response: {len(data.get('results', []))} results")
 
         if not data.get("results"):
             raise ValueError(f"Location '{location}' not found")
 
-        result = data["results"][0]
+        results = data["results"]
+
+        # If we have a state, filter to find the right city
+        if state_name:
+            for r in results:
+                if r.get("admin1", "").lower() == state_name.lower() and r.get("country") == "United States":
+                    logger.info(f"Found match: {r['name']}, {r.get('admin1')} (filtered by state)")
+                    return {
+                        "latitude": r["latitude"],
+                        "longitude": r["longitude"],
+                        "name": r["name"],
+                        "admin1": r.get("admin1", ""),
+                        "country": r.get("country", ""),
+                        "timezone": r.get("timezone", "UTC")
+                    }
+            # No exact state match, fall through to first US result or first result
+            logger.warning(f"No exact state match for {state_name}, using best match")
+
+        # Return first result (or first US result if we had a state hint)
+        result = results[0]
         return {
             "latitude": result["latitude"],
             "longitude": result["longitude"],
             "name": result["name"],
-            "admin1": result.get("admin1", ""),  # State/Province
+            "admin1": result.get("admin1", ""),
             "country": result.get("country", ""),
             "timezone": result.get("timezone", "UTC")
         }

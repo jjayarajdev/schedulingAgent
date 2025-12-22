@@ -1,16 +1,18 @@
 """
 Intelligent Workflow Orchestrator
-Uses Sonnet 3.7 for ALL decision-making - NO HARDCODING, NO REGEX
 
-Sonnet 3.7 handles:
-- Intent understanding
-- Context retention across turns
-- Entity extraction from natural language
-- Workflow stage detection
-- Next action decisions
-- Response generation
+Architecture: Hybrid LLM + Deterministic
+- Sonnet 3.7 handles: intent classification, context-aware decisions, response generation
+- Deterministic helpers handle: cheap extraction (dates, ordinals, times), guardrails, post-filtering
 
-ZERO hardcoded state machines or regex patterns!
+Key design decisions:
+1. Upstream ProjectForce API does NOT support filtering - we fetch all and post-filter
+2. Post-filters (status, category, projectType) are applied via apply_project_filters()
+3. Category buckets map user terms ("kitchen") to actual categories ("Dishwasher", "Ovens")
+4. Workflow state tracks: project_ids, project_mapping, viewed_projects for ordinal resolution
+
+Note: This module has its own intelligent_classify() which may duplicate classifier.py.
+Consider unifying to a single classification source of truth.
 """
 import json
 import logging
@@ -23,7 +25,10 @@ from botocore.config import Config as BotoConfig
 from config import get_config
 from workflow_state import get_state_manager
 from router import call_lambda_directly, format_lambda_response
+from classifier import apply_project_filters, extract_first_json_object, heuristic_intent_fallback, CATEGORY_BUCKETS, SCHEDULED_STATUSES, classify_intent_and_action
 from voice_formatter import _format_project_details_for_voice, _add_voice_followup
+from action_guards import apply_guards, log_classification_decision
+from sonnet_enricher import enrich_entities, needs_enrichment
 from weather_aware_scheduling import (
     is_outdoor_project,
     find_forecast_for_date,
@@ -37,6 +42,20 @@ logger = logging.getLogger()
 
 # Bedrock runtime client singleton
 _bedrock_runtime = None
+
+
+def get_category_bucket(category: str) -> Optional[str]:
+    """
+    Determine which bucket a category belongs to.
+    Returns bucket name ("kitchen", "windows", etc.) or None if no match.
+    """
+    if not category:
+        return None
+    cat_lower = category.lower().strip()
+    for bucket_name, bucket_categories in CATEGORY_BUCKETS.items():
+        if cat_lower in bucket_categories:
+            return bucket_name
+    return None
 
 
 # ============================================================================
@@ -689,18 +708,22 @@ def extract_project_data_from_history(conversation_history: List[Dict], classifi
                         logger.info(f"[CONTEXT] Using only project in list")
 
                     if target_proj:
+                        # FOUND EXACT MATCH - extract all data and return immediately
+                        # This prevents data from other projects bleeding in
+                        matched_data = {}
+
                         # Extract technician from installer field
-                        if target_proj.get('installer') and 'technician_name' not in project_data:
+                        if target_proj.get('installer'):
                             inst = target_proj['installer']
                             if isinstance(inst, dict):
-                                project_data['technician_name'] = inst.get('name', '')
-                                project_data['technician_id'] = str(inst.get('id', ''))
-                                logger.info(f"[CONTEXT] Extracted technician from projects array: {project_data['technician_name']}")
+                                matched_data['technician_name'] = inst.get('name', '')
+                                matched_data['technician_id'] = str(inst.get('id', ''))
+                                logger.info(f"[CONTEXT] Extracted technician from projects array: {matched_data['technician_name']}")
 
                         # Extract scheduled date/time
-                        if target_proj.get('scheduledDate') and 'scheduled_date' not in project_data:
+                        if target_proj.get('scheduledDate'):
                             sched = target_proj['scheduledDate']
-                            project_data['scheduled_date'] = sched
+                            matched_data['scheduled_date'] = sched
                             # Parse time from "11-29-2025 08:00 AM - 11-29-2025 09:00 AM" format
                             time_range_match = re.search(
                                 r'(\d{1,2}:\d{2}\s*(?:AM|PM))\s*-\s*\d{1,2}-\d{1,2}-\d{4}\s*(\d{1,2}:\d{2}\s*(?:AM|PM))',
@@ -709,26 +732,30 @@ def extract_project_data_from_history(conversation_history: List[Dict], classifi
                             if time_range_match:
                                 start_time = time_range_match.group(1)
                                 end_time = time_range_match.group(2)
-                                project_data['scheduled_time'] = f"{start_time} - {end_time}"
-                                logger.info(f"[CONTEXT] Extracted time range from projects: {project_data['scheduled_time']}")
+                                matched_data['scheduled_time'] = f"{start_time} - {end_time}"
+                                logger.info(f"[CONTEXT] Extracted time range from projects: {matched_data['scheduled_time']}")
 
                         # Extract other fields
-                        if target_proj.get('category') and 'category' not in project_data:
-                            project_data['category'] = target_proj['category']
-                        if target_proj.get('id') and 'project_id' not in project_data:
-                            project_data['project_id'] = str(target_proj['id'])
-                        if target_proj.get('address') and 'address' not in project_data:
+                        if target_proj.get('category'):
+                            matched_data['category'] = target_proj['category']
+                        if target_proj.get('id'):
+                            matched_data['project_id'] = str(target_proj['id'])
+                        if target_proj.get('status'):
+                            matched_data['status'] = target_proj['status']
+                        if target_proj.get('address'):
                             addr = target_proj['address']
                             if isinstance(addr, dict):
-                                project_data['address'] = addr.get('fullAddress') or f"{addr.get('address1', '')}, {addr.get('city', '')}, {addr.get('state', '')} {addr.get('zipcode', '')}"
-                                # Also extract city/state separately for weather queries
-                                if addr.get('city') and 'city' not in project_data:
-                                    project_data['city'] = addr['city']
-                                if addr.get('state') and 'state' not in project_data:
-                                    project_data['state'] = addr['state']
-                                logger.info(f"[CONTEXT] Extracted address: {project_data['address']}, city={addr.get('city')}, state={addr.get('state')}")
+                                matched_data['address'] = addr.get('fullAddress') or f"{addr.get('address1', '')}, {addr.get('city', '')}, {addr.get('state', '')} {addr.get('zipcode', '')}"
+                                matched_data['city'] = addr.get('city', '')
+                                matched_data['state'] = addr.get('state', '')
+                                logger.info(f"[CONTEXT] Extracted address: {matched_data['address']}, city={addr.get('city')}, state={addr.get('state')}")
                             else:
-                                project_data['address'] = addr
+                                matched_data['address'] = addr
+
+                        # RETURN IMMEDIATELY with matched data - prevents context bleeding
+                        logger.info(f"[CONTEXT] EXACT MATCH found for project {target_project_id} - returning immediately")
+                        logger.info(f"[CONTEXT] Final extracted project_data: {matched_data}")
+                        return matched_data
 
                 # Also check for nested project data
                 if 'project' in data and isinstance(data['project'], dict):
@@ -1019,6 +1046,18 @@ ACTION SELECTION GUIDE:
 - "cancel this appointment" / "cancel my appointment" / "cancel this" / "cancel the booking" -> cancel_appointment (extract project_id from context)
 - "reschedule this" / "reschedule my appointment" / "change the date" / "move the appointment" -> reschedule_appointment (extract project_id from context)
 
+CRITICAL - DO NOT AUTO-ESCALATE TO SCHEDULING:
+- NEVER automatically use get_available_dates just because a project has status "Ready To Schedule"
+- get_available_dates ONLY when user EXPLICITLY says: "schedule", "book", "make appointment", "get dates", "find dates"
+- If user says "just the X" or "only X" or "show me X" after a list -> This is FILTERING, not scheduling
+- Example flow:
+  - User: "what can I schedule?" -> list_projects (status=schedulable)
+  - User: "just kitchen stuff" -> list_projects (category=Kitchen) - FILTER, not schedule
+  - User: "just the dishwasher" -> list_projects (category=Dishwasher) OR get_project_details - FILTER/SHOW, not schedule
+  - User: "schedule the dishwasher" -> get_available_dates - NOW user explicitly asked to schedule
+- The words "just", "only", "show me", "the X one" = FILTER/SHOW, not SCHEDULE
+- Do NOT assume user wants to schedule just because they narrowed down to one project
+
 IMPORTANT RULES:
 1. Extract ALL entities from the message AND conversation history
 2. If user says "it", "that" (pronoun) - look back and find the MOST RECENTLY DISCUSSED project
@@ -1037,7 +1076,11 @@ IMPORTANT RULES:
    - "weather for 1st project" / "weather for project 7751741" -> Extract location (city, state) from that project's address in conversation
    - "what's the weather" (no project specified) -> Use location from most recent project in conversation
    - Always return action: "get_weather" with entities.location as "City, ST" format (e.g., "Minneapolis, MN")
-8. For list_projects with status filter: if user says "scheduled projects", "new projects", etc., extract status entity
+8. For list_projects with filters (POST-FILTERS - API doesn't filter, we do):
+   - "scheduled projects" / "my scheduled jobs" -> entities.status = "scheduled" (matches Scheduled + Tentatively Scheduled)
+   - "projects I can schedule" / "schedulable jobs" -> entities.status = "schedulable" (matches New + Ready To Schedule)
+   - "kitchen projects" / "my kitchen jobs" -> entities.category = "kitchen" (bucket: Dishwasher, Ovens, Sink, etc.)
+   - "new projects" -> entities.status = "New" (exact match)
 9. Handle batch/multiple project references:
    - "first two projects" -> extract project_ids for positions [0, 1] from conversation
    - "first 3 projects" -> extract project_ids for positions [0, 1, 2]
@@ -1283,20 +1326,22 @@ Respond ONLY with valid JSON."""
     response_text = call_sonnet(prompt, max_tokens=800)
 
     try:
-        # Parse JSON response
-        classification = json.loads(response_text)
+        # Parse JSON response with robust extraction (handles fenced JSON, leading text, etc.)
+        classification = extract_first_json_object(response_text)
         logger.info(f"[SONNET] Sonnet classification: {classification}")
         return classification
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse Sonnet response as JSON: {response_text}")
-        # Fallback
+        # Heuristic fallback - use message content to guess intent instead of always chitchat
+        fallback_intent = heuristic_intent_fallback(message)
+        logger.info(f"[SONNET] Using heuristic fallback intent: {fallback_intent}")
         return {
-            "intent": "chitchat",
-            "action": "general",
+            "intent": fallback_intent,
+            "action": None,  # Let downstream handle action based on intent
             "entities": {},
             "workflow_type": None,
-            "reasoning": "Failed to parse response"
+            "reasoning": f"JSON parse failed, heuristic fallback to {fallback_intent}"
         }
 
 
@@ -1366,8 +1411,17 @@ Determine the next step:
    - For confirm_appointment: need project_id + date + time + request_id
    - For cancel_appointment: need project_id - extract from conversation context if user says "cancel this appointment" after viewing project details
    - For reschedule_appointment: need project_id - extract from conversation context if user says "reschedule this" after viewing project details
-   - For list_projects: just need customer_id (already available), optional: status filter if user specified (e.g., "Scheduled", "New", "Customer Scheduled", "Ready To Schedule", "Awaiting Confirmation", "Pending Signature")
+   - For list_projects: just need customer_id (already available)
+     POST-FILTERS (applied after fetching - upstream API does NOT support filtering):
+       - status: "schedulable" (New, Ready To Schedule), "scheduled" (Scheduled, Tentatively Scheduled), or exact status
+       - category: bucket name ("Kitchen", "Windows", "Decking", "Bathroom", "Flooring") or exact category ("Storm Door", "Dishwasher")
+       - projectType: "Call Back", "Installation", "Repair", "Measurement"
    - For get_weather: need location as "City, State" format (e.g., "Minneapolis, MN") - combine city and state from entities
+
+IMPORTANT - POST-FILTERS vs API PARAMS:
+The upstream ProjectForce API does NOT support filtering. When you specify status/category/projectType in lambda_params,
+these are POST-FILTERS that the orchestrator applies AFTER fetching all projects. This is transparent to you - just include
+the filters and the system will handle the post-filtering automatically.
 
 CATEGORY-BASED PROJECT LOOKUP: When user refers to a project by category (e.g., "storm door project", "kitchen sink", "decking project"), check the project_mapping in workflow context to find the exact project_id that matches that category. Do NOT call list_projects if you already have project_mapping - just use it to resolve the project_id directly.
 
@@ -1553,15 +1607,20 @@ Respond ONLY with valid JSON."""
     response_text = call_sonnet(prompt, max_tokens=1000)
 
     try:
-        decision = json.loads(response_text)
+        # Parse JSON response with robust extraction (handles fenced JSON, leading text, etc.)
+        decision = extract_first_json_object(response_text)
         logger.info(f"[DECISION] Sonnet decision: call_lambda={decision.get('should_call_lambda')}, action={decision.get('lambda_action')}")
         return decision
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse Sonnet decision: {response_text}")
-        # Fallback
+        # Heuristic fallback based on classification
+        fallback_intent = classification.get('intent', 'scheduling') if classification else 'scheduling'
+        logger.info(f"[DECISION] Using fallback with intent: {fallback_intent}")
         return {
-            "should_call_lambda": False,
+            "should_call_lambda": fallback_intent == 'scheduling',  # Try Lambda for scheduling
+            "lambda_action": "list_projects" if fallback_intent == 'scheduling' else None,
+            "lambda_params": {},
             "response_to_user": "I'm having trouble understanding. Could you rephrase that?",
             "workflow_complete": False
         }
@@ -1881,13 +1940,16 @@ def orchestrate_intelligent_workflow(
                 # Save project_ids AND project_mapping to workflow state for ordinal/category references
                 if 'projects' in response_body:
                     project_ids = [str(p.get('id', '')) for p in response_body['projects'] if p.get('id')]
-                    # Build project_mapping: project_id -> {category, address} for accurate matching
+                    # Build project_mapping: project_id -> {category, category_bucket, address, status}
+                    # category_bucket enables "show kitchen projects" to match Dishwasher, Ovens, etc.
                     project_mapping = {}
                     for p in response_body['projects']:
                         pid = str(p.get('id', ''))
                         if pid:
+                            exact_category = p.get('category', '')
                             project_mapping[pid] = {
-                                'category': p.get('category', ''),
+                                'category': exact_category,
+                                'category_bucket': get_category_bucket(exact_category),
                                 'address': p.get('address', ''),
                                 'status': p.get('status', '')
                             }
@@ -1921,6 +1983,90 @@ def orchestrate_intelligent_workflow(
             except Exception as voice_err:
                 logger.warning(f"[VOICE-PRECHECK] Error in voice pre-check: {voice_err}, falling through to normal flow")
                 # Fall through to normal classification
+
+    # ========================================================================
+    # STEP 0.4b: CALENDAR/SCHEDULED QUERIES - Bypass workflow context
+    # These are NEW queries about scheduled appointments, not continuations
+    # "What's on my calendar?", "What's scheduled?", "Show my appointments"
+    # ========================================================================
+    msg_lower = message.lower().strip()
+    calendar_patterns = [
+        "what's on my calendar", "whats on my calendar", "what is on my calendar",
+        "what's scheduled", "whats scheduled", "what is scheduled",
+        "show my appointments", "my appointments", "show scheduled",
+        "what appointments", "scheduled projects", "what's booked", "whats booked"
+    ]
+    if any(pattern in msg_lower for pattern in calendar_patterns):
+        logger.info(f"[CALENDAR-QUERY] Detected calendar/scheduled query - bypassing workflow context")
+        try:
+            # Directly call list_projects with status=Scheduled filter
+            list_response = call_lambda_directly('list_projects', {
+                'status': 'Scheduled',
+                'customer_id': customer_id,
+                'client_id': client_id,
+                'pf_bearer_token': pf_bearer_token
+            })
+
+            # Parse response
+            list_data = list_response.get('response', {})
+            list_func = list_data.get('functionResponse', {})
+            list_body_wrapper = list_func.get('responseBody', {})
+            list_text = list_body_wrapper.get('TEXT', {})
+            list_body_str = list_text.get('body', '{}')
+
+            if isinstance(list_body_str, str):
+                response_body = json.loads(list_body_str)
+            else:
+                response_body = list_body_str
+
+            # Apply status filter on the result
+            if 'projects' in response_body:
+                original_count = len(response_body['projects'])
+                response_body['projects'] = [
+                    p for p in response_body['projects']
+                    if p.get('status') in SCHEDULED_STATUSES
+                ]
+                logger.info(f"[CALENDAR-QUERY] Filtered {original_count} → {len(response_body['projects'])} scheduled projects")
+
+            # Format response
+            response_text = format_lambda_response('list_projects', response_body, message, channel)
+
+            # Save project_ids to workflow state
+            if 'projects' in response_body:
+                project_ids = [str(p.get('id', '')) for p in response_body['projects'] if p.get('id')]
+                project_mapping = {}
+                for p in response_body['projects']:
+                    pid = str(p.get('id', ''))
+                    if pid:
+                        project_mapping[pid] = {
+                            'category': p.get('category', ''),
+                            'address': p.get('address', ''),
+                            'status': p.get('status', '')
+                        }
+                if project_ids:
+                    state_manager.save_state(session_id, {
+                        'workflow_type': 'project_list',
+                        'current_stage': 'showing_scheduled',
+                        'context': {
+                            'project_ids': project_ids,
+                            'project_mapping': project_mapping
+                        }
+                    })
+                    logger.info(f"[CALENDAR-QUERY] Saved {len(project_ids)} scheduled project_ids to state")
+
+            timing['total'] = time.time() - start_time
+            return {
+                'response': response_text,
+                'intent': 'scheduling',
+                'action': 'list_projects',
+                'agent_name': 'Intelligent Orchestrator (Calendar Query)',
+                'direct_call': True,
+                'timing': timing,
+                'pf_http_status_code': 200
+            }
+        except Exception as cal_err:
+            logger.warning(f"[CALENDAR-QUERY] Error: {cal_err}, falling through to normal flow")
+            # Fall through to normal classification
 
     # ========================================================================
     # STEP 0.5: Check for ORDINAL PROJECT REFERENCE (before classification)
@@ -2104,17 +2250,85 @@ def orchestrate_intelligent_workflow(
         else:
             logger.info("[ORDINAL] No project_ids in workflow state, falling through to classification")
 
-    # Step 1: Intelligent classification using Sonnet 3.7
-    logger.info("[SONNET] Step 1: Intelligent classification with Sonnet 3.7")
-    classification_start = time.time()
+    # ========================================================================
+    # Step 1: NLU CLASSIFICATION (Source of Truth for Action)
+    # NLU is fast, deterministic, and usually correct
+    # ========================================================================
+    logger.info("[NLU] Step 1: NLU classification (action source of truth)")
+    nlu_start = time.time()
 
-    classification = intelligent_classify(
-        message,
-        conversation_history,
-        workflow_state
+    nlu_result = classify_intent_and_action(message, conversation_history)
+    nlu_action = nlu_result.get('action')
+    nlu_intent = nlu_result.get('intent', 'scheduling')
+    nlu_params = nlu_result.get('params', {})
+
+    timing['nlu_classification'] = time.time() - nlu_start
+    logger.info(f"[NLU] Result: intent={nlu_intent}, action={nlu_action}, params={nlu_params}")
+
+    # ========================================================================
+    # Step 2: APPLY ACTION GUARDS - Rule-based validation
+    # Guards can override NLU action for specific patterns
+    # ========================================================================
+    guard_context = {
+        'workflow_state': workflow_state or {},
+        'entities': nlu_params or {},
+        'previous_action': workflow_state.get('context', {}).get('last_action') if workflow_state else None,
+        'conversation_history': conversation_history
+    }
+
+    final_action, guard_reason = apply_guards(message, nlu_action, nlu_action, guard_context)
+
+    if guard_reason:
+        logger.info(f"[GUARD] Override: {nlu_action} → {final_action}")
+    else:
+        final_action = nlu_action
+
+    # ========================================================================
+    # Step 3: SONNET ENTITY ENRICHMENT (Only When Needed)
+    # Sonnet ONLY extracts entities - it CANNOT change the action
+    # ========================================================================
+    enriched_entities = nlu_params.copy() if nlu_params else {}
+
+    if final_action and needs_enrichment(final_action, enriched_entities):
+        logger.info(f"[ENRICHER] Calling Sonnet for entity enrichment (action={final_action})")
+        enricher_start = time.time()
+
+        enricher_context = {
+            'workflow_state': workflow_state or {},
+            'available_dates': workflow_state.get('context', {}).get('available_dates', []) if workflow_state else [],
+            'available_slots': workflow_state.get('context', {}).get('available_slots', []) if workflow_state else [],
+        }
+
+        sonnet_entities = enrich_entities(message, final_action, enricher_context)
+        timing['entity_enrichment'] = time.time() - enricher_start
+
+        # Merge Sonnet entities (Sonnet fills gaps, doesn't override NLU)
+        for key, value in sonnet_entities.items():
+            if key not in enriched_entities or enriched_entities[key] is None:
+                enriched_entities[key] = value
+                logger.info(f"[ENRICHER] Added entity: {key}={value}")
+    else:
+        logger.info(f"[ENRICHER] Skipped - already have needed entities")
+
+    # Build classification object (compatible with existing code)
+    classification = {
+        'intent': nlu_intent,
+        'action': final_action,
+        'entities': enriched_entities,
+        'reasoning': f"NLU: {nlu_result.get('_nlu_intent', 'unknown')} → {final_action}",
+        'guard_applied': guard_reason,
+        '_nlu_action': nlu_action,  # Original NLU action (for debugging)
+    }
+
+    timing['classification'] = time.time() - nlu_start
+
+    # Log classification decision for debugging
+    log_classification_decision(
+        nlu_result={'action': nlu_action, 'confidence': 'high'},
+        sonnet_result={'action': final_action, 'reasoning': 'Entity enrichment only'},
+        final_action=final_action,
+        guard_reason=guard_reason
     )
-
-    timing['classification'] = time.time() - classification_start
 
     # ========================================================================
     # HANDLE HELP/CAPABILITIES: Show user what they can do
@@ -2715,9 +2929,38 @@ What would you like to do?"""
     # Category can be in entities.search_criteria.category OR entities.category (Sonnet varies)
     category_to_resolve = search_criteria.get('category') or entities.get('category')
 
+    # VALIDATION: If both project_id and category are present, verify they match
+    # This catches cases where Sonnet hallucinates wrong project_id for a category
+    needs_category_resolution = False
     if (classified_action in ['get_project_details', 'get_available_dates', 'schedule_project', 'reschedule_appointment', 'cancel_appointment']
-        and not entities.get('project_id')
         and category_to_resolve):
+
+        sonnet_project_id = entities.get('project_id')
+
+        if not sonnet_project_id:
+            # No project_id, need to resolve from category
+            needs_category_resolution = True
+        else:
+            # project_id exists - VALIDATE it matches the category
+            project_mapping = {}
+            if workflow_state:
+                project_mapping = workflow_state.get('project_mapping', {}) or workflow_state.get('context', {}).get('project_mapping', {})
+
+            if project_mapping and sonnet_project_id in project_mapping:
+                actual_category = project_mapping[sonnet_project_id].get('category', '').lower().strip()
+                requested_category = category_to_resolve.lower().strip()
+
+                # Check if categories match (allow partial match)
+                if requested_category not in actual_category and actual_category not in requested_category:
+                    logger.warning(f"[CATEGORY-MISMATCH] Sonnet returned project_id={sonnet_project_id} (category={actual_category}) but user asked for '{requested_category}'")
+                    logger.info(f"[CATEGORY-MISMATCH] Discarding mismatched project_id, will re-resolve from category")
+                    # Remove the wrong project_id so we re-resolve below
+                    entities.pop('project_id', None)
+                    needs_category_resolution = True
+                else:
+                    logger.info(f"[CATEGORY-MATCH] Validated project_id={sonnet_project_id} matches category '{requested_category}'")
+
+    if needs_category_resolution:
 
         search_category = category_to_resolve.lower().strip()
         logger.info(f"[CATEGORY-RESOLVE] Need to resolve category '{search_category}' to project_id")
@@ -3270,6 +3513,15 @@ What would you like to do?"""
             else:
                 response_body = response_body_str
 
+            # POST-FILTER PROJECTS: Apply semantic filters since upstream API doesn't filter
+            # Use lambda_params which contains status, category, projectType from classification
+            if lambda_action == 'list_projects' and 'projects' in response_body and isinstance(response_body['projects'], list):
+                original_count = len(response_body['projects'])
+                response_body['projects'] = apply_project_filters(response_body['projects'], lambda_params)
+                filtered_count = len(response_body['projects'])
+                if original_count != filtered_count:
+                    logger.info(f"[FILTER] Applied post-filters: {original_count} -> {filtered_count} projects (params={lambda_params})")
+
             # Extract PF API HTTP status code from Lambda response
             # Check both 'pf_http_status_code' and 'pf_status_code' for compatibility
             pf_http_status_code = response_body.get('pf_http_status_code') or response_body.get('pf_status_code', 200)
@@ -3677,13 +3929,16 @@ What would you like to do?"""
                 projects_list = response_body['projects']
                 project_ids = [str(p.get('id', '')) for p in projects_list if p.get('id')]
 
-                # Build project_mapping: project_id -> {category, address, status}
+                # Build project_mapping: project_id -> {category, category_bucket, address, status}
+                # category_bucket enables "show kitchen projects" to match Dishwasher, Ovens, etc.
                 project_mapping = {}
                 for p in projects_list:
                     pid = str(p.get('id', ''))
                     if pid:
+                        exact_category = p.get('category', '')
                         project_mapping[pid] = {
-                            'category': p.get('category', ''),
+                            'category': exact_category,
+                            'category_bucket': get_category_bucket(exact_category),
                             'address': p.get('address', ''),
                             'status': p.get('status', '')
                         }
@@ -3949,9 +4204,11 @@ What would you like to do?"""
     # like "tell me about the third project"
     lambda_action = decision.get('lambda_action', '')
     if decision.get('workflow_complete'):
-        if channel == 'voice' and lambda_action == 'list_projects':
-            # Preserve project_ids for voice follow-up queries
-            logger.info("[VOICE] Keeping workflow state after list_projects (project_ids needed for follow-up)")
+        # Preserve workflow state for actions that need follow-up context
+        # project_mapping is needed for category-based queries like "details for dishwasher"
+        actions_that_need_context = {'list_projects', 'get_project_details'}
+        if lambda_action in actions_that_need_context:
+            logger.info(f"[STATE] Keeping workflow state after {lambda_action} (project_mapping needed for follow-up)")
         else:
             state_manager.clear_state(session_id)
             logger.info("[OK] Workflow complete, state cleared")
