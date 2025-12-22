@@ -321,6 +321,56 @@
             100% { transform: rotate(360deg); }
         }
 
+        /* Progress indicator styles */
+        .progress-container {
+            width: 100%;
+            margin: 12px 0;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e1e4e8;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #0066cc, #00aaff);
+            border-radius: 3px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        .progress-text {
+            font-size: 13px;
+            color: #666;
+            margin-top: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .progress-stage {
+            color: #0066cc;
+            font-weight: 500;
+        }
+
+        .progress-time {
+            color: #999;
+            font-size: 12px;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .progress-stage.active {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
         .view {
             display: none;
             flex: 1;
@@ -541,7 +591,15 @@
 
                 <div class="loading" id="loading">
                     <div class="spinner"></div>
-                    <p>Agent is thinking...</p>
+                    <div class="progress-container">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-fill"></div>
+                        </div>
+                        <div class="progress-text">
+                            <span class="progress-stage active" id="progress-stage">Processing...</span>
+                            <span class="progress-time" id="progress-time"></span>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="input-area">
@@ -888,7 +946,27 @@
             }
         }
 
-        // Chat functions
+        // Update progress indicator UI
+        function updateProgress(percent, stage, elapsed) {
+            const progressFill = document.getElementById('progress-fill');
+            const progressStage = document.getElementById('progress-stage');
+            const progressTime = document.getElementById('progress-time');
+
+            if (progressFill) progressFill.style.width = `${percent}%`;
+            if (progressStage) progressStage.textContent = stage;
+            if (progressTime && elapsed !== undefined) {
+                progressTime.textContent = `${elapsed}s`;
+            }
+        }
+
+        // Reset progress indicator
+        function resetProgress() {
+            updateProgress(0, 'Processing...', undefined);
+            const progressTime = document.getElementById('progress-time');
+            if (progressTime) progressTime.textContent = '';
+        }
+
+        // Chat functions - now with SSE streaming for progress updates
         async function sendMessage(isRetry = false) {
             const input = document.getElementById('message-input');
             const message = input.value.trim();
@@ -899,9 +977,10 @@
                 input.value = '';
             }
             input.disabled = true;
+            resetProgress();
             document.getElementById('loading').classList.add('active');
 
-            // Create a placeholder message for streaming
+            // Create a placeholder message for the response
             const messagesContainer = document.getElementById('chat-messages');
             const messageDiv = document.createElement('div');
             messageDiv.className = 'message agent-message';
@@ -910,10 +989,10 @@
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
             const contentDiv = messageDiv.querySelector('.message-content');
-            let fullResponse = '';
 
             try {
-                const response = await fetch(`${API_URL}/invoke-agent`, {
+                // Use SSE streaming endpoint for progress updates
+                const response = await fetch(`${API_URL}/invoke-agent-stream`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -921,62 +1000,103 @@
                         session_id: sessionId,
                         pf_token: accessToken,
                         pf_client_id: clientId,
-                        pf_user_id: userId,
-                        stream: false  // Disable streaming for stability
+                        pf_user_id: userId
                     })
                 });
 
-                // Non-streaming response
-                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status}`);
+                }
 
-                // Check for token expiration (403 or authentication error)
-                if (response.status === 403 ||
-                    (data.error && data.error.toLowerCase().includes('token')) ||
-                    (data.error && data.error.toLowerCase().includes('auth'))) {
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let finalResult = null;
+                let authError = false;
 
-                    if (!isRetry) {
-                        console.log('[REFRESH] Token expired, attempting refresh...');
-                        messagesContainer.removeChild(messageDiv);
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
 
-                        const refreshed = await refreshToken();
-                        if (refreshed) {
-                            console.log('[OK] Token refreshed, retrying request...');
-                            // Save message back to input for retry
-                            input.value = message;
-                            return await sendMessage(true);
-                        } else {
-                            throw new Error('Token refresh failed. Please reload the page.');
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // Process SSE events in buffer
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+                    let eventType = null;
+                    let eventData = null;
+
+                    for (const line of lines) {
+                        if (line.startsWith('event: ')) {
+                            eventType = line.slice(7).trim();
+                        } else if (line.startsWith('data: ')) {
+                            try {
+                                eventData = JSON.parse(line.slice(6));
+
+                                if (eventType === 'progress') {
+                                    // Update progress indicator
+                                    updateProgress(
+                                        eventData.percent || 0,
+                                        eventData.message || 'Processing...',
+                                        eventData.elapsed
+                                    );
+                                } else if (eventType === 'result') {
+                                    finalResult = eventData;
+
+                                    // Check for auth error in result
+                                    if (eventData.pf_http_status_code === 401 || eventData.pf_http_status_code === 403) {
+                                        authError = true;
+                                    }
+                                } else if (eventType === 'error') {
+                                    throw new Error(eventData.message || 'Unknown error');
+                                }
+                            } catch (parseError) {
+                                if (parseError.message !== 'Unknown error' && !parseError.message.startsWith('Error:')) {
+                                    console.warn('Failed to parse SSE data:', line);
+                                } else {
+                                    throw parseError;
+                                }
+                            }
                         }
-                    } else {
-                        throw new Error('Authentication failed after token refresh. Please reload the page.');
                     }
                 }
 
-                // Check HTTP status
-                if (!response.ok) {
-                    throw new Error(data.error || `Server error: ${response.status} ${response.statusText}`);
+                // Handle auth errors
+                if (authError && !isRetry) {
+                    console.log('[REFRESH] Token expired, attempting refresh...');
+                    messagesContainer.removeChild(messageDiv);
+
+                    const refreshed = await refreshToken();
+                    if (refreshed) {
+                        console.log('[OK] Token refreshed, retrying request...');
+                        input.value = message;
+                        return await sendMessage(true);
+                    } else {
+                        throw new Error('Session expired. Please reload the page to log in again.');
+                    }
                 }
 
-                // Check if response contains an error
-                if (data.error) {
-                    throw new Error(data.error);
+                if (finalResult && finalResult.response) {
+                    // Update progress to 100%
+                    updateProgress(100, 'Complete!', undefined);
+
+                    // Format and display the response
+                    contentDiv.innerHTML = formatAgentMessage(finalResult.response);
+                    contentDiv.classList.remove('streaming');
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                } else {
+                    throw new Error('No response received from server');
                 }
-
-                fullResponse = data.response;
-
-                // Format the complete response with JSON detection
-                contentDiv.innerHTML = formatAgentMessage(fullResponse);
-                contentDiv.classList.remove('streaming');
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
             } catch (error) {
                 console.error('Streaming error:', error);
-                // Fall back to non-streaming
                 messagesContainer.removeChild(messageDiv);
                 addMessage('agent', `Error: ${error.message}`);
             } finally {
                 input.disabled = false;
                 document.getElementById('loading').classList.remove('active');
+                resetProgress();
                 input.focus();
             }
         }

@@ -4,13 +4,15 @@ Simple CORS proxy for ProjectForce API
 Allows the HTML page to make API calls without CORS issues
 """
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import requests
 import logging
 import json
 import os
 import time
+import threading
+from queue import Queue
 from pathlib import Path
 
 app = Flask(__name__)
@@ -1388,6 +1390,223 @@ def invoke_agent():
     except Exception as e:
         logger.error(f"Error in invoke-agent endpoint: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/invoke-agent-stream', methods=['POST'])
+def invoke_agent_stream():
+    """
+    SSE endpoint for streaming progress updates while Lambda processes.
+    Sends progress events as the request moves through different stages.
+    """
+    import boto3
+
+    data = request.json
+    message = data.get('message', '')
+    session_id = data.get('session_id', 'session-default')
+    pf_token = data.get('pf_token', '')
+    pf_client_id = data.get('pf_client_id', '09PF05VD')
+    pf_user_id = data.get('pf_user_id', '1646085')
+
+    # Use stored token if not provided in request
+    if not pf_token or len(pf_token) < 50:
+        stored = get_stored_token()
+        if stored:
+            pf_token = stored
+            logger.info(f"Using stored token for streaming (length: {len(pf_token)})")
+
+    logger.info(f"[STREAM] Starting streaming request for: {message[:50]}...")
+
+    # Cleanup old sessions periodically
+    cleanup_old_sessions()
+
+    # Get conversation history and add user message
+    conversation_history = get_conversation_history(session_id)
+    add_to_conversation_history(session_id, 'user', message)
+
+    def generate():
+        """Generator function for SSE events"""
+        result_queue = Queue()
+        error_occurred = [False]  # Use list to allow modification in nested function
+
+        # Progress stages with estimated times
+        progress_stages = [
+            ("Analyzing your request...", 0),
+            ("Understanding intent...", 2.5),
+            ("Retrieving relevant data...", 5.0),
+            ("Processing with AI...", 7.5),
+            ("Generating response...", 12.0),
+            ("Finalizing...", 18.0),
+        ]
+
+        def send_event(event_type, data):
+            """Format an SSE event"""
+            return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+        def call_orchestrator():
+            """Background thread to call Lambda orchestrator"""
+            try:
+                config_region = AGENT_CONFIG.get('region', AWS_REGION)
+                lambda_client = boto3.client('lambda', region_name=config_region)
+                orchestrator_fn = AGENT_CONFIG.get('orchestrator_function', 'pf-syn-orchestrator-dev')
+
+                request_body = {
+                    'message': message,
+                    'session_id': session_id,
+                    'pf_token': pf_token,
+                    'pf_client_id': pf_client_id,
+                    'pf_user_id': str(pf_user_id)
+                }
+
+                orchestrator_event = {
+                    'body': json.dumps(request_body),
+                    'headers': {'Content-Type': 'application/json'}
+                }
+
+                logger.info(f"[STREAM] Invoking {orchestrator_fn}...")
+                response = lambda_client.invoke(
+                    FunctionName=orchestrator_fn,
+                    InvocationType='RequestResponse',
+                    Payload=json.dumps(orchestrator_event)
+                )
+
+                payload = json.loads(response['Payload'].read())
+                result_queue.put(('success', payload))
+
+            except Exception as e:
+                logger.error(f"[STREAM] Orchestrator error: {e}")
+                result_queue.put(('error', str(e)))
+
+        # Start the orchestrator call in background
+        thread = threading.Thread(target=call_orchestrator)
+        thread.start()
+
+        # Send initial progress event
+        yield send_event('progress', {
+            'stage': 'started',
+            'message': 'Processing your request...',
+            'percent': 5
+        })
+
+        # Send progress updates while waiting for Lambda
+        start_time = time.time()
+        stage_index = 0
+        result = None
+
+        while thread.is_alive() or not result_queue.empty():
+            # Check for result
+            if not result_queue.empty():
+                result = result_queue.get()
+                break
+
+            # Send progress update based on elapsed time
+            elapsed = time.time() - start_time
+            while stage_index < len(progress_stages) - 1:
+                next_stage_time = progress_stages[stage_index + 1][1]
+                if elapsed >= next_stage_time:
+                    stage_index += 1
+                else:
+                    break
+
+            stage_msg = progress_stages[stage_index][0]
+            # Calculate progress percentage (cap at 90% until complete)
+            percent = min(90, int(10 + (elapsed / 25.0) * 80))
+
+            yield send_event('progress', {
+                'stage': f'stage_{stage_index}',
+                'message': stage_msg,
+                'percent': percent,
+                'elapsed': round(elapsed, 1)
+            })
+
+            time.sleep(1.5)  # Update every 1.5 seconds
+
+        # Wait for thread to complete
+        thread.join(timeout=60)
+
+        if result is None:
+            # Timeout or no result
+            yield send_event('error', {
+                'message': 'Request timed out. Please try again.'
+            })
+            return
+
+        status, payload = result
+
+        if status == 'error':
+            yield send_event('error', {
+                'message': f'Error: {payload}'
+            })
+            return
+
+        # Send completion progress
+        yield send_event('progress', {
+            'stage': 'complete',
+            'message': 'Complete!',
+            'percent': 100
+        })
+
+        # Parse the Lambda response
+        try:
+            status_code = payload.get('statusCode', 200)
+
+            if status_code != 200:
+                error_body = payload.get('body', '{}')
+                if isinstance(error_body, str):
+                    error_body = json.loads(error_body)
+                error_msg = error_body.get('error', 'Unknown error')
+                yield send_event('error', {'message': error_msg})
+                return
+
+            body_str = payload.get('body', '{}')
+            if isinstance(body_str, str):
+                body = json.loads(body_str)
+            else:
+                body = body_str
+
+            response_text = body.get('response', str(body))
+            agent_name = body.get('agent_name', 'Orchestrator')
+            action = body.get('action')
+            intent = body.get('intent', 'unknown')
+            projects = body.get('projects', [])
+            pf_http_status_code = body.get('pf_http_status_code', 200)
+
+            # Add to conversation history
+            add_to_conversation_history(
+                session_id,
+                'assistant',
+                str(response_text),
+                metadata={
+                    'agent_name': agent_name,
+                    'intent': intent,
+                    'action': action
+                }
+            )
+
+            # Send the final result
+            yield send_event('result', {
+                'response': response_text,
+                'agent_name': agent_name,
+                'intent': intent,
+                'action': action,
+                'session_id': session_id,
+                'projects': projects,
+                'pf_http_status_code': pf_http_status_code
+            })
+
+        except Exception as e:
+            logger.error(f"[STREAM] Response parsing error: {e}")
+            yield send_event('error', {'message': f'Error parsing response: {str(e)}'})
+
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+            'Access-Control-Allow-Origin': '*'
+        }
+    )
 
 
 if __name__ == '__main__':
