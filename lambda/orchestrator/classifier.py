@@ -291,6 +291,7 @@ def _build_response(intent: str, params: Optional[Dict[str, Any]]) -> Dict[str, 
         "action": action,
         "can_call_direct": action is not None,
         "params": params,
+        "entities": params,  # Alias for backward compatibility with orchestrator
         "_nlu_intent": intent,
     }
 
