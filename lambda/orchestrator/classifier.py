@@ -355,7 +355,7 @@ Analyze the user utterance and extract structured information.
 ### Information Request Intents:
 - **Project_List_Request**: User wants to see a LIST of projects
   Parameters: status, category, projectType, technician_name, address
-  Exclusion: exclude_status, exclude_category, exclude_technician (arrays)
+  Exclusion: exclude_status, exclude_category, exclude_technician, exclude_address (arrays)
   Ordinal: ordinal (for "2nd kitchen project")
 
 - **Project_Information_Request**: User wants DETAILS about a specific project
@@ -394,12 +394,19 @@ Analyze the user utterance and extract structured information.
 
 ## PARAMETER EXTRACTION
 
-### Exclusion (negation):
-- "except", "but not", "excluding" -> exclude_* arrays
+### Exclusion (negation) - IMPORTANT:
+When user says "except", "but not", "excluding", "other than", extract exclude_* parameters:
 - "show all projects except kitchen" -> exclude_category: ["Kitchen"]
+- "list projects but not the scheduled ones" -> exclude_status: ["Scheduled"]
+- "show projects excluding Mildred's" -> exclude_technician: ["Mildred"]
+- "projects except at 401 Chicago" -> exclude_address: ["401 Chicago"]
+- "everything but the kitchen projects" -> exclude_category: ["Kitchen"]
+
+CRITICAL: Do NOT use inclusion filters when user says "except/but not/excluding". Use exclude_* instead.
 
 ### Ordinal with filters:
 - "2nd kitchen project" -> category: "Kitchen", ordinal: "second"
+- "first project at Chicago" -> address: "Chicago", ordinal: "first"
 
 ### Preferences with fallback:
 - "Tuesday if available, otherwise Wednesday" ->

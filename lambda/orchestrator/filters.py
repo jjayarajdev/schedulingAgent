@@ -138,6 +138,11 @@ def apply_project_filters(
     if exclude_technician:
         out = _apply_exclude_technician_filter(out, exclude_technician)
 
+    # ---- EXCLUDE ADDRESS ----
+    exclude_address = params.get("exclude_address")
+    if exclude_address:
+        out = _apply_exclude_address_filter(out, exclude_address)
+
     # ════════════════════════════════════════════════════════════════════════════
     # ORDINAL SELECTION (applied LAST, after all filters)
     # ════════════════════════════════════════════════════════════════════════════
@@ -226,25 +231,42 @@ def _apply_project_type_filter(projects: List[Dict], project_type: str) -> List[
     ]
 
 
+def _get_technician_name(project: Dict) -> str:
+    """Extract technician/installer name from project using various field names."""
+    # Try nested installer object
+    installer = project.get('installer', {})
+    if isinstance(installer, dict):
+        name = installer.get('name', '')
+        if name:
+            return name
+
+    # Try nested technician object
+    technician = project.get('technician', {})
+    if isinstance(technician, dict):
+        name = technician.get('name', '')
+        if name:
+            return name
+
+    # Try dashboard format (user_idata_first_name, user_idata_last_name)
+    first = project.get('user_idata_first_name') or project.get('installer_first_name') or ''
+    last = project.get('user_idata_last_name') or project.get('installer_last_name') or ''
+    if first or last:
+        return f"{first} {last}".strip()
+
+    # Try direct technician_name field
+    tech_name = project.get('technician_name') or project.get('installerName') or ''
+    if tech_name:
+        return tech_name
+
+    return ''
+
+
 def _apply_technician_filter(projects: List[Dict], technician_name: str) -> List[Dict]:
     """Filter projects by technician/installer name."""
     tn = _norm(technician_name)
     logger.info(f"[FILTER] Filtering by technician_name: '{technician_name}'")
 
-    def _get_installer_name(project: Dict) -> str:
-        installer = project.get('installer', {})
-        if isinstance(installer, dict):
-            name = installer.get('name', '')
-            if name:
-                return name
-        technician = project.get('technician', {})
-        if isinstance(technician, dict):
-            name = technician.get('name', '')
-            if name:
-                return name
-        return ''
-
-    result = [p for p in projects if tn in _norm(_get_installer_name(p))]
+    result = [p for p in projects if tn in _norm(_get_technician_name(p))]
     logger.info(f"[FILTER] After technician filter: {len(result)} projects")
     return result
 
@@ -351,20 +373,9 @@ def _apply_exclude_technician_filter(projects: List[Dict], exclude_technician) -
     excluded_techs = {_norm(t) for t in exclude_technician}
     logger.info(f"[FILTER] Excluding technicians: {exclude_technician}")
 
-    def _get_installer_name(project: Dict) -> str:
-        installer = project.get('installer', {})
-        if isinstance(installer, dict):
-            name = installer.get('name', '')
-            if name:
-                return name
-        technician = project.get('technician', {})
-        if isinstance(technician, dict):
-            name = technician.get('name', '')
-            if name:
-                return name
-        return ''
-
     def _technician_excluded(proj_tech: str) -> bool:
+        if not proj_tech:
+            return False  # Don't exclude unassigned projects
         pt = _norm(proj_tech)
         for excl in excluded_techs:
             if excl in pt or pt in excl:
@@ -373,9 +384,49 @@ def _apply_exclude_technician_filter(projects: List[Dict], exclude_technician) -
 
     result = [
         p for p in projects
-        if not _technician_excluded(_get_installer_name(p))
+        if not _technician_excluded(_get_technician_name(p))
     ]
     logger.info(f"[FILTER] After exclude_technician: {len(result)} projects")
+    return result
+
+
+def _apply_exclude_address_filter(projects: List[Dict], exclude_address) -> List[Dict]:
+    """Exclude projects at specified addresses."""
+    if isinstance(exclude_address, str):
+        exclude_address = [exclude_address]
+
+    excluded_addrs = {_norm(a) for a in exclude_address}
+    logger.info(f"[FILTER] Excluding addresses: {exclude_address}")
+
+    def _address_excluded(proj_addr: str) -> bool:
+        if not proj_addr:
+            return False
+        pa = _norm(proj_addr)
+        for excl in excluded_addrs:
+            if excl in pa or pa in excl:
+                return True
+        return False
+
+    def _get_address_string(project: Dict) -> str:
+        # Try multiple field names
+        addr = (
+            project.get('address') or
+            project.get('Address') or
+            project.get('installation_address_address1') or
+            project.get('addressLine1') or
+            ''
+        )
+        if isinstance(addr, str):
+            return addr
+        if isinstance(addr, dict):
+            return addr.get('address1', '') or addr.get('street', '') or addr.get('line1', '')
+        return ''
+
+    result = [
+        p for p in projects
+        if not _address_excluded(_get_address_string(p))
+    ]
+    logger.info(f"[FILTER] After exclude_address: {len(result)} projects")
     return result
 
 
