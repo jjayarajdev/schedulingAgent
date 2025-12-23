@@ -4,9 +4,16 @@ NLU-Style Intent Classifier for ProjectForce
 Architecture:
 - Intent Taxonomy: Well-defined intents with clear semantics
 - Parameter Extraction: Systematic slot filling from utterance
-- Action Mapping: Intent → Lambda action (deterministic)
+- Action Mapping: Intent -> Lambda action (deterministic)
 
-This replaces the fuzzy "intent + action in one prompt" approach with structured NLU.
+This module provides the core NLU classification. Additional functionality
+is organized into separate modules:
+- filters.py: Post-filtering (inclusion, exclusion, ordinals)
+- preferences.py: Fallback/preference logic
+- compound_actions.py: Multi-intent detection
+- batch_operations.py: Batch operation helpers
+- relative_scheduling.py: Relative scheduling
+- comparative_queries.py: Comparative queries
 """
 import json
 import logging
@@ -25,7 +32,34 @@ from config_loader import (
     find_category_bucket_for_keyword,
 )
 
-logger = logging.getLogger()
+# Import from refactored modules for re-export (backward compatibility)
+from filters import apply_project_filters, _norm, _get_field
+from preferences import find_matching_slot_with_fallback, parse_preference_from_message
+from compound_actions import (
+    detect_compound_actions,
+    classify_compound_message,
+    execute_compound_actions,
+    format_compound_response,
+)
+from batch_operations import (
+    is_batch_operation,
+    prepare_batch_operation,
+    execute_batch_operation,
+    format_batch_result,
+)
+from relative_scheduling import (
+    resolve_relative_date,
+    find_anchor_project_appointment,
+    parse_relative_reference,
+    resolve_relative_scheduling,
+)
+from comparative_queries import (
+    compare_project_availability,
+    compare_project_status,
+    rank_projects_by_urgency,
+)
+
+logger = logging.getLogger(__name__)
 _bedrock_runtime_client = None
 
 
@@ -33,7 +67,6 @@ _bedrock_runtime_client = None
 # INTENT TAXONOMY
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Primary intents with their action mappings
 INTENT_ACTION_MAP = {
     # Information Requests (Query intents - read-only)
     "Project_List_Request": "list_projects",
@@ -50,6 +83,15 @@ INTENT_ACTION_MAP = {
     "Appointment_Confirmation": "confirm_appointment",
     "Note_Add_Request": "add_note",
 
+    # Batch Action Requests (operate on multiple projects)
+    "Batch_Schedule_Request": "batch_schedule",
+    "Batch_Cancel_Request": "batch_cancel",
+    "Batch_Reschedule_Request": "batch_reschedule",
+
+    # Comparative Queries (compare across projects)
+    "Compare_Availability": "compare_availability",
+    "Compare_Projects": "compare_projects",
+
     # Non-scheduling intents
     "Weather_Request": "get_weather",
     "Greeting": "greet",
@@ -58,13 +100,14 @@ INTENT_ACTION_MAP = {
     "Thanks": "general",
 }
 
-# Intent categories for routing
 INTENT_CATEGORIES = {
     "scheduling": {
         "Project_List_Request", "Project_Information_Request", "Availability_Check",
         "Time_Slot_Check", "Reschedule_Availability_Check", "Note_List_Request",
         "Schedule_Request", "Reschedule_Request", "Cancel_Request",
         "Appointment_Confirmation", "Note_Add_Request",
+        "Batch_Schedule_Request", "Batch_Cancel_Request", "Batch_Reschedule_Request",
+        "Compare_Availability", "Compare_Projects",
     },
     "information": {"Weather_Request"},
     "chitchat": {"Greeting", "Help_Request", "Farewell", "Thanks"},
@@ -72,63 +115,43 @@ INTENT_CATEGORIES = {
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ENTITY DEFINITIONS
+# BACKWARD COMPATIBILITY EXPORTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# DYNAMIC STATUS & CATEGORY CONFIG (loaded from S3 via config_loader)
-# ═══════════════════════════════════════════════════════════════════════════════
-# These are now loaded dynamically from S3 config files.
-# The functions below provide backward-compatible access.
+SCHEDULABLE_STATUSES = None
+SCHEDULED_STATUSES = None
+CATEGORY_BUCKETS = None
 
-def _get_schedulable_statuses():
-    """Get schedulable statuses from external config."""
-    return get_schedulable_statuses_safe()
-
-def _get_scheduled_statuses():
-    """Get scheduled statuses from external config."""
-    return get_scheduled_statuses_safe()
-
-def _get_category_buckets():
-    """Get category buckets from external config."""
-    return get_all_category_buckets_safe()
-
-# Backward-compatible exports (computed on first access)
-# These are kept for imports in other modules
-SCHEDULABLE_STATUSES = None  # Will be populated on first use
-SCHEDULED_STATUSES = None    # Will be populated on first use
-CATEGORY_BUCKETS = None      # Will be populated on first use
 
 def _init_backward_compat():
     """Initialize backward-compatible module-level variables."""
     global SCHEDULABLE_STATUSES, SCHEDULED_STATUSES, CATEGORY_BUCKETS
     if SCHEDULABLE_STATUSES is None:
-        SCHEDULABLE_STATUSES = _get_schedulable_statuses()
+        SCHEDULABLE_STATUSES = get_schedulable_statuses_safe()
     if SCHEDULED_STATUSES is None:
-        SCHEDULED_STATUSES = _get_scheduled_statuses()
+        SCHEDULED_STATUSES = get_scheduled_statuses_safe()
     if CATEGORY_BUCKETS is None:
-        CATEGORY_BUCKETS = _get_category_buckets()
+        CATEGORY_BUCKETS = get_all_category_buckets_safe()
 
-# Status aliases (user terms → canonical status)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ALIASES
+# ═══════════════════════════════════════════════════════════════════════════════
+
 STATUS_ALIASES = {
-    # Schedulable
     "new": "New",
     "unscheduled": "New",
     "ready to schedule": "Ready To Schedule",
     "ready to go": "Ready To Schedule",
-    "schedulable": "schedulable",  # Special: matches SCHEDULABLE_STATUSES
+    "schedulable": "schedulable",
     "can schedule": "schedulable",
     "available to schedule": "schedulable",
-
-    # Scheduled
     "scheduled": "Scheduled",
     "on the books": "Scheduled",
     "on the calendar": "Scheduled",
     "booked": "Scheduled",
     "tentatively scheduled": "Tentatively Scheduled",
     "tentative": "Tentatively Scheduled",
-
-    # Other
     "completed": "Completed",
     "done": "Completed",
     "finished": "Completed",
@@ -141,7 +164,6 @@ STATUS_ALIASES = {
     "in the queue": "Pending",
 }
 
-# Project type aliases
 PROJECT_TYPE_ALIASES = {
     "call back": "Call Back",
     "callback": "Call Back",
@@ -177,23 +199,8 @@ def get_bedrock_client():
 # UTILITY FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _norm(s: Any) -> str:
-    """Normalize for case/whitespace-insensitive comparisons."""
-    if s is None:
-        return ""
-    return re.sub(r"\s+", " ", str(s).strip().lower())
-
-
-def _get_field(obj: Dict[str, Any], candidates: List[str]) -> Any:
-    """Retrieve first available field from dict using multiple candidate keys."""
-    for k in candidates:
-        if k in obj:
-            return obj.get(k)
-    return None
-
-
 def extract_first_json_object(text: str) -> Dict[str, Any]:
-    """Extract first valid JSON object from model output (handles code fences and extra text)."""
+    """Extract first valid JSON object from model output."""
     if not text:
         raise json.JSONDecodeError("Empty model response", "", 0)
 
@@ -236,179 +243,14 @@ def heuristic_intent_fallback(message: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# POST-FILTERING (for upstream APIs that don't support filtering)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def apply_project_filters(projects: List[Dict[str, Any]], params: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Apply semantic filters to a list of project records.
-
-    Supported params:
-    - status: "schedulable", "scheduled", or exact status value
-    - category: bucket name or exact category
-    - projectType: exact type value
-    """
-    if not params:
-        return projects
-
-    out = projects
-
-    # ---- STATUS FILTER ----
-    status = params.get("status")
-    if status:
-        s = _norm(status)
-        schedulable_statuses = _get_schedulable_statuses()
-        scheduled_statuses = _get_scheduled_statuses()
-
-        if s == "schedulable":
-            out = [
-                p for p in out
-                if _get_field(p, ["Status", "status"]) in schedulable_statuses
-                or _norm(_get_field(p, ["Status", "status"])) in {_norm(x) for x in schedulable_statuses}
-            ]
-        elif s == "scheduled":
-            out = [
-                p for p in out
-                if _get_field(p, ["Status", "status"]) in scheduled_statuses
-                or _norm(_get_field(p, ["Status", "status"])) in {_norm(x) for x in scheduled_statuses}
-            ]
-        else:
-            out = [
-                p for p in out
-                if _norm(_get_field(p, ["Status", "status"])) == s
-            ]
-
-    # ---- CATEGORY FILTER ----
-    category = params.get("category")
-    if category:
-        c = _norm(category)
-        category_buckets = _get_category_buckets()
-
-        # Helper: check if project category matches any keyword in bucket (partial match)
-        def _matches_bucket(proj_category: str, bucket_keywords: set) -> bool:
-            """Check if project category contains any bucket keyword or vice versa."""
-            pc = _norm(proj_category)
-            for kw in bucket_keywords:
-                # Match if keyword is in category OR category is in keyword
-                # e.g., "door" in "exterior doors" OR "exterior door" == "exterior doors" (close enough)
-                if kw in pc or pc in kw:
-                    return True
-            return False
-
-        if c in category_buckets:
-            # Direct bucket name match (e.g., "kitchen", "fencing")
-            allowed = category_buckets[c]
-            logger.info(f"[FILTER] Using bucket '{c}' with {len(allowed)} keywords")
-            out = [
-                p for p in out
-                if _matches_bucket(_get_field(p, ["Category", "category"]) or "", allowed)
-            ]
-        else:
-            # Check if term is a keyword in any bucket (e.g., "fence" → "fencing" bucket)
-            resolved_bucket = find_category_bucket_for_keyword(c)
-            if resolved_bucket and resolved_bucket in category_buckets:
-                allowed = category_buckets[resolved_bucket]
-                logger.info(f"[FILTER] Resolved keyword '{c}' to bucket '{resolved_bucket}' with {len(allowed)} keywords")
-                out = [
-                    p for p in out
-                    if _matches_bucket(_get_field(p, ["Category", "category"]) or "", allowed)
-                ]
-            else:
-                # Fall back to partial match on category value
-                # (e.g., "fence" matches "Fence Installation", "fence repair", etc.)
-                logger.info(f"[FILTER] No bucket match for '{c}', using partial match")
-                out = [
-                    p for p in out
-                    if c in _norm(_get_field(p, ["Category", "category"]) or "")
-                ]
-
-    # ---- PROJECT TYPE FILTER ----
-    project_type = params.get("projectType")
-    if project_type:
-        pt = _norm(project_type)
-        out = [
-            p for p in out
-            if _norm(_get_field(p, ["Type", "type", "projectType"])) == pt
-        ]
-
-    # ---- TECHNICIAN/INSTALLER FILTER ----
-    technician_name = params.get("technician_name")
-    if technician_name:
-        tn = _norm(technician_name)
-        logger.info(f"[FILTER] Filtering by technician_name: '{technician_name}'")
-
-        def _get_installer_name(project: Dict) -> str:
-            """Extract installer/technician name from project."""
-            # Check 'installer' object (from list_projects format)
-            installer = project.get('installer', {})
-            if isinstance(installer, dict):
-                name = installer.get('name', '')
-                if name:
-                    return name
-            # Check 'technician' object (from get_project_details format)
-            technician = project.get('technician', {})
-            if isinstance(technician, dict):
-                name = technician.get('name', '')
-                if name:
-                    return name
-            return ''
-
-        out = [
-            p for p in out
-            if tn in _norm(_get_installer_name(p))
-        ]
-        logger.info(f"[FILTER] After technician filter: {len(out)} projects")
-
-    # ---- ADDRESS FILTER ----
-    address = params.get("address")
-    if address:
-        addr = _norm(address)
-        logger.info(f"[FILTER] Filtering by address: '{address}'")
-
-        def _get_address_string(project: Dict) -> str:
-            """Extract address as searchable string from project."""
-            addr_field = project.get('address', project.get('Address', ''))
-            if isinstance(addr_field, str):
-                return addr_field
-            if isinstance(addr_field, dict):
-                # Handle object format - check all common field names
-                parts = [
-                    addr_field.get('street', ''),
-                    addr_field.get('address', ''),
-                    addr_field.get('address1', ''),
-                    addr_field.get('addressLine1', ''),
-                    addr_field.get('line1', ''),
-                    addr_field.get('city', ''),
-                    addr_field.get('state', ''),
-                    addr_field.get('zip', ''),
-                    addr_field.get('zipCode', ''),
-                    addr_field.get('postalCode', ''),
-                ]
-                return ' '.join(p for p in parts if p)
-            return ''
-
-        # Debug: Log first project's address to see format
-        if out:
-            sample_addr = out[0].get('address', out[0].get('Address', 'NO_ADDRESS_FIELD'))
-            logger.info(f"[FILTER] Sample address format: {type(sample_addr).__name__} = {sample_addr}")
-
-        out = [
-            p for p in out
-            if addr in _norm(_get_address_string(p))
-        ]
-        logger.info(f"[FILTER] After address filter: {len(out)} projects")
-
-    return out
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# FAST PATH (deterministic, no LLM needed)
+# FAST PATH
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _FASTPATH_GREETINGS = {"hi", "hello", "hey", "good morning", "good evening", "good afternoon"}
 _FASTPATH_HELP = {"help", "what can you do", "how does this work", "?"}
 _FASTPATH_THANKS = {"thanks", "thank you", "thx", "ty"}
 _FASTPATH_BYE = {"bye", "goodbye", "see you", "later"}
+
 
 def _fast_path(message: str) -> Optional[Dict[str, Any]]:
     """Handle trivial messages without LLM call."""
@@ -423,7 +265,6 @@ def _fast_path(message: str) -> Optional[Dict[str, Any]]:
     if m in _FASTPATH_BYE:
         return _build_response("Farewell", None)
     if "weather" in m or "forecast" in m:
-        # Extract location if present
         loc_match = re.search(r"(?:weather|forecast)\s+(?:in|for|at)\s+(\w+(?:\s+\w+)?)", m)
         params = {"location": loc_match.group(1)} if loc_match else None
         return _build_response("Weather_Request", params)
@@ -439,7 +280,6 @@ def _build_response(intent: str, params: Optional[Dict[str, Any]]) -> Dict[str, 
     """Build standardized classification response from intent."""
     action = INTENT_ACTION_MAP.get(intent)
 
-    # Determine category
     category = "chitchat"
     for cat, intents in INTENT_CATEGORIES.items():
         if intent in intents:
@@ -451,7 +291,7 @@ def _build_response(intent: str, params: Optional[Dict[str, Any]]) -> Dict[str, 
         "action": action,
         "can_call_direct": action is not None,
         "params": params,
-        "_nlu_intent": intent,  # Keep for debugging
+        "_nlu_intent": intent,
     }
 
 
@@ -460,10 +300,7 @@ def _build_response(intent: str, params: Optional[Dict[str, Any]]) -> Dict[str, 
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _summarize_history(conversation_history: List[Dict[str, Any]]) -> Tuple[str, List[str]]:
-    """
-    Summarize conversation history and extract project IDs for ordinal resolution.
-    Returns: (context_string, list_of_project_ids)
-    """
+    """Summarize conversation history and extract project IDs for ordinal resolution."""
     if not conversation_history:
         return "", []
 
@@ -476,11 +313,9 @@ def _summarize_history(conversation_history: List[Dict[str, Any]]) -> Tuple[str,
         content = (msg.get("content") or "")
 
         if role == "Assistant":
-            # Extract project IDs from assistant responses
             ids = []
             ids += re.findall(r'"id"\s*:\s*"?(\d+)"?', content)
             ids += re.findall(r"project\s*#?\s*(\d+)", content, flags=re.IGNORECASE)
-            # De-dup preserve order
             seen = set()
             for _id in ids:
                 if _id not in seen:
@@ -517,103 +352,62 @@ Analyze the user utterance and extract structured information.
 
 ## INTENT TAXONOMY
 
-### Information Request Intents (user wants to VIEW/CHECK data):
+### Information Request Intents:
 - **Project_List_Request**: User wants to see a LIST of projects
-  Triggers: "show my projects", "list jobs", "what projects do I have", "display orders"
-  Parameters: status, category, projectType, technician_name, address (optional filters)
-  Notes:
-    - technician_name: filter by assigned technician/installer (e.g., "projects assigned to John")
-    - address: filter by installation address (e.g., "projects at 401 Chicago Avenue", "orders at Main Street")
+  Parameters: status, category, projectType, technician_name, address
+  Exclusion: exclude_status, exclude_category, exclude_technician (arrays)
+  Ordinal: ordinal (for "2nd kitchen project")
 
-- **Project_Information_Request**: User wants DETAILS about a specific project or category
-  Triggers: "details for X", "tell me about X", "what is this X project about", "show me X project"
-  Parameters: project_id OR category, information_type (overview/schedule/status)
+- **Project_Information_Request**: User wants DETAILS about a specific project
+  Parameters: project_id OR category
 
-- **Availability_Check**: User wants to see available DATES for scheduling
-  Triggers: "what dates are available", "when can I schedule", "show dates for project X"
+- **Availability_Check**: User wants available DATES
   Parameters: project_id
 
-- **Time_Slot_Check**: User wants to see available TIME SLOTS on a specific date
-  Triggers: "what times on Nov 14", "show slots for tomorrow", "available times"
+- **Time_Slot_Check**: User wants available TIME SLOTS
   Parameters: date, project_id
 
-- **Note_List_Request**: User wants to see notes on a project
-  Triggers: "show notes for project X", "list notes"
+### Action Request Intents:
+- **Schedule_Request**: User wants to BOOK/SCHEDULE
+  Parameters: project_id, date_preference, time_preference, relative_to
+
+- **Reschedule_Request**: User wants to CHANGE appointment
   Parameters: project_id
 
-### Action Request Intents (user wants to CHANGE something):
-- **Schedule_Request**: User wants to BOOK/SCHEDULE a project
-  Triggers: "schedule project X", "book me in", "set up appointment", "get this scheduled"
+- **Cancel_Request**: User wants to CANCEL
   Parameters: project_id
 
-- **Reschedule_Request**: User wants to CHANGE an existing appointment
-  Triggers: "reschedule project X", "move my appointment", "change the time"
-  Parameters: project_id
-
-- **Cancel_Request**: User wants to CANCEL an appointment
-  Triggers: "cancel project X", "cancel my appointment", "I can't make it"
-  Parameters: project_id
-
-- **Appointment_Confirmation**: User is CONFIRMING a date/time selection
-  Triggers: "2pm", "Nov 25", "the first one", "yes that works"
+- **Appointment_Confirmation**: User CONFIRMING selection
   Parameters: date, time, slot_index
 
-- **Note_Add_Request**: User wants to ADD a note to a project
-  Triggers: "add a note to project X", "add note"
-  Parameters: project_id, note_text
+### Batch Intents:
+- **Batch_Schedule_Request**: Schedule MULTIPLE projects
+- **Batch_Cancel_Request**: Cancel MULTIPLE appointments
+- **Batch_Reschedule_Request**: Reschedule MULTIPLE
 
-### Other Intents:
-- **Weather_Request**: User asks about weather
-- **Greeting**: "hello", "hi", "hey"
-- **Help_Request**: "help", "what can you do"
-- **Thanks**: "thank you", "thanks"
-- **Farewell**: "bye", "goodbye"
+### Comparative Intents:
+- **Compare_Availability**: Compare scheduling across projects
+- **Compare_Projects**: Compare project status
+
+### Other:
+- **Weather_Request**, **Greeting**, **Help_Request**, **Thanks**, **Farewell**
 
 ## PARAMETER EXTRACTION
 
-### project_id:
-- Extract explicit IDs: "project 123" → "123"
-- Resolve ordinals from context: "2nd project" → use ID from history
-- If ordinal cannot be resolved, set project_id: null
+### Exclusion (negation):
+- "except", "but not", "excluding" -> exclude_* arrays
+- "show all projects except kitchen" -> exclude_category: ["Kitchen"]
 
-### category:
-IMPORTANT: The category value depends on the intent:
+### Ordinal with filters:
+- "2nd kitchen project" -> category: "Kitchen", ordinal: "second"
 
-For **Project_List_Request** (filtering a list): Use BUCKET names
-  * Kitchen, Windows, Decking, Flooring, Bathroom
-  * Example: "show my kitchen projects" → category="Kitchen"
+### Preferences with fallback:
+- "Tuesday if available, otherwise Wednesday" ->
+  date_preference: {{"primary": "Tuesday", "fallback": ["Wednesday"]}}
 
-For **Project_Information_Request** (specific project details): Use EXACT category name
-  * Preserve the exact category mentioned by user
-  * "Dishwasher" → category="Dishwasher" (NOT "Kitchen")
-  * "Electric Cooktop" → category="Electric Cooktop" (NOT "Kitchen")
-  * "Storm Door" → category="Storm Door" (NOT "Windows")
-  * "Exterior Doors" → category="Exterior Doors" (NOT "Windows")
-  * Example: "details for dishwasher project" → category="Dishwasher"
-  * Example: "what is this electric cooktop project about" → category="Electric Cooktop"
-
-### status (for filtering):
-- "schedulable", "can schedule", "available to schedule" → "schedulable"
-- "scheduled", "on the books", "booked" → "Scheduled"
-- "new", "unscheduled" → "New"
-- "ready to schedule", "ready to go" → "Ready To Schedule"
-
-### date/time:
-- Extract date mentions: "Nov 14", "tomorrow", "next Tuesday"
-- Extract time mentions: "2pm", "morning", "afternoon"
-
-## CRITICAL DISTINCTIONS
-
-**Project_List_Request vs Project_Information_Request:**
-- "show my projects" → Project_List_Request (wants a LIST)
-- "show my kitchen projects" → Project_List_Request with category="Kitchen" (bucket name)
-- "details for dishwasher project" → Project_Information_Request with category="Dishwasher" (EXACT name)
-- "what is this electric cooktop project about" → Project_Information_Request with category="Electric Cooktop" (EXACT name)
-- "tell me about the storm door" → Project_Information_Request with category="Storm Door" (EXACT name)
-
-**Availability_Check vs Schedule_Request:**
-- "what dates are available" → Availability_Check (ASKING, not booking)
-- "schedule it for Nov 14" → Schedule_Request (BOOKING)
+### Relative scheduling:
+- "after the dishwasher" ->
+  relative_to: {{"anchor_project": "dishwasher", "relation": "after"}}
 
 {context_section}
 
@@ -627,7 +421,10 @@ Respond with JSON only."""
 # MAIN CLASSIFIER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def classify_intent_and_action(message: str, conversation_history: Optional[List[Dict]] = None) -> Dict:
+def classify_intent_and_action(
+    message: str,
+    conversation_history: Optional[List[Dict]] = None
+) -> Dict:
     """
     NLU-style intent classification with structured parameter extraction.
 
@@ -637,7 +434,7 @@ def classify_intent_and_action(message: str, conversation_history: Optional[List
             "action": action_name or null,
             "can_call_direct": boolean,
             "params": extracted parameters or null,
-            "_nlu_intent": original NLU intent name (for debugging)
+            "_nlu_intent": original NLU intent name
         }
     """
     # Fast path for trivial messages
@@ -649,12 +446,11 @@ def classify_intent_and_action(message: str, conversation_history: Optional[List
     cfg = get_config()
     context_str, project_ids = _summarize_history(conversation_history or [])
 
-    # Build context section for prompt
     context_section = ""
     if context_str:
         context_section = f"\n## CONVERSATION CONTEXT\n{context_str}"
     if project_ids:
-        context_section += f"\nProject IDs from context (for ordinal resolution): [{', '.join(project_ids[:10])}]"
+        context_section += f"\nProject IDs from context: [{', '.join(project_ids[:10])}]"
 
     prompt = NLU_PROMPT_TEMPLATE.format(
         context_section=context_section,
@@ -679,11 +475,9 @@ def classify_intent_and_action(message: str, conversation_history: Optional[List
         logger.info(f"Raw NLU response: {classification_text}")
 
         nlu_result = extract_first_json_object(classification_text)
-
         intent = nlu_result.get("intent", "")
         params = nlu_result.get("parameters")
 
-        # Validate intent exists
         if intent not in INTENT_ACTION_MAP:
             logger.warning(f"Unknown intent '{intent}', using heuristic fallback")
             return {
@@ -693,19 +487,16 @@ def classify_intent_and_action(message: str, conversation_history: Optional[List
                 "params": None,
             }
 
-        # Build response
         result = _build_response(intent, params if params else None)
 
-        # Post-process: normalize status/category values
         if result["params"]:
             _normalize_params(result["params"])
 
-        logger.info(f"[OK] NLU: {intent} → {result['action']} for: '{message[:60]}...'")
+        logger.info(f"[OK] NLU: {intent} -> {result['action']} for: '{message[:60]}...'")
         return result
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse NLU JSON: {e}")
-        logger.error(f"NLU text: {classification_text or 'N/A'}")
         return {
             "intent": heuristic_intent_fallback(message),
             "action": None,
@@ -724,13 +515,11 @@ def classify_intent_and_action(message: str, conversation_history: Optional[List
 
 def _normalize_params(params: Dict[str, Any]) -> None:
     """Normalize parameter values in-place."""
-    # Normalize status
     if "status" in params:
         s = _norm(params["status"])
         if s in STATUS_ALIASES:
             params["status"] = STATUS_ALIASES[s]
 
-    # Normalize projectType
     if "projectType" in params:
         pt = _norm(params["projectType"])
         if pt in PROJECT_TYPE_ALIASES:
@@ -740,8 +529,5 @@ def _normalize_params(params: Dict[str, Any]) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 # MODULE INITIALIZATION
 # ═══════════════════════════════════════════════════════════════════════════════
-# Initialize backward-compatible module-level variables at import time.
-# This ensures CATEGORY_BUCKETS, SCHEDULED_STATUSES, etc. are populated
-# when other modules import them.
 
 _init_backward_compat()
