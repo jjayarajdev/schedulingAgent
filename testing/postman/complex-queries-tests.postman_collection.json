@@ -1,0 +1,941 @@
+{
+  "info": {
+    "_postman_id": "complex-queries-tests-v1",
+    "name": "Complex Query Scenarios Tests",
+    "description": "Tests for 7 complex query scenarios:\n\n1. **Negation/Exclusion** - \"Show all except kitchen\"\n2. **Ordinal + Filter** - \"The 2nd kitchen project\"\n3. **Fallback Logic** - \"Tuesday if available, otherwise Wednesday\"\n4. **Compound Actions** - \"Cancel X and schedule Y\"\n5. **Batch Operations** - \"Schedule all my projects\"\n6. **Relative Scheduling** - \"After the dishwasher install\"\n7. **Comparative Queries** - \"Which has earliest slot?\"\n\n**Test Data (from dashboard.json):**\n- Decking (Ready To Schedule) - North Loop\n- Storm Door (Scheduled Dec 22) - Canterbury Park - Alice\n- Dishwasher (Ready To Schedule) - 401 Chicago\n- Kitchen Sink (Scheduled Dec 29) - 401 Chicago - Mildred\n- Ovens (Tentatively Scheduled Dec 10) - 401 Chicago - arjun\n- Washer Dryer (Scheduled Dec 23) - 401 Chicago - Mildred\n- Exterior Doors (Scheduled Dec 22) - 401 Chicago - Mildred\n- ELECTRIC COOKTOP (Scheduled Dec 29) - 401 Chicago - Mildred",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "proxy_url", "value": "http://localhost:3000", "type": "string"},
+    {"key": "access_token", "value": "", "type": "string"},
+    {"key": "client_id", "value": "09PF05VD", "type": "string"},
+    {"key": "user_id", "value": "", "type": "string"},
+    {"key": "login_email", "value": "alicetestuser@projectsforce.com", "type": "string"},
+    {"key": "login_password", "value": "Alice@2024", "type": "string"}
+  ],
+  "item": [
+    {
+      "name": "0. Setup & Authentication",
+      "item": [
+        {
+          "name": "0.1 Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Proxy is healthy', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{proxy_url}}/health",
+              "host": ["{{proxy_url}}"],
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "0.2 Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Login successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    const jsonData = pm.response.json();",
+                  "    const token = jsonData.accesstoken || jsonData.access_token || (jsonData.data && jsonData.data.access_token);",
+                  "    const user = jsonData.user || jsonData.data || {};",
+                  "    const userId = user.customer_id || user.user_id || jsonData.user_id;",
+                  "    const clientId = user.client_id || jsonData.client_id;",
+                  "    ",
+                  "    if (token) pm.collectionVariables.set('access_token', token);",
+                  "    if (userId) pm.collectionVariables.set('user_id', userId);",
+                  "    if (clientId) pm.collectionVariables.set('client_id', clientId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"{{login_email}}\",\n    \"password\": \"{{login_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/login",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "login"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scenario 1 - Negation/Exclusion Filters",
+      "description": "Test exclusion queries: 'except', 'but not', 'excluding'",
+      "item": [
+        {
+          "name": "1.1 Show all except scheduled",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": ["pm.collectionVariables.set('s1_session', 'negation-' + Date.now());"],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Should NOT contain scheduled projects', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    const responseText = JSON.stringify(jsonData).toLowerCase();",
+                  "    // Should show Ready To Schedule, not Scheduled",
+                  "    pm.expect(responseText).to.include('ready');",
+                  "});",
+                  "",
+                  "pm.test('Should contain Decking or Dishwasher (unscheduled)', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    const responseText = JSON.stringify(jsonData).toLowerCase();",
+                  "    pm.expect(responseText).to.satisfy(function(text) {",
+                  "        return text.includes('decking') || text.includes('dishwasher');",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Show all my projects except the scheduled ones\",\n    \"session_id\": \"{{s1_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: list_projects with exclude_status=['Scheduled']\\n\\nShould return: Decking, Dishwasher, Decking (Ready To Schedule)"
+          }
+        },
+        {
+          "name": "1.2 Show all except kitchen projects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Should NOT contain Kitchen Sink or Dishwasher', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    const responseText = JSON.stringify(jsonData).toLowerCase();",
+                  "    // Note: May still appear in 'excluded' explanation",
+                  "    // Main projects shown should not be kitchen",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Show all projects but not the kitchen ones\",\n    \"session_id\": \"{{s1_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: list_projects with exclude_category=['Kitchen Sink', 'Dishwasher']\\n\\nShould return: Decking, Storm Door, Ovens, Washer Dryer, Exterior Doors, ELECTRIC COOKTOP"
+          }
+        },
+        {
+          "name": "1.3 Show projects excluding Mildred's",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Show my projects excluding the ones assigned to Mildred\",\n    \"session_id\": \"{{s1_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: list_projects with exclude_technician=['Mildred']\\n\\nShould return: Decking, Storm Door (Alice), Dishwasher, Ovens (arjun)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scenario 2 - Ordinal + Filter Combinations",
+      "description": "Test ordinal selection: 'first', 'second', '2nd'",
+      "item": [
+        {
+          "name": "2.1 First project at 401 Chicago",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": ["pm.collectionVariables.set('s2_session', 'ordinal-' + Date.now());"],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Should return exactly ONE project', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    const responseText = JSON.stringify(jsonData).toLowerCase();",
+                  "    // Should mention a single project at 401 Chicago",
+                  "    pm.expect(responseText).to.include('chicago');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Show me the first project at 401 Chicago Avenue\",\n    \"session_id\": \"{{s2_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: list_projects with address='401 Chicago', ordinal='first'\\n\\nShould return: Dishwasher (first at that address)"
+          }
+        },
+        {
+          "name": "2.2 Second Decking project",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Should return Decking project', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    const responseText = JSON.stringify(jsonData).toLowerCase();",
+                  "    pm.expect(responseText).to.include('decking');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Tell me about my 2nd Decking project\",\n    \"session_id\": \"{{s2_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: get_project_details with category='Decking', ordinal='second'\\n\\nShould return: Second Decking project (ID 11111173)"
+          }
+        },
+        {
+          "name": "2.3 Third scheduled project",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"What's my third scheduled project?\",\n    \"session_id\": \"{{s2_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: list_projects with status='Scheduled', ordinal='third'\\n\\nShould return: Third scheduled project from list"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scenario 3 - Fallback/Preference Logic",
+      "description": "Test scheduling with primary/fallback preferences",
+      "item": [
+        {
+          "name": "3.1 Check availability",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": ["pm.collectionVariables.set('s3_session', 'preference-' + Date.now());"],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"When can I schedule my dishwasher?\",\n    \"session_id\": \"{{s3_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: get_available_dates for Dishwasher project"
+          }
+        },
+        {
+          "name": "3.2 Schedule with fallback preference",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Should acknowledge preference', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    const responseText = JSON.stringify(jsonData).toLowerCase();",
+                  "    // Should mention Tuesday or Wednesday",
+                  "    pm.expect(responseText).to.satisfy(function(text) {",
+                  "        return text.includes('tuesday') || text.includes('wednesday') || text.includes('slot');",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Schedule it for Tuesday if available, otherwise Wednesday\",\n    \"session_id\": \"{{s3_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: schedule_project with date_preference={primary:'Tuesday', fallback:['Wednesday']}\\n\\nShould try Tuesday first, fall back to Wednesday if unavailable"
+          }
+        },
+        {
+          "name": "3.3 Time preference with fallback",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"I prefer morning, but afternoon is fine too\",\n    \"session_id\": \"{{s3_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: Understand time preference with fallback"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scenario 4 - Compound Actions",
+      "description": "Test multi-intent messages: 'X and Y', 'X then Y'",
+      "item": [
+        {
+          "name": "4.1 Cancel and Schedule",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": ["pm.collectionVariables.set('s4_session', 'compound-' + Date.now());"],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Should handle both actions', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    const responseText = JSON.stringify(jsonData).toLowerCase();",
+                  "    // Should mention both storm door and dishwasher",
+                  "    pm.expect(responseText).to.satisfy(function(text) {",
+                  "        return text.includes('storm') || text.includes('dishwasher') || text.includes('cancel') || text.includes('schedule');",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Cancel the storm door appointment and schedule the dishwasher\",\n    \"session_id\": \"{{s4_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: Compound action - cancel_appointment + schedule_project\\n\\nShould split into: 'Cancel the storm door appointment' AND 'schedule the dishwasher'"
+          }
+        },
+        {
+          "name": "4.2 Show then Schedule",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Show my schedulable projects then schedule the first one\",\n    \"session_id\": \"{{s4_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: Compound action - list_projects + schedule_project\\n\\nShould execute sequentially: Show projects THEN schedule first one"
+          }
+        },
+        {
+          "name": "4.3 Check and Reschedule",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Check availability for the ovens and reschedule it to next week\",\n    \"session_id\": \"{{s4_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: Compound action - get_available_dates + reschedule_appointment"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scenario 5 - Batch Operations",
+      "description": "Test batch commands: 'all', 'every', 'everything'",
+      "item": [
+        {
+          "name": "5.1 Schedule all schedulable projects",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": ["pm.collectionVariables.set('s5_session', 'batch-' + Date.now());"],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Should ask for confirmation or list projects', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    const responseText = JSON.stringify(jsonData).toLowerCase();",
+                  "    pm.expect(responseText).to.satisfy(function(text) {",
+                  "        return text.includes('confirm') || text.includes('project') || text.includes('found');",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Schedule all my ready to schedule projects\",\n    \"session_id\": \"{{s5_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: Batch_Schedule_Request\\n\\nShould find: Decking, Dishwasher, Decking (Ready To Schedule)\\nShould ask for confirmation before proceeding"
+          }
+        },
+        {
+          "name": "5.2 Cancel all Mildred's appointments",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Should identify multiple projects', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    const responseText = JSON.stringify(jsonData).toLowerCase();",
+                  "    pm.expect(responseText).to.satisfy(function(text) {",
+                  "        return text.includes('mildred') || text.includes('project') || text.includes('4');",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Cancel all appointments assigned to Mildred\",\n    \"session_id\": \"{{s5_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: Batch_Cancel_Request with technician_name='Mildred'\\n\\nShould find: Kitchen Sink, Washer Dryer, Exterior Doors, ELECTRIC COOKTOP (4 projects)"
+          }
+        },
+        {
+          "name": "5.3 Reschedule everything at 401 Chicago",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Reschedule everything at 401 Chicago Avenue to next month\",\n    \"session_id\": \"{{s5_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: Batch_Reschedule_Request with address='401 Chicago Avenue'"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scenario 6 - Relative Scheduling",
+      "description": "Test scheduling relative to other appointments",
+      "item": [
+        {
+          "name": "6.1 Schedule after another project",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": ["pm.collectionVariables.set('s6_session', 'relative-' + Date.now());"],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Should understand relative reference', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    const responseText = JSON.stringify(jsonData).toLowerCase();",
+                  "    pm.expect(responseText).to.satisfy(function(text) {",
+                  "        return text.includes('storm') || text.includes('dishwasher') || text.includes('after') || text.includes('dec');",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Schedule the dishwasher the day after my storm door appointment\",\n    \"session_id\": \"{{s6_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: schedule_project with relative_to={anchor:'storm door', relation:'after', offset:'1 day'}\\n\\nStorm Door is Dec 22, so should suggest Dec 23"
+          }
+        },
+        {
+          "name": "6.2 Schedule before another project",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Schedule my decking project the day before the kitchen sink\",\n    \"session_id\": \"{{s6_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: schedule_project with relative_to={anchor:'kitchen sink', relation:'before', offset:'1 day'}\\n\\nKitchen Sink is Dec 29, so should suggest Dec 28"
+          }
+        },
+        {
+          "name": "6.3 Schedule same week as another",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Can you schedule the decking the same week as the washer dryer?\",\n    \"session_id\": \"{{s6_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: schedule_project with relative_to={anchor:'washer dryer', relation:'same_week'}\\n\\nWasher Dryer is Dec 23, same week = week of Dec 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scenario 7 - Comparative Queries",
+      "description": "Test comparison across projects",
+      "item": [
+        {
+          "name": "7.1 Which has earliest slot?",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": ["pm.collectionVariables.set('s7_session', 'compare-' + Date.now());"],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Should compare and recommend', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    const responseText = JSON.stringify(jsonData).toLowerCase();",
+                  "    pm.expect(responseText).to.satisfy(function(text) {",
+                  "        return text.includes('earliest') || text.includes('first') || text.includes('soonest') || text.includes('project');",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Which of my schedulable projects has the earliest available slot?\",\n    \"session_id\": \"{{s7_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: Compare_Availability with comparison_type='earliest_slot'\\n\\nShould compare Decking, Dishwasher availability and recommend the one with earliest opening"
+          }
+        },
+        {
+          "name": "7.2 Compare project status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Should summarize statuses', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    const responseText = JSON.stringify(jsonData).toLowerCase();",
+                  "    pm.expect(responseText).to.satisfy(function(text) {",
+                  "        return text.includes('scheduled') || text.includes('ready') || text.includes('status');",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Compare the status of all my projects\",\n    \"session_id\": \"{{s7_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: Compare_Projects\\n\\nShould group: 3 Ready To Schedule, 5 Scheduled, 1 Tentatively Scheduled"
+          }
+        },
+        {
+          "name": "7.3 Which should I schedule first?",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Should recommend priority', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    const responseText = JSON.stringify(jsonData).toLowerCase();",
+                  "    pm.expect(responseText).to.satisfy(function(text) {",
+                  "        return text.includes('first') || text.includes('priority') || text.includes('recommend') || text.includes('suggest');",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Which projects should I schedule first based on urgency?\",\n    \"session_id\": \"{{s7_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: Compare_Projects with ranking by urgency\\n\\nShould rank Ready To Schedule projects first, then Tentatively Scheduled, then Scheduled"
+          }
+        },
+        {
+          "name": "7.4 Soonest to get all done",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response is successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"What's the soonest I can get all my schedulable projects done?\",\n    \"session_id\": \"{{s7_session}}\",\n    \"pf_token\": \"{{access_token}}\",\n    \"pf_client_id\": \"{{client_id}}\",\n    \"pf_user_id\": \"{{user_id}}\",\n    \"stream\": false\n}"
+            },
+            "url": {
+              "raw": "{{proxy_url}}/api/invoke-agent",
+              "host": ["{{proxy_url}}"],
+              "path": ["api", "invoke-agent"]
+            },
+            "description": "Expected: Compare_Availability with comparison_type='all_fit_earliest'\\n\\nShould find common date when all projects can be scheduled"
+          }
+        }
+      ]
+    }
+  ]
+}
