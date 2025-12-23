@@ -1,0 +1,110 @@
+{
+  "version": "1.0",
+  "description": "Project status configuration for voice assistant",
+
+  "status_groups": {
+    "schedulable": {
+      "description": "Projects that can be scheduled",
+      "statuses": [
+        "New",
+        "Ready To Schedule",
+        "RTS",
+        "Product Available",
+        "Rescheduled",
+        "Customer Rescheduled"
+      ],
+      "voice_phrase": "ready to schedule"
+    },
+    "scheduled": {
+      "description": "Projects with confirmed appointments",
+      "statuses": [
+        "Scheduled",
+        "Tentatively Scheduled",
+        "Customer Scheduled",
+        "Store Scheduled",
+        "Install Scheduled",
+        "HDMS scheduled"
+      ],
+      "voice_phrase": "scheduled"
+    },
+    "in_progress": {
+      "description": "Projects currently being worked on",
+      "statuses": [
+        "In Progress",
+        "In-Progress",
+        "Installation In Progress",
+        "Dispatched",
+        "Issued to Field"
+      ],
+      "voice_phrase": "in progress"
+    },
+    "completed": {
+      "description": "Finished projects",
+      "statuses": [
+        "Completed",
+        "Work Complete",
+        "Project Completed",
+        "Work Order Completed",
+        "Done",
+        "Completed-Archived"
+      ],
+      "voice_phrase": "completed"
+    },
+    "on_hold": {
+      "description": "Projects waiting on something",
+      "statuses": [
+        "On Hold",
+        "Waiting for Product",
+        "Waiting Product",
+        "Missing Product",
+        "Paused - Missing Product",
+        "Paused - Waiting on Product",
+        "Waiting For Permit",
+        "Needs Permit",
+        "Product Ordered",
+        "Pending"
+      ],
+      "voice_phrase": "on hold"
+    },
+    "cancelled": {
+      "description": "Cancelled projects",
+      "statuses": [
+        "Cancelled",
+        "Cancelled/SURGE",
+        "Ready To Cancel"
+      ],
+      "voice_phrase": "cancelled"
+    }
+  },
+
+  "aliases": {
+    "schedulable": "schedulable",
+    "can schedule": "schedulable",
+    "available to schedule": "schedulable",
+    "ready to go": "schedulable",
+    "ready": "schedulable",
+
+    "scheduled": "scheduled",
+    "on the books": "scheduled",
+    "on the calendar": "scheduled",
+    "booked": "scheduled",
+    "appointments": "scheduled",
+
+    "in progress": "in_progress",
+    "underway": "in_progress",
+    "active": "in_progress",
+    "working on": "in_progress",
+
+    "completed": "completed",
+    "done": "completed",
+    "finished": "completed",
+
+    "on hold": "on_hold",
+    "waiting": "on_hold",
+    "blocked": "on_hold",
+    "pending": "on_hold",
+
+    "cancelled": "cancelled",
+    "canceled": "cancelled"
+  }
+}

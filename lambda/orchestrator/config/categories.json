@@ -1,0 +1,155 @@
+{
+  "version": "1.0",
+  "description": "Project category configuration for voice assistant",
+
+  "buckets": {
+    "kitchen": {
+      "description": "Kitchen appliances and fixtures",
+      "keywords": [
+        "dishwasher", "kitchen sink", "sink", "oven", "ovens",
+        "cooktop", "electric cooktop", "gas cooktop", "range",
+        "microwave", "otr", "garbage disposal", "disposal",
+        "range hood", "hood", "trash compactor"
+      ],
+      "voice_name": "kitchen",
+      "is_indoor": true
+    },
+    "appliances": {
+      "description": "Major home appliances",
+      "keywords": [
+        "washer", "dryer", "washer dryer", "refrigerator", "fridge",
+        "freezer", "water heater", "water heaters", "ice maker",
+        "wine cooler", "air conditioner", "hvac"
+      ],
+      "voice_name": "appliance",
+      "is_indoor": true
+    },
+    "plumbing": {
+      "description": "Plumbing fixtures and installations",
+      "keywords": [
+        "toilet", "toilets", "faucet", "faucets", "vanity", "vanities",
+        "pedestal sink", "water softener", "water filtration",
+        "shower head", "bath sink", "plumbing"
+      ],
+      "voice_name": "plumbing",
+      "is_indoor": true
+    },
+    "bathroom": {
+      "description": "Bathroom projects",
+      "keywords": [
+        "bathroom", "bath", "shower door", "shower doors", "tub",
+        "shower", "bathroom remodel"
+      ],
+      "voice_name": "bathroom",
+      "is_indoor": true
+    },
+    "flooring": {
+      "description": "Floor installations",
+      "keywords": [
+        "flooring", "floor", "carpet", "hardwood", "laminate",
+        "vinyl", "lvp", "luxury vinyl", "tile", "ceramic tile",
+        "wood floors", "tile flooring"
+      ],
+      "voice_name": "flooring",
+      "is_indoor": true
+    },
+    "windows_doors": {
+      "description": "Windows and doors",
+      "keywords": [
+        "window", "windows", "door", "doors", "entry door", "exterior door",
+        "interior door", "patio door", "sliding door", "storm door",
+        "security door", "screen door", "garage door", "garage door opener",
+        "barn door", "bifold", "bi-fold"
+      ],
+      "voice_name": "window and door",
+      "is_indoor": false
+    },
+    "decking": {
+      "description": "Deck and patio projects",
+      "keywords": [
+        "deck", "decking", "decks", "patio", "pergola", "composite",
+        "wood decking", "composite decking"
+      ],
+      "voice_name": "decking",
+      "is_indoor": false
+    },
+    "roofing": {
+      "description": "Roofing projects",
+      "keywords": [
+        "roof", "roofing", "shingles", "gutters", "seamless gutters"
+      ],
+      "voice_name": "roofing",
+      "is_indoor": false
+    },
+    "siding": {
+      "description": "Siding and exterior",
+      "keywords": [
+        "siding", "vinyl siding", "fiber cement", "cement siding"
+      ],
+      "voice_name": "siding",
+      "is_indoor": false
+    },
+    "fencing": {
+      "description": "Fencing projects",
+      "keywords": [
+        "fence", "fencing", "gate", "railing"
+      ],
+      "voice_name": "fencing",
+      "is_indoor": false
+    },
+    "cabinets_countertops": {
+      "description": "Cabinets and countertops",
+      "keywords": [
+        "cabinet", "cabinets", "countertop", "countertops",
+        "granite", "quartz", "silestone", "cambria", "laminate countertop",
+        "backsplash", "kitchen cabinets"
+      ],
+      "voice_name": "cabinet and countertop",
+      "is_indoor": true
+    },
+    "electrical": {
+      "description": "Electrical installations",
+      "keywords": [
+        "electrical", "ceiling fan", "light fixtures", "fan",
+        "generator", "generators", "floodlight"
+      ],
+      "voice_name": "electrical",
+      "is_indoor": true
+    },
+    "blinds_shutters": {
+      "description": "Window treatments",
+      "keywords": [
+        "blinds", "shades", "shutters", "drapery", "window treatments",
+        "window treatment"
+      ],
+      "voice_name": "window treatment",
+      "is_indoor": true
+    }
+  },
+
+  "outdoor_buckets": [
+    "decking", "roofing", "siding", "fencing", "windows_doors"
+  ],
+
+  "aliases": {
+    "kitchen appliances": "kitchen",
+    "kitchen project": "kitchen",
+    "dishwasher project": "kitchen",
+
+    "laundry": "appliances",
+    "water heater project": "appliances",
+
+    "floor project": "flooring",
+    "carpet project": "flooring",
+    "hardwood project": "flooring",
+
+    "window project": "windows_doors",
+    "door project": "windows_doors",
+
+    "deck project": "decking",
+    "patio project": "decking",
+
+    "outdoor": "decking",
+    "exterior": "siding"
+  }
+}

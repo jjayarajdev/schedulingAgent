@@ -13,6 +13,8 @@ import logging
 import re
 from typing import Dict, Optional, Tuple
 
+from config_loader import get_scheduled_statuses_safe
+
 logger = logging.getLogger()
 
 
@@ -168,7 +170,8 @@ def guard_cancel_needs_scheduled(message: str, nlu_action: str, sonnet_action: s
     project_info = project_mapping.get(project_id, {})
     status = project_info.get('status', '').lower()
 
-    scheduled_statuses = ['scheduled', 'tentatively scheduled', 'customer scheduled']
+    # Get scheduled statuses from external config
+    scheduled_statuses = {s.lower() for s in get_scheduled_statuses_safe()}
 
     if status and status not in scheduled_statuses:
         return 'get_project_details', f"GUARD: Can't cancel project with status '{status}'"
@@ -198,7 +201,8 @@ def guard_reschedule_needs_scheduled(message: str, nlu_action: str, sonnet_actio
     project_info = project_mapping.get(project_id, {})
     status = project_info.get('status', '').lower()
 
-    scheduled_statuses = ['scheduled', 'tentatively scheduled', 'customer scheduled']
+    # Get scheduled statuses from external config
+    scheduled_statuses = {s.lower() for s in get_scheduled_statuses_safe()}
 
     if status and status not in scheduled_statuses:
         return 'get_project_details', f"GUARD: Can't reschedule project with status '{status}'"

@@ -58,6 +58,78 @@ def get_category_bucket(category: str) -> Optional[str]:
     return None
 
 
+def find_project_by_partial_id(search_id: str, project_mapping: Dict[str, Any]) -> Optional[str]:
+    """
+    Find a project ID using partial matching.
+
+    Handles cases where user provides:
+    - Order Number (projectNumber) like "21083_09PF05VD_1762166550719_1"
+    - Internal Project ID like "9000497"
+    - Partial ID
+
+    Args:
+        search_id: The ID the user provided (may be Order Number or partial)
+        project_mapping: Dict of project_id/projectNumber -> project_info
+
+    Returns:
+        Internal project_id (for API calls) if found, None otherwise
+    """
+    if not search_id or not project_mapping:
+        return None
+
+    search_id_str = str(search_id).strip()
+    search_id_lower = search_id_str.lower()
+
+    # 1. Exact match - check if it's an Order Number with project_id mapping
+    if search_id_str in project_mapping:
+        info = project_mapping[search_id_str]
+        # If this entry has a project_id field, it's an Order Number -> return the internal ID
+        if info.get('project_id'):
+            logger.info(f"[RESOLVE] Order Number '{search_id_str}' -> Project ID '{info['project_id']}'")
+            return info['project_id']
+        # Otherwise it's already an internal project ID
+        return search_id_str
+
+    # 2. Case-insensitive exact match
+    for pid in project_mapping.keys():
+        if pid.lower() == search_id_lower:
+            info = project_mapping[pid]
+            if info.get('project_id'):
+                logger.info(f"[RESOLVE] Order Number '{pid}' -> Project ID '{info['project_id']}'")
+                return info['project_id']
+            return pid
+
+    # 3. Suffix match - search_id is at the end of the full ID
+    # e.g., "9000407_1" matches "21083_09PF05VD_9000407_1"
+    for pid in project_mapping.keys():
+        if pid.lower().endswith(search_id_lower):
+            info = project_mapping[pid]
+            resolved = info.get('project_id', pid)
+            logger.info(f"[PARTIAL-MATCH] Suffix match: '{search_id}' -> '{pid}' -> project_id '{resolved}'")
+            return resolved
+
+    # 4. Contains match - search_id is contained in full ID
+    for pid in project_mapping.keys():
+        if search_id_lower in pid.lower():
+            info = project_mapping[pid]
+            resolved = info.get('project_id', pid)
+            logger.info(f"[PARTIAL-MATCH] Contains match: '{search_id}' -> '{pid}' -> project_id '{resolved}'")
+            return resolved
+
+    # 5. Numeric suffix match - extract numeric part and match
+    search_digits = re.sub(r'[^0-9_]', '', search_id_str)
+    if search_digits:
+        for pid in project_mapping.keys():
+            pid_digits = re.sub(r'[^0-9_]', '', pid)
+            if search_digits in pid_digits:
+                info = project_mapping[pid]
+                resolved = info.get('project_id', pid)
+                logger.info(f"[PARTIAL-MATCH] Numeric match: '{search_id}' -> '{pid}' -> project_id '{resolved}'")
+                return resolved
+
+    return None
+
+
 # ============================================================================
 # STAGE-DRIVEN WORKFLOW CONTINUATION
 # These functions check if user is providing what we're waiting for,
@@ -772,11 +844,21 @@ def extract_project_data_from_history(conversation_history: List[Dict], classifi
                     # Find the target project by ID or index
                     target_proj = None
                     if target_project_id:
+                        # First try exact match
                         for p in projects_list:
                             if str(p.get('id')) == str(target_project_id):
                                 target_proj = p
-                                logger.info(f"[CONTEXT] Matched project by ID: {target_project_id}")
+                                logger.info(f"[CONTEXT] Matched project by exact ID: {target_project_id}")
                                 break
+
+                        # If no exact match, try partial matching
+                        if not target_proj:
+                            # Build temp mapping for partial match
+                            temp_mapping = {str(p.get('id')): p for p in projects_list if p.get('id')}
+                            matched_pid = find_project_by_partial_id(str(target_project_id), temp_mapping)
+                            if matched_pid:
+                                target_proj = temp_mapping[matched_pid]
+                                logger.info(f"[CONTEXT] Matched project by partial ID: {target_project_id} -> {matched_pid}")
                     elif target_project_index is not None:
                         # Support negative indices: -1 = last, -2 = second to last, etc.
                         try:
@@ -1085,6 +1167,10 @@ Examples: "who is the technician", "who is coming", "who's doing the work", "tec
 "who's the installer", "who will do the job", "tell me about the technician", "who's assigned to my project",
 "what's the technician's name", "who is working on this", "installer info", "who will be coming out"
 
+Category queries -> context_query with query_type: "category"
+Examples: "what is the category", "what type of project is this", "what kind of project",
+"what's the category for project X", "is this a kitchen project", "what category is project 123"
+
 Appointment time queries -> context_query with query_type: "appointment_time"
 Examples: "what time is my appointment", "when are they coming", "what's the scheduled time",
 "when is the appointment", "what time should I expect them", "when will they arrive",
@@ -1096,9 +1182,15 @@ Examples: "what's the address", "where is the work being done", "installation ad
 
 Status/General queries -> context_query with query_type: "status"
 Examples: "what's happening with my job", "status of my project", "what's going on with my project",
-"update on my job", "how is my project going", "any updates", "what's the status", "tell me about my project",
-"what's happening with my second job", "status update", "project update", "what's new with my project",
-"whats happening", "hows my project", "whats going on", "progress on my job", "any news on my project"
+
+MULTI-FIELD QUERIES (user asks for multiple pieces of info at once):
+When user asks for MULTIPLE pieces of information in a single query, use query_types (array) instead of query_type.
+Examples:
+- "give me technician name and appointment time for project X" -> query_types: ["technician", "appointment_time"]
+- "what's the technician and scheduled date" -> query_types: ["technician", "appointment_time"]
+- "tell me the address and status of the project" -> query_types: ["address", "status"]
+- "who is coming and when" -> query_types: ["technician", "appointment_time"]
+- "technician information and schedule start and end date" -> query_types: ["technician", "appointment_time"]
 
 For these: Check if project details are in conversation history. Return intent=information, action=context_query
 IMPORTANT: If user specifies a project reference (e.g., "for the 1st project", "for project 7751741", "for my Decking project"):
@@ -2023,19 +2115,31 @@ def orchestrate_intelligent_workflow(
                 # Save project_ids AND project_mapping to workflow state for ordinal/category references
                 if 'projects' in response_body:
                     project_ids = [str(p.get('id', '')) for p in response_body['projects'] if p.get('id')]
-                    # Build project_mapping: project_id -> {category, category_bucket, address, status}
+                    # Build project_mapping: project_id -> {category, category_bucket, address, status, projectNumber}
                     # category_bucket enables "show kitchen projects" to match Dishwasher, Ovens, etc.
+                    # projectNumber (Order Number) enables lookup when user references by order number
                     project_mapping = {}
                     for p in response_body['projects']:
                         pid = str(p.get('id', ''))
                         if pid:
                             exact_category = p.get('category', '')
+                            project_number = p.get('projectNumber', '')
                             project_mapping[pid] = {
                                 'category': exact_category,
                                 'category_bucket': get_category_bucket(exact_category),
                                 'address': p.get('address', ''),
-                                'status': p.get('status', '')
+                                'status': p.get('status', ''),
+                                'projectNumber': project_number  # Order Number for user display
                             }
+                            # Also map by projectNumber (Order Number) for reverse lookup
+                            if project_number:
+                                project_mapping[project_number] = {
+                                    'category': exact_category,
+                                    'category_bucket': get_category_bucket(exact_category),
+                                    'address': p.get('address', ''),
+                                    'status': p.get('status', ''),
+                                    'project_id': pid  # Internal project ID for API calls
+                                }
                     if project_ids:
                         logger.info(f"[VOICE-PRECHECK] Saving {len(project_ids)} project_ids and project_mapping to workflow state")
                         # Get existing state to preserve viewed_projects
@@ -2150,6 +2254,99 @@ def orchestrate_intelligent_workflow(
         except Exception as cal_err:
             logger.warning(f"[CALENDAR-QUERY] Error: {cal_err}, falling through to normal flow")
             # Fall through to normal classification
+
+    # ========================================================================
+    # STEP 0.4c: CONTEXT FILTER QUERIES - "Any of these ready to schedule?"
+    # When user asks about "these/those" with a status filter, filter from
+    # the previous list results instead of fetching fresh from API
+    # ========================================================================
+    context_filter_patterns = [
+        # "any of these/those [status]" patterns
+        (r'\b(?:any|which|are any|are there any)\s+(?:of\s+)?(?:these|those|them)\b.*\b(?:ready to schedule|schedulable|can schedule)\b', 'schedulable'),
+        (r'\b(?:any|which|are any|are there any)\s+(?:of\s+)?(?:these|those|them)\b.*\b(?:scheduled|on the books|booked)\b', 'scheduled'),
+        (r'\b(?:any|which|are any|are there any)\s+(?:of\s+)?(?:these|those|them)\b.*\b(?:completed|done|finished)\b', 'completed'),
+        # "[status] ones from these" patterns
+        (r'\b(?:ready to schedule|schedulable)\b.*\b(?:from\s+)?(?:these|those|them)\b', 'schedulable'),
+        (r'\b(?:scheduled|booked)\b.*\b(?:from\s+)?(?:these|those|them)\b', 'scheduled'),
+    ]
+
+    for pattern, status_filter in context_filter_patterns:
+        if re.search(pattern, msg_lower):
+            logger.info(f"[CONTEXT-FILTER] Detected '{status_filter}' filter on previous results")
+
+            # Get project_mapping from workflow state (from previous list_projects)
+            prev_project_mapping = {}
+            if workflow_state:
+                prev_project_mapping = workflow_state.get('project_mapping', {}) or workflow_state.get('context', {}).get('project_mapping', {})
+
+            if prev_project_mapping:
+                # Get status sets from config
+                from config_loader import get_schedulable_statuses_safe, get_scheduled_statuses_safe, get_completed_statuses
+
+                if status_filter == 'schedulable':
+                    target_statuses = {s.lower() for s in get_schedulable_statuses_safe()}
+                elif status_filter == 'scheduled':
+                    target_statuses = {s.lower() for s in get_scheduled_statuses_safe()}
+                elif status_filter == 'completed':
+                    try:
+                        target_statuses = {s.lower() for s in get_completed_statuses()}
+                    except:
+                        target_statuses = {'completed', 'done', 'finished'}
+                else:
+                    target_statuses = set()
+
+                # Filter the previous results
+                filtered_projects = []
+                filtered_mapping = {}
+                for pid, info in prev_project_mapping.items():
+                    proj_status = info.get('status', '').lower()
+                    if proj_status in target_statuses:
+                        filtered_projects.append({
+                            'id': pid,
+                            'category': info.get('category', ''),
+                            'address': info.get('address', ''),
+                            'status': info.get('status', '')
+                        })
+                        filtered_mapping[pid] = info
+
+                logger.info(f"[CONTEXT-FILTER] Filtered {len(prev_project_mapping)} → {len(filtered_projects)} projects with status '{status_filter}'")
+
+                # Format response
+                response_body = {'projects': filtered_projects}
+                response_text = format_lambda_response('list_projects', response_body, message, channel)
+
+                # Update workflow state with filtered results
+                if filtered_projects:
+                    project_ids = [str(p['id']) for p in filtered_projects]
+                    existing_state = state_manager.get_state(session_id) or {}
+                    viewed_projects = existing_state.get('viewed_projects', [])
+
+                    state_manager.save_state(session_id, {
+                        'workflow_type': 'project_list',
+                        'current_stage': f'filtered_by_{status_filter}',
+                        'context': {
+                            'project_ids': project_ids,
+                            'project_mapping': filtered_mapping,
+                            'customer_id': customer_id,
+                            'previous_filter': status_filter
+                        },
+                        'viewed_projects': viewed_projects,
+                        'project_mapping': filtered_mapping
+                    })
+
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': response_text,
+                    'intent': 'scheduling',
+                    'action': 'list_projects',
+                    'agent_name': 'Intelligent Orchestrator (Context Filter)',
+                    'direct_call': True,
+                    'timing': timing,
+                    'pf_http_status_code': 200
+                }
+            else:
+                logger.info(f"[CONTEXT-FILTER] No previous project_mapping found, falling through to normal flow")
+            break  # Only match first pattern
 
     # ========================================================================
     # STEP 0.5: Check for ORDINAL PROJECT REFERENCE (before classification)
@@ -2466,7 +2663,13 @@ What would you like to do?"""
     # HANDLE CONTEXT QUERIES: Answer from conversation history
     if classification.get('action') == 'context_query':
         query_type = classification.get('entities', {}).get('query_type', '')
-        logger.info(f"[CONTEXT] Context query detected: {query_type}")
+        # Support multiple query_types (comma-separated or list)
+        query_types = classification.get('entities', {}).get('query_types', [])
+        if isinstance(query_types, str):
+            query_types = [q.strip() for q in query_types.split(',') if q.strip()]
+        if query_type and query_type not in query_types:
+            query_types.insert(0, query_type)
+        logger.info(f"[CONTEXT] Context query detected: query_type={query_type}, query_types={query_types}")
 
         # Extract project data from conversation history (pass classification for project reference)
         project_data = extract_project_data_from_history(conversation_history, classification)
@@ -2568,15 +2771,26 @@ What would you like to do?"""
                             # Save project_ids AND project_mapping to workflow state for future queries
                             fetched_ids = [str(p.get('id', '')) for p in fetched_projects if p.get('id')]
                             # Build project_mapping for accurate category matching
+                            # Also include projectNumber for Order Number -> Project ID resolution
                             fetched_mapping = {}
                             for p in fetched_projects:
                                 pid = str(p.get('id', ''))
+                                project_number = p.get('projectNumber', '')
                                 if pid:
                                     fetched_mapping[pid] = {
                                         'category': p.get('category', ''),
                                         'address': p.get('address', ''),
-                                        'status': p.get('status', '')
+                                        'status': p.get('status', ''),
+                                        'projectNumber': project_number
                                     }
+                                    # Also map by projectNumber for reverse lookup
+                                    if project_number:
+                                        fetched_mapping[project_number] = {
+                                            'category': p.get('category', ''),
+                                            'address': p.get('address', ''),
+                                            'status': p.get('status', ''),
+                                            'project_id': pid  # Internal project ID
+                                        }
                             if fetched_ids:
                                 state_manager.save_state(session_id, {
                                     'workflow_type': 'project_listing',
@@ -2595,6 +2809,62 @@ What would you like to do?"""
                     # Continue with None project_data - will ask user for context
 
         if project_data:
+            # MULTI-FIELD QUERIES: Handle requests for multiple pieces of information
+            # e.g., "give me technician name and appointment time for project X"
+            if len(query_types) > 1:
+                logger.info(f"[CONTEXT] Multi-field query detected: {query_types}")
+                category = project_data.get('category', 'project')
+                project_id = project_data.get('project_id', '')
+
+                response = f"Here's the information for your **{category}** project"
+                if project_id:
+                    response += f" (#{project_id})"
+                response += ":\n\n"
+
+                for qt in query_types:
+                    if qt == 'technician':
+                        tech_name = project_data.get('technician_name', 'Not assigned yet')
+                        if tech_name and tech_name != 'Not assigned yet':
+                            response += f"**Technician:** {tech_name}\n"
+                        else:
+                            response += "**Technician:** Not yet assigned\n"
+
+                    elif qt == 'appointment_time':
+                        scheduled_date = project_data.get('scheduled_date', '')
+                        scheduled_time = project_data.get('scheduled_time', '')
+                        if scheduled_date:
+                            formatted_date = format_date_natural(scheduled_date)
+                            response += f"**Scheduled Date:** {formatted_date}\n"
+                            if scheduled_time and scheduled_time not in formatted_date:
+                                response += f"**Appointment Time:** {scheduled_time}\n"
+                        else:
+                            response += "**Scheduled:** Not yet scheduled\n"
+
+                    elif qt == 'address':
+                        address = project_data.get('address', '')
+                        if address:
+                            response += f"**Address:** {address}\n"
+
+                    elif qt == 'category':
+                        response += f"**Category:** {category}\n"
+
+                    elif qt == 'status':
+                        status = project_data.get('status', '')
+                        if status:
+                            response += f"**Status:** {status}\n"
+
+                response += "\nIs there anything else you'd like to know?"
+
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': response,
+                    'intent': 'information',
+                    'action': 'context_query',
+                    'agent_name': 'Intelligent Orchestrator (Multi-Field)',
+                    'direct_call': True,
+                    'timing': timing
+                }
+
             if query_type == 'technician':
                 tech_name = project_data.get('technician_name', 'Not assigned yet')
                 tech_id = project_data.get('technician_id', '')
@@ -2652,6 +2922,21 @@ What would you like to do?"""
                     response += f" is **{address}**."
                 else:
                     response = "I don't have the address details in our current conversation. Would you like me to look up your project details?"
+
+            elif query_type == 'category':
+                # CATEGORY QUERY - "what is the category for project X"
+                category = project_data.get('category', '')
+                project_id = project_data.get('project_id', '')
+                status = project_data.get('status', '')
+                project_type = project_data.get('project_type', 'Call Back')
+
+                if category:
+                    response = f"Project #{project_id} is a **{category}** project"
+                    if status:
+                        response += f" with status **{status}**"
+                    response += "."
+                else:
+                    response = f"I couldn't find the category information for project #{project_id}. Would you like me to look up the full project details?"
 
             elif query_type in ['status', 'general', 'update', 'info', 'details', 'happening', 'progress']:
                 # COMPREHENSIVE STATUS HANDLER - "whats happening with my job", "status of my project", etc.
@@ -3099,17 +3384,26 @@ What would you like to do?"""
                 projects = projects_data.get('projects', [])
                 if projects:
                     # Build project_mapping from fetched projects
+                    # IMPORTANT: projectNumber is what users see (Order Number), id is internal
                     fetched_mapping = {}
                     for p in projects:
                         pid = str(p.get('id', ''))
+                        project_number = p.get('projectNumber', '')
                         if pid:
                             fetched_mapping[pid] = {
                                 'category': p.get('category', ''),
                                 'address': p.get('address', ''),
-                                'status': p.get('status', '')
+                                'status': p.get('status', ''),
+                                'projectNumber': project_number  # Order Number for display
                             }
+                            # Also map by projectNumber for reverse lookup (Order Number -> Project ID)
+                            if project_number:
+                                fetched_mapping[project_number] = {
+                                    'category': p.get('category', ''),
+                                    'project_id': pid  # Internal project ID for API calls
+                                }
 
-                    logger.info(f"[CATEGORY-RESOLVE] Fetched {len(fetched_mapping)} projects, searching for '{search_category}'")
+                    logger.info(f"[CATEGORY-RESOLVE] Fetched {len(projects)} projects, searching for '{search_category}'")
 
                     # Now resolve category from fetched projects
                     resolved_project_id = None
@@ -3425,15 +3719,24 @@ What would you like to do?"""
 
                         # Build project_mapping: project_id -> {category, address, status}
                         # This enables weather queries, category-based lookups, and other context-aware features
+                        # IMPORTANT: projectNumber is what users see (Order Number), id is internal
                         fetched_mapping = {}
                         for p in fetched_projects:
                             pid = str(p.get('id', ''))
+                            project_number = p.get('projectNumber', '')
                             if pid:
                                 fetched_mapping[pid] = {
                                     'category': p.get('category', ''),
                                     'address': p.get('address', ''),
-                                    'status': p.get('status', '')
+                                    'status': p.get('status', ''),
+                                    'projectNumber': project_number  # Order Number for display
                                 }
+                                # Also map by projectNumber for reverse lookup (Order Number -> Project ID)
+                                if project_number:
+                                    fetched_mapping[project_number] = {
+                                        'category': p.get('category', ''),
+                                        'project_id': pid  # Internal project ID for API calls
+                                    }
 
                         if fetched_ids:
                             logger.info(f"[ORDINAL] Auto-fetched {len(fetched_ids)} project_ids: {fetched_ids[:5]}...")
@@ -3479,6 +3782,63 @@ What would you like to do?"""
             'client_id': client_id,
             'pf_bearer_token': pf_bearer_token
         })
+
+        # ORDER NUMBER → PROJECT ID RESOLUTION
+        # Users see/say Order Numbers (projectNumber) but API requires internal Project IDs
+        # Order Numbers can be ANY format (e.g., "AI-PRO-100000", "21083_09PF05VD_...", etc.)
+        # Always try to resolve before making Lambda calls that use project_id
+        if 'project_id' in lambda_params and lambda_action != 'list_projects':
+            raw_project_id = str(lambda_params['project_id'])
+            project_mapping = {}
+            if workflow_state:
+                project_mapping = workflow_state.get('project_mapping', {}) or workflow_state.get('context', {}).get('project_mapping', {})
+
+            # Try to resolve from existing mapping first
+            resolved_id = None
+            if project_mapping:
+                resolved_id = find_project_by_partial_id(raw_project_id, project_mapping)
+
+            # If not resolved and raw_project_id doesn't look like a pure numeric internal ID,
+            # auto-fetch projects to build the mapping
+            if not resolved_id and not raw_project_id.isdigit():
+                logger.info(f"[ORDER-RESOLVE] '{raw_project_id}' not found in mapping - auto-fetching projects")
+                try:
+                    list_response = call_lambda_directly('list_projects', {
+                        'customer_id': customer_id,
+                        'client_id': client_id,
+                        'pf_bearer_token': pf_bearer_token
+                    })
+                    list_data = list_response.get('response', {})
+                    list_func = list_data.get('functionResponse', {})
+                    list_body_wrapper = list_func.get('responseBody', {})
+                    list_text = list_body_wrapper.get('TEXT', {})
+                    list_body_str = list_text.get('body', '{}')
+                    if isinstance(list_body_str, str):
+                        list_body = json.loads(list_body_str)
+                    else:
+                        list_body = list_body_str
+
+                    if 'projects' in list_body and isinstance(list_body['projects'], list):
+                        project_mapping = {}  # Fresh mapping
+                        for p in list_body['projects']:
+                            pid = str(p.get('id', ''))
+                            project_number = p.get('projectNumber', '')
+                            if pid:
+                                # Map by internal ID
+                                project_mapping[pid] = {'projectNumber': project_number, 'category': p.get('category', '')}
+                                # Also map by Order Number for reverse lookup
+                                if project_number:
+                                    project_mapping[project_number] = {'project_id': pid, 'category': p.get('category', '')}
+                        logger.info(f"[ORDER-RESOLVE] Auto-fetched {len(list_body['projects'])} projects")
+
+                        # Try resolution again with fresh mapping
+                        resolved_id = find_project_by_partial_id(raw_project_id, project_mapping)
+                except Exception as fetch_err:
+                    logger.warning(f"[ORDER-RESOLVE] Auto-fetch failed: {fetch_err}")
+
+            if resolved_id and resolved_id != raw_project_id:
+                logger.info(f"[ORDER-RESOLVE] Resolved '{raw_project_id}' -> Project ID '{resolved_id}'")
+                lambda_params['project_id'] = resolved_id
 
         # Convert schedule_project to get_available_dates (schedule_project is the classifier action,
         # but the Lambda only understands get_available_dates)
@@ -4312,8 +4672,80 @@ What would you like to do?"""
             decision['update_workflow_state'] = None
 
     else:
-        # Use Sonnet's direct response
-        response_text = decision.get('response_to_user', "How can I help you?")
+        # FALLBACK: If classification says get_project_details and we have a project_id,
+        # try calling the Lambda anyway even if Sonnet said should_call_lambda=False
+        classified_action = classification.get('action', '') if classification else ''
+        classified_project_id = classification.get('entities', {}).get('project_id') if classification else None
+
+        if classified_action == 'get_project_details' and classified_project_id:
+            logger.info(f"[FALLBACK] Sonnet said should_call_lambda=False but classification has get_project_details with project_id={classified_project_id} - trying Lambda anyway")
+
+            try:
+                # First try partial matching against project_mapping if available
+                actual_project_id = classified_project_id
+                if workflow_state:
+                    project_mapping = workflow_state.get('project_mapping', {}) or workflow_state.get('context', {}).get('project_mapping', {})
+                    if project_mapping:
+                        matched_id = find_project_by_partial_id(str(classified_project_id), project_mapping)
+                        if matched_id:
+                            actual_project_id = matched_id
+                            logger.info(f"[FALLBACK] Partial match: {classified_project_id} -> {actual_project_id}")
+
+                fallback_response = call_lambda_directly('get_project_details', {
+                    'project_id': actual_project_id,
+                    'customer_id': customer_id,
+                    'client_id': client_id,
+                    'pf_bearer_token': pf_bearer_token
+                })
+
+                # Extract response
+                fallback_data = fallback_response.get('response', {})
+                fallback_func = fallback_data.get('functionResponse', {})
+                fallback_body_wrapper = fallback_func.get('responseBody', {})
+                fallback_text = fallback_body_wrapper.get('TEXT', {})
+                fallback_body_str = fallback_text.get('body', '{}')
+
+                if isinstance(fallback_body_str, str):
+                    fallback_body = json.loads(fallback_body_str)
+                else:
+                    fallback_body = fallback_body_str
+
+                # Check for errors in response
+                if fallback_body.get('error'):
+                    logger.warning(f"[FALLBACK] Lambda returned error: {fallback_body.get('error')}")
+                    response_text = decision.get('response_to_user', f"I couldn't find project #{classified_project_id}. Would you like me to show your project list?")
+                else:
+                    # Success! Format the response
+                    project = fallback_body.get('project', fallback_body)
+                    category = project.get('category', project.get('Category', 'Unknown'))
+                    status = project.get('status', project.get('Status', ''))
+                    project_type = project.get('projectType', project.get('ProjectType', ''))
+
+                    # Check what info was requested
+                    info_type = classification.get('entities', {}).get('information_type', '')
+
+                    if info_type == 'category':
+                        response_text = f"Project #{actual_project_id} is a **{category}** project"
+                        if status:
+                            response_text += f" with status **{status}**"
+                        response_text += "."
+                    else:
+                        # Generic project details response
+                        response_text = f"**Project #{actual_project_id}**\n\n"
+                        response_text += f"**Category:** {category}\n"
+                        if status:
+                            response_text += f"**Status:** {status}\n"
+                        if project_type:
+                            response_text += f"**Type:** {project_type}\n"
+
+                    logger.info(f"[FALLBACK] Successfully fetched project details for {actual_project_id}")
+
+            except Exception as fallback_err:
+                logger.error(f"[FALLBACK] get_project_details failed: {fallback_err}")
+                response_text = decision.get('response_to_user', "How can I help you?")
+        else:
+            # Use Sonnet's direct response
+            response_text = decision.get('response_to_user', "How can I help you?")
 
     # Step 4: Update workflow state
     if decision.get('update_workflow_state'):

@@ -50,11 +50,12 @@ except ImportError:
 # Configuration
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
 AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
+ORCHESTRATOR_REGION = os.environ.get('ORCHESTRATOR_REGION', AWS_REGION)  # Region where orchestrator runs
 ORCHESTRATOR_LAMBDA = os.environ.get('ORCHESTRATOR_LAMBDA', f'pf-syn-orchestrator-{ENVIRONMENT}')
 TWILIO_NUMBER = os.environ.get('TWILIO_NUMBER', '')  # Set in Lambda env vars
 
-# AWS clients
-lambda_client = boto3.client('lambda', region_name=AWS_REGION)
+# AWS clients - use ORCHESTRATOR_REGION for Lambda calls
+lambda_client = boto3.client('lambda', region_name=ORCHESTRATOR_REGION)
 
 # Session cache (in-memory for Lambda warm starts)
 _session_cache = {}

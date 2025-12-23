@@ -17,6 +17,13 @@ import boto3
 from botocore.config import Config as BotoConfig
 
 from config import get_config
+from config_loader import (
+    get_schedulable_statuses_safe,
+    get_scheduled_statuses_safe,
+    get_all_category_buckets_safe,
+    resolve_status_alias,
+    find_category_bucket_for_keyword,
+)
 
 logger = logging.getLogger()
 _bedrock_runtime_client = None
@@ -68,32 +75,39 @@ INTENT_CATEGORIES = {
 # ENTITY DEFINITIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Project statuses in the system
-ALL_STATUSES = {
-    "New", "Ready To Schedule", "Scheduled", "Tentatively Scheduled",
-    "Completed", "Cancelled", "In Progress", "Pending",
-}
-SCHEDULABLE_STATUSES = {"New", "Ready To Schedule"}
-SCHEDULED_STATUSES = {"Scheduled", "Tentatively Scheduled"}
+# ═══════════════════════════════════════════════════════════════════════════════
+# DYNAMIC STATUS & CATEGORY CONFIG (loaded from S3 via config_loader)
+# ═══════════════════════════════════════════════════════════════════════════════
+# These are now loaded dynamically from S3 config files.
+# The functions below provide backward-compatible access.
 
-# Category buckets (normalized lowercase for matching)
-CATEGORY_BUCKETS = {
-    "kitchen": {
-        "dishwasher", "kitchen sink", "sink", "ovens", "oven",
-        "washer dryer", "washer", "dryer", "electric cooktop", "cooktop",
-        "range", "microwave", "garbage disposal",
-    },
-    "windows": {
-        "storm door", "exterior doors", "exterior door", "entry door",
-        "patio door", "sliding door", "windows", "window", "doors", "door",
-    },
-    "decking": {"decking", "deck", "patio", "pergola", "composite"},
-    "bathroom": {"bathroom", "bath", "toilet", "vanity", "shower"},
-    "flooring": {
-        "flooring", "floor", "hardwood", "carpet", "tile",
-        "laminate", "vinyl", "lvp", "luxury vinyl",
-    },
-}
+def _get_schedulable_statuses():
+    """Get schedulable statuses from external config."""
+    return get_schedulable_statuses_safe()
+
+def _get_scheduled_statuses():
+    """Get scheduled statuses from external config."""
+    return get_scheduled_statuses_safe()
+
+def _get_category_buckets():
+    """Get category buckets from external config."""
+    return get_all_category_buckets_safe()
+
+# Backward-compatible exports (computed on first access)
+# These are kept for imports in other modules
+SCHEDULABLE_STATUSES = None  # Will be populated on first use
+SCHEDULED_STATUSES = None    # Will be populated on first use
+CATEGORY_BUCKETS = None      # Will be populated on first use
+
+def _init_backward_compat():
+    """Initialize backward-compatible module-level variables."""
+    global SCHEDULABLE_STATUSES, SCHEDULED_STATUSES, CATEGORY_BUCKETS
+    if SCHEDULABLE_STATUSES is None:
+        SCHEDULABLE_STATUSES = _get_schedulable_statuses()
+    if SCHEDULED_STATUSES is None:
+        SCHEDULED_STATUSES = _get_scheduled_statuses()
+    if CATEGORY_BUCKETS is None:
+        CATEGORY_BUCKETS = _get_category_buckets()
 
 # Status aliases (user terms → canonical status)
 STATUS_ALIASES = {
@@ -243,17 +257,20 @@ def apply_project_filters(projects: List[Dict[str, Any]], params: Optional[Dict[
     status = params.get("status")
     if status:
         s = _norm(status)
+        schedulable_statuses = _get_schedulable_statuses()
+        scheduled_statuses = _get_scheduled_statuses()
+
         if s == "schedulable":
             out = [
                 p for p in out
-                if _get_field(p, ["Status", "status"]) in SCHEDULABLE_STATUSES
-                or _norm(_get_field(p, ["Status", "status"])) in {_norm(x) for x in SCHEDULABLE_STATUSES}
+                if _get_field(p, ["Status", "status"]) in schedulable_statuses
+                or _norm(_get_field(p, ["Status", "status"])) in {_norm(x) for x in schedulable_statuses}
             ]
         elif s == "scheduled":
             out = [
                 p for p in out
-                if _get_field(p, ["Status", "status"]) in SCHEDULED_STATUSES
-                or _norm(_get_field(p, ["Status", "status"])) in {_norm(x) for x in SCHEDULED_STATUSES}
+                if _get_field(p, ["Status", "status"]) in scheduled_statuses
+                or _norm(_get_field(p, ["Status", "status"])) in {_norm(x) for x in scheduled_statuses}
             ]
         else:
             out = [
@@ -265,18 +282,45 @@ def apply_project_filters(projects: List[Dict[str, Any]], params: Optional[Dict[
     category = params.get("category")
     if category:
         c = _norm(category)
-        if c in CATEGORY_BUCKETS:
-            allowed = CATEGORY_BUCKETS[c]
+        category_buckets = _get_category_buckets()
+
+        # Helper: check if project category matches any keyword in bucket (partial match)
+        def _matches_bucket(proj_category: str, bucket_keywords: set) -> bool:
+            """Check if project category contains any bucket keyword or vice versa."""
+            pc = _norm(proj_category)
+            for kw in bucket_keywords:
+                # Match if keyword is in category OR category is in keyword
+                # e.g., "door" in "exterior doors" OR "exterior door" == "exterior doors" (close enough)
+                if kw in pc or pc in kw:
+                    return True
+            return False
+
+        if c in category_buckets:
+            # Direct bucket name match (e.g., "kitchen", "fencing")
+            allowed = category_buckets[c]
+            logger.info(f"[FILTER] Using bucket '{c}' with {len(allowed)} keywords")
             out = [
                 p for p in out
-                if _norm(_get_field(p, ["Category", "category"])) in allowed
+                if _matches_bucket(_get_field(p, ["Category", "category"]) or "", allowed)
             ]
         else:
-            # Exact match or check if it's in any bucket
-            out = [
-                p for p in out
-                if _norm(_get_field(p, ["Category", "category"])) == c
-            ]
+            # Check if term is a keyword in any bucket (e.g., "fence" → "fencing" bucket)
+            resolved_bucket = find_category_bucket_for_keyword(c)
+            if resolved_bucket and resolved_bucket in category_buckets:
+                allowed = category_buckets[resolved_bucket]
+                logger.info(f"[FILTER] Resolved keyword '{c}' to bucket '{resolved_bucket}' with {len(allowed)} keywords")
+                out = [
+                    p for p in out
+                    if _matches_bucket(_get_field(p, ["Category", "category"]) or "", allowed)
+                ]
+            else:
+                # Fall back to partial match on category value
+                # (e.g., "fence" matches "Fence Installation", "fence repair", etc.)
+                logger.info(f"[FILTER] No bucket match for '{c}', using partial match")
+                out = [
+                    p for p in out
+                    if c in _norm(_get_field(p, ["Category", "category"]) or "")
+                ]
 
     # ---- PROJECT TYPE FILTER ----
     project_type = params.get("projectType")
@@ -286,6 +330,34 @@ def apply_project_filters(projects: List[Dict[str, Any]], params: Optional[Dict[
             p for p in out
             if _norm(_get_field(p, ["Type", "type", "projectType"])) == pt
         ]
+
+    # ---- TECHNICIAN/INSTALLER FILTER ----
+    technician_name = params.get("technician_name")
+    if technician_name:
+        tn = _norm(technician_name)
+        logger.info(f"[FILTER] Filtering by technician_name: '{technician_name}'")
+
+        def _get_installer_name(project: Dict) -> str:
+            """Extract installer/technician name from project."""
+            # Check 'installer' object (from list_projects format)
+            installer = project.get('installer', {})
+            if isinstance(installer, dict):
+                name = installer.get('name', '')
+                if name:
+                    return name
+            # Check 'technician' object (from get_project_details format)
+            technician = project.get('technician', {})
+            if isinstance(technician, dict):
+                name = technician.get('name', '')
+                if name:
+                    return name
+            return ''
+
+        out = [
+            p for p in out
+            if tn in _norm(_get_installer_name(p))
+        ]
+        logger.info(f"[FILTER] After technician filter: {len(out)} projects")
 
     return out
 
@@ -409,7 +481,8 @@ Analyze the user utterance and extract structured information.
 ### Information Request Intents (user wants to VIEW/CHECK data):
 - **Project_List_Request**: User wants to see a LIST of projects
   Triggers: "show my projects", "list jobs", "what projects do I have", "display orders"
-  Parameters: status, category, projectType (optional filters)
+  Parameters: status, category, projectType, technician_name (optional filters)
+  Note: technician_name is for filtering by assigned technician/installer (e.g., "projects assigned to John Demo")
 
 - **Project_Information_Request**: User wants DETAILS about a specific project or category
   Triggers: "details for X", "tell me about X", "what is this X project about", "show me X project"
@@ -621,3 +694,13 @@ def _normalize_params(params: Dict[str, Any]) -> None:
         pt = _norm(params["projectType"])
         if pt in PROJECT_TYPE_ALIASES:
             params["projectType"] = PROJECT_TYPE_ALIASES[pt]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MODULE INITIALIZATION
+# ═══════════════════════════════════════════════════════════════════════════════
+# Initialize backward-compatible module-level variables at import time.
+# This ensures CATEGORY_BUCKETS, SCHEDULED_STATUSES, etc. are populated
+# when other modules import them.
+
+_init_backward_compat()
