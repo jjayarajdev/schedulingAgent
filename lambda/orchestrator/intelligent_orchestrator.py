@@ -7,7 +7,7 @@ Architecture: Hybrid LLM + Deterministic
 
 Key design decisions:
 1. Upstream ProjectForce API does NOT support filtering - we fetch all and post-filter
-2. Post-filters (status, category, projectType) are applied via apply_project_filters()
+2. Post-filters (status, category, projectType, address) are applied via apply_project_filters()
 3. Category buckets map user terms ("kitchen") to actual categories ("Dishwasher", "Ovens")
 4. Workflow state tracks: project_ids, project_mapping, viewed_projects for ordinal resolution
 
@@ -1256,6 +1256,8 @@ IMPORTANT RULES:
    - "projects I can schedule" / "schedulable jobs" -> entities.status = "schedulable" (matches New + Ready To Schedule)
    - "kitchen projects" / "my kitchen jobs" -> entities.category = "kitchen" (bucket: Dishwasher, Ovens, Sink, etc.)
    - "new projects" -> entities.status = "New" (exact match)
+   - "orders at 401 Chicago Avenue" / "projects at Main Street" -> entities.address = "401 Chicago Avenue" or "Main Street"
+   - "how many jobs at Minneapolis" -> entities.address = "Minneapolis"
 9. Handle batch/multiple project references:
    - "first two projects" -> extract project_ids for positions [0, 1] from conversation
    - "first 3 projects" -> extract project_ids for positions [0, 1, 2]
@@ -1591,10 +1593,11 @@ Determine the next step:
        - status: "schedulable" (New, Ready To Schedule), "scheduled" (Scheduled, Tentatively Scheduled), or exact status
        - category: bucket name ("Kitchen", "Windows", "Decking", "Bathroom", "Flooring") or exact category ("Storm Door", "Dishwasher")
        - projectType: "Call Back", "Installation", "Repair", "Measurement"
+       - address: partial address match (e.g., "401 Chicago Avenue", "Main Street", "Minneapolis")
    - For get_weather: need location as "City, State" format (e.g., "Minneapolis, MN") - combine city and state from entities
 
 IMPORTANT - POST-FILTERS vs API PARAMS:
-The upstream ProjectForce API does NOT support filtering. When you specify status/category/projectType in lambda_params,
+The upstream ProjectForce API does NOT support filtering. When you specify status/category/projectType/address in lambda_params,
 these are POST-FILTERS that the orchestrator applies AFTER fetching all projects. This is transparent to you - just include
 the filters and the system will handle the post-filtering automatically.
 
@@ -1740,6 +1743,15 @@ User says "list my scheduled projects" (WITH status filter):
     "lambda_action": "list_projects",
     "lambda_params": {{
         "status": "Scheduled"  // Include status ONLY when user specifies it
+    }}
+}}
+
+User says "how many orders at 401 Chicago Avenue" (WITH address filter):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "list_projects",
+    "lambda_params": {{
+        "address": "401 Chicago Avenue"  // Filter by address when user specifies location
     }}
 }}
 
