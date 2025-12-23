@@ -1590,10 +1590,16 @@ Determine the next step:
    - For reschedule_appointment: need project_id - extract from conversation context if user says "reschedule this" after viewing project details
    - For list_projects: just need customer_id (already available)
      POST-FILTERS (applied after fetching - upstream API does NOT support filtering):
+       INCLUSION filters:
        - status: "schedulable" (New, Ready To Schedule), "scheduled" (Scheduled, Tentatively Scheduled), or exact status
        - category: bucket name ("Kitchen", "Windows", "Decking", "Bathroom", "Flooring") or exact category ("Storm Door", "Dishwasher")
        - projectType: "Call Back", "Installation", "Repair", "Measurement"
        - address: partial address match (e.g., "401 Chicago Avenue", "Main Street", "Minneapolis")
+       EXCLUSION filters (for "except", "but not", "excluding"):
+       - exclude_status: array of statuses to EXCLUDE (e.g., ["Scheduled"])
+       - exclude_category: array of categories to EXCLUDE (e.g., ["Kitchen Sink", "Dishwasher"])
+       - exclude_technician: array of technician names to EXCLUDE (e.g., ["Mildred"])
+       - exclude_address: array of addresses to EXCLUDE (e.g., ["401 Chicago"])
    - For get_weather: need location as "City, State" format (e.g., "Minneapolis, MN") - combine city and state from entities
 
 IMPORTANT - POST-FILTERS vs API PARAMS:
@@ -1745,6 +1751,50 @@ User says "list my scheduled projects" (WITH status filter):
         "status": "Scheduled"  // Include status ONLY when user specifies it
     }}
 }}
+
+User says "show all projects except the scheduled ones" (WITH EXCLUSION filter):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "list_projects",
+    "lambda_params": {{
+        "exclude_status": ["Scheduled"]  // EXCLUDE scheduled projects
+    }}
+}}
+
+User says "list projects but not the kitchen ones" (WITH category EXCLUSION):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "list_projects",
+    "lambda_params": {{
+        "exclude_category": ["Kitchen Sink", "Dishwasher"]  // EXCLUDE kitchen-related categories
+    }}
+}}
+
+User says "show projects excluding Mildred's" (WITH technician EXCLUSION):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "list_projects",
+    "lambda_params": {{
+        "exclude_technician": ["Mildred"]  // EXCLUDE projects assigned to Mildred
+    }}
+}}
+
+User says "projects except at 401 Chicago" (WITH address EXCLUSION):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "list_projects",
+    "lambda_params": {{
+        "exclude_address": ["401 Chicago"]  // EXCLUDE projects at this address
+    }}
+}}
+
+EXCLUSION FILTER RULES (CRITICAL):
+- When user says "except", "but not", "excluding", "other than" -> use exclude_* parameters
+- exclude_status: Array of statuses to EXCLUDE (e.g., ["Scheduled", "Completed"])
+- exclude_category: Array of categories to EXCLUDE (e.g., ["Kitchen Sink", "Dishwasher"])
+- exclude_technician: Array of technician names to EXCLUDE (e.g., ["Mildred"])
+- exclude_address: Array of addresses to EXCLUDE (e.g., ["401 Chicago"])
+- DO NOT use inclusion filters (status, category) when user wants exclusion!
 
 User says "how many orders at 401 Chicago Avenue" (WITH address filter):
 {{
