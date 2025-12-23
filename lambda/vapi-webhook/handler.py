@@ -97,6 +97,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         elif message_type == 'function-call':
             return handle_function_call(message)
 
+        elif message_type == 'tool-calls':
+            # VAPI sends tool-calls for OpenAI-style tool calling
+            return handle_tool_calls(message)
+
         elif message_type == 'end-of-call-report':
             return handle_end_of_call(message)
 
@@ -191,20 +195,64 @@ def handle_function_call(message: Dict) -> Dict:
     Handle function-call: VAPI wants to call a custom function.
 
     This is for VAPI's tool/function calling feature.
+    The main function is 'projectforce_api' which routes to the orchestrator.
     """
     function_call = message.get('functionCall', {})
     function_name = function_call.get('name', 'unknown')
     parameters = function_call.get('parameters', {})
 
+    # Extract call info for authentication
+    call = message.get('call', {})
+    call_id = call.get('id', 'unknown')
+    customer = call.get('customer', {})
+    phone_number = call.get('phoneNumber', {})
+    from_phone = customer.get('number', '')
+    to_phone = phone_number.get('number', '') or TWILIO_NUMBER
+
     logger.info(f"[VAPI] Function call: {function_name}, params={parameters}")
+    logger.info(f"[VAPI] Call context: call_id={call_id}, from={mask_phone(from_phone)}")
 
-    # Handle specific functions
-    if function_name == 'authenticate':
-        # Authentication function
-        from_phone = parameters.get('from_phone', '')
-        to_phone = parameters.get('to_phone', TWILIO_NUMBER)
+    # Handle projectforce_api - the main tool for all project operations
+    if function_name == 'projectforce_api':
+        user_message = parameters.get('message', '')
+        action = parameters.get('action', 'other')
 
+        if not user_message:
+            return create_function_response({
+                "error": "No message provided",
+                "response": "I didn't catch what you needed. Could you please repeat that?"
+            })
+
+        # Authenticate caller
         credentials = authenticate_caller(from_phone, to_phone)
+
+        if not credentials:
+            logger.warning(f"[VAPI] Authentication failed for {mask_phone(from_phone)}")
+            return create_function_response({
+                "error": "Authentication failed",
+                "response": "I couldn't verify your account. Please make sure you're calling from your registered phone number."
+            })
+
+        logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, action={action}")
+
+        # Call orchestrator with the user's message
+        response_text = call_orchestrator(
+            message=user_message,
+            call_id=call_id,
+            credentials=credentials
+        )
+
+        return create_function_response({
+            "success": True,
+            "response": response_text
+        })
+
+    # Handle legacy authenticate function
+    elif function_name == 'authenticate':
+        from_phone_param = parameters.get('from_phone', '') or from_phone
+        to_phone_param = parameters.get('to_phone', TWILIO_NUMBER) or to_phone
+
+        credentials = authenticate_caller(from_phone_param, to_phone_param)
 
         if credentials:
             return create_function_response({
@@ -218,14 +266,108 @@ def handle_function_call(message: Dict) -> Dict:
                 "error": "Authentication failed"
             })
 
-    elif function_name == 'list_projects':
-        # Could add more function handlers here
-        pass
-
     # Default: unknown function
+    logger.warning(f"[VAPI] Unknown function: {function_name}")
     return create_function_response({
-        "error": f"Unknown function: {function_name}"
+        "error": f"Unknown function: {function_name}",
+        "response": "I'm not sure how to help with that. Could you try rephrasing?"
     })
+
+
+def handle_tool_calls(message: Dict) -> Dict:
+    """
+    Handle tool-calls: VAPI sends this for OpenAI-style tool calling.
+
+    The toolCalls array contains the tool calls from the LLM.
+    We process each and return results.
+    """
+    tool_calls = message.get('toolCalls', message.get('toolCallList', []))
+
+    # Extract call info for authentication
+    call = message.get('call', {})
+    call_id = call.get('id', 'unknown')
+    customer = call.get('customer', {})
+    phone_number = call.get('phoneNumber', {})
+    from_phone = customer.get('number', '')
+    to_phone = phone_number.get('number', '') or TWILIO_NUMBER
+
+    logger.info(f"[VAPI] Tool calls received: {len(tool_calls)} calls")
+    logger.info(f"[VAPI] Call context: call_id={call_id}, from={mask_phone(from_phone)}")
+
+    results = []
+
+    for tool_call in tool_calls:
+        tool_call_id = tool_call.get('id', '')
+        function = tool_call.get('function', {})
+        function_name = function.get('name', 'unknown')
+        arguments_str = function.get('arguments', '{}')
+
+        # Parse arguments
+        try:
+            arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+        except json.JSONDecodeError:
+            arguments = {}
+
+        logger.info(f"[VAPI] Tool call: {function_name}, args={arguments}")
+
+        # Handle projectforce_api tool
+        if function_name == 'projectforce_api':
+            user_message = arguments.get('message', '')
+            action = arguments.get('action', 'other')
+
+            if not user_message:
+                results.append({
+                    "toolCallId": tool_call_id,
+                    "result": json.dumps({
+                        "error": "No message provided",
+                        "response": "I didn't catch what you needed. Could you please repeat that?"
+                    })
+                })
+                continue
+
+            # Authenticate caller
+            credentials = authenticate_caller(from_phone, to_phone)
+
+            if not credentials:
+                logger.warning(f"[VAPI] Authentication failed for {mask_phone(from_phone)}")
+                results.append({
+                    "toolCallId": tool_call_id,
+                    "result": json.dumps({
+                        "error": "Authentication failed",
+                        "response": "I couldn't verify your account. Please make sure you're calling from your registered phone number."
+                    })
+                })
+                continue
+
+            logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, action={action}")
+
+            # Call orchestrator
+            response_text = call_orchestrator(
+                message=user_message,
+                call_id=call_id,
+                credentials=credentials
+            )
+
+            results.append({
+                "toolCallId": tool_call_id,
+                "result": json.dumps({
+                    "success": True,
+                    "response": response_text
+                })
+            })
+
+        else:
+            logger.warning(f"[VAPI] Unknown tool: {function_name}")
+            results.append({
+                "toolCallId": tool_call_id,
+                "result": json.dumps({
+                    "error": f"Unknown tool: {function_name}",
+                    "response": "I'm not sure how to help with that."
+                })
+            })
+
+    # Return results in VAPI format
+    return create_response(200, {"results": results})
 
 
 def handle_end_of_call(message: Dict) -> Dict:

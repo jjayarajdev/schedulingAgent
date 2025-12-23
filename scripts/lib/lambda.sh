@@ -13,6 +13,7 @@ LAMBDA_FUNCTION_LIST=(
     "information-actions:lambda/information-actions:information-actions:60:1769"
     "chitchat-actions:lambda/chitchat-actions:chitchat-actions:60:1769"
     "notes-actions:lambda/notes-actions:notes-actions:60:512"
+    "vapi-webhook:lambda/vapi-webhook:vapi-webhook:30:256"
 )
 
 # DynamoDB table BASE names (without prefix/environment)
@@ -124,6 +125,18 @@ get_lambda_env_vars() {
             env_vars="${env_vars},PF_SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
             env_vars="${env_vars},SECRETS_REGION=${SECRETS_REGION:-us-east-2}"
             env_vars="${env_vars},AWS_REGION_NAME=${VOICE_REGION}"
+            env_vars="${env_vars},REGION=${VOICE_REGION}"
+            ;;
+        "vapi-webhook")
+            # Voice region Lambda - VAPI/Twilio voice webhook
+            # Receives calls from VAPI, authenticates via phone-call-login, invokes orchestrator
+            env_vars="ENVIRONMENT=${ENVIRONMENT}"
+            env_vars="${env_vars},ORCHESTRATOR_LAMBDA=${orchestrator_arn}"
+            env_vars="${env_vars},ORCHESTRATOR_REGION=${CORE_REGION}"
+            env_vars="${env_vars},TWILIO_NUMBER=${TWILIO_PHONE_NUMBER:-+12185516488}"
+            env_vars="${env_vars},PF_SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
+            env_vars="${env_vars},SECRETS_REGION=${SECRETS_REGION:-us-east-2}"
+            env_vars="${env_vars},LOG_LEVEL=INFO"
             env_vars="${env_vars},REGION=${VOICE_REGION}"
             ;;
         *)
@@ -363,24 +376,40 @@ deploy_lambda() {
     return 0
 }
 
-# Deploy all core Lambda functions
+# Get deployment region for a Lambda based on its role
+# Voice/SMS Lambdas deploy to VOICE_REGION, others to CORE_REGION
+get_lambda_deploy_region() {
+    local role_base="$1"
+    case "$role_base" in
+        "vapi-webhook"|"lex-fulfillment"|"sms-inbound"|"customer-lookup"|"voice-bedrock-bridge")
+            echo "$VOICE_REGION"
+            ;;
+        *)
+            echo "$CORE_REGION"
+            ;;
+    esac
+}
+
+# Deploy all Lambda functions
 # Core Lambdas deploy to CORE_REGION (us-east-2)
+# Voice/SMS Lambdas deploy to VOICE_REGION (us-east-1)
 deploy_all_lambdas() {
-    log_section "Deploying Core Lambda Functions"
+    log_section "Deploying Lambda Functions"
     print_naming_config
-    log_info "Deploy region: $CORE_REGION"
+    log_info "Core region: $CORE_REGION, Voice region: $VOICE_REGION"
 
     local failed=0
 
     # Deploy DynamoDB tables first (to CORE_REGION)
     deploy_lambda_dynamodb_tables
 
-    # Deploy each Lambda function to CORE_REGION
+    # Deploy each Lambda function to appropriate region
     for entry in "${LAMBDA_FUNCTION_LIST[@]}"; do
         IFS=':' read -r base_name source_dir role_base timeout memory <<< "$entry"
         local func_name=$(lambda_name "$base_name")
         local full_role_name=$(role_name "$role_base")
-        deploy_lambda "$func_name" "$source_dir" "$full_role_name" "$timeout" "$memory" "$role_base" "$CORE_REGION" || ((failed++))
+        local deploy_region=$(get_lambda_deploy_region "$role_base")
+        deploy_lambda "$func_name" "$source_dir" "$full_role_name" "$timeout" "$memory" "$role_base" "$deploy_region" || ((failed++))
     done
 
     if [[ $failed -gt 0 ]]; then
@@ -388,7 +417,7 @@ deploy_all_lambdas() {
         return 1
     fi
 
-    log_info "All core Lambda functions deployed to $CORE_REGION"
+    log_info "All Lambda functions deployed successfully"
     return 0
 }
 
@@ -504,23 +533,24 @@ cleanup_lambda() {
     return 0
 }
 
-# Cleanup all core Lambda functions
+# Cleanup all Lambda functions
 cleanup_all_lambdas() {
-    log_section "Cleaning Up Core Lambda Functions"
+    log_section "Cleaning Up Lambda Functions"
     print_naming_config
 
-    local confirmation_msg="This will delete all core Lambda functions and their IAM roles for ${RESOURCE_PREFIX}-*-${ENVIRONMENT}. Continue?"
+    local confirmation_msg="This will delete all Lambda functions and their IAM roles for ${RESOURCE_PREFIX}-*-${ENVIRONMENT}. Continue?"
     if ! confirm_action "$confirmation_msg"; then
         log_info "Cleanup cancelled"
         return 0
     fi
 
-    # Delete Lambda functions
+    # Delete Lambda functions (from appropriate regions)
     for entry in "${LAMBDA_FUNCTION_LIST[@]}"; do
         IFS=':' read -r base_name source_dir role_base timeout memory <<< "$entry"
         local func_name=$(lambda_name "$base_name")
         local full_role_name=$(role_name "$role_base")
-        cleanup_lambda "$func_name" "$full_role_name"
+        local cleanup_region=$(get_lambda_deploy_region "$role_base")
+        cleanup_lambda "$func_name" "$full_role_name" "$cleanup_region"
     done
 
     # Delete DynamoDB tables
@@ -554,29 +584,30 @@ cleanup_lambda_dynamodb_tables() {
 # =============================================================================
 
 # Validate all Lambda functions
-# Core Lambdas validated in CORE_REGION
+# Validates each Lambda in its appropriate region
 validate_lambdas() {
     log_section "Validating Lambda Functions"
     print_naming_config
-    log_info "Validating in region: $CORE_REGION"
+    log_info "Core region: $CORE_REGION, Voice region: $VOICE_REGION"
 
     local failed=0
 
     for entry in "${LAMBDA_FUNCTION_LIST[@]}"; do
         IFS=':' read -r base_name source_dir role_base timeout memory <<< "$entry"
         local func_name=$(lambda_name "$base_name")
-        if aws lambda get-function --function-name "$func_name" --region "$CORE_REGION" &>/dev/null; then
+        local validate_region=$(get_lambda_deploy_region "$role_base")
+        if aws lambda get-function --function-name "$func_name" --region "$validate_region" &>/dev/null; then
             local state
-            state=$(aws lambda get-function --function-name "$func_name" --region "$CORE_REGION" \
+            state=$(aws lambda get-function --function-name "$func_name" --region "$validate_region" \
                 --query 'Configuration.State' --output text 2>/dev/null)
             if [[ "$state" == "Active" ]]; then
-                log_info "$func_name: Active (${CORE_REGION})"
+                log_info "$func_name: Active (${validate_region})"
             else
                 log_warn "$func_name: $state"
                 ((failed++))
             fi
         else
-            log_error "$func_name: NOT FOUND in $CORE_REGION"
+            log_error "$func_name: NOT FOUND in $validate_region"
             ((failed++))
         fi
     done

@@ -954,7 +954,9 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
             elif status_code == 404:
                 raise ValueError("No time slots available for this date")
             elif status_code == 401:
-                raise ValueError("Authentication failed - token may be expired (after retry)")
+                raise ValueError("SESSION_EXPIRED: Your session has expired. Please log out and log back in to continue.")
+            elif status_code == 403:
+                raise ValueError("SESSION_EXPIRED: Your session has expired. Please log out and log back in to continue.")
             else:
                 raise ValueError(f"Failed to fetch time slots: HTTP {status_code}")
         except requests.RequestException as e:
