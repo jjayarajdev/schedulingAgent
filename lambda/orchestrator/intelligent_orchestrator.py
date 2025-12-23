@@ -1788,13 +1788,21 @@ User says "projects except at 401 Chicago" (WITH address EXCLUSION):
     }}
 }}
 
-EXCLUSION FILTER RULES (CRITICAL):
-- When user says "except", "but not", "excluding", "other than" -> use exclude_* parameters
+EXCLUSION FILTER RULES (CRITICAL - READ CAREFULLY):
+- When user says "except", "but not", "excluding", "other than" -> use ONLY exclude_* parameters
 - exclude_status: Array of statuses to EXCLUDE (e.g., ["Scheduled", "Completed"])
 - exclude_category: Array of categories to EXCLUDE (e.g., ["Kitchen Sink", "Dishwasher"])
 - exclude_technician: Array of technician names to EXCLUDE (e.g., ["Mildred"])
 - exclude_address: Array of addresses to EXCLUDE (e.g., ["401 Chicago"])
-- DO NOT use inclusion filters (status, category) when user wants exclusion!
+
+**NEVER USE BOTH INCLUSION AND EXCLUSION FOR THE SAME FIELD!**
+- WRONG: {"status": "Scheduled", "exclude_status": ["Scheduled"]} -> Results in 0 projects!
+- RIGHT: {"exclude_status": ["Scheduled"]} -> Excludes scheduled, keeps everything else
+
+Examples of correct exclusion-only params:
+- "except scheduled" -> {"exclude_status": ["Scheduled"]} (NO status field!)
+- "but not kitchen" -> {"exclude_category": ["Kitchen"]} (NO category field!)
+- "excluding Mildred" -> {"exclude_technician": ["Mildred"]} (NO technician_name field!)
 
 User says "how many orders at 401 Chicago Avenue" (WITH address filter):
 {{

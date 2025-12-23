@@ -91,18 +91,30 @@ def apply_project_filters(
     out = projects
 
     # ════════════════════════════════════════════════════════════════════════════
-    # INCLUSION FILTERS
+    # CONFLICT RESOLUTION: If both inclusion and exclusion exist, prefer exclusion
+    # ════════════════════════════════════════════════════════════════════════════
+    has_exclude_status = params.get("exclude_status")
+    has_exclude_category = params.get("exclude_category")
+    has_exclude_technician = params.get("exclude_technician")
+    has_exclude_address = params.get("exclude_address")
+
+    # ════════════════════════════════════════════════════════════════════════════
+    # INCLUSION FILTERS (skip if corresponding exclusion exists)
     # ════════════════════════════════════════════════════════════════════════════
 
     # ---- STATUS FILTER ----
     status = params.get("status")
-    if status:
+    if status and not has_exclude_status:  # Skip if exclude_status exists
         out = _apply_status_filter(out, status)
+    elif status and has_exclude_status:
+        logger.warning(f"[FILTER] Skipping status inclusion filter - exclusion takes precedence")
 
     # ---- CATEGORY FILTER ----
     category = params.get("category")
-    if category:
+    if category and not has_exclude_category:  # Skip if exclude_category exists
         out = _apply_category_filter(out, category)
+    elif category and has_exclude_category:
+        logger.warning(f"[FILTER] Skipping category inclusion filter - exclusion takes precedence")
 
     # ---- PROJECT TYPE FILTER ----
     project_type = params.get("projectType")
@@ -111,13 +123,17 @@ def apply_project_filters(
 
     # ---- TECHNICIAN/INSTALLER FILTER ----
     technician_name = params.get("technician_name")
-    if technician_name:
+    if technician_name and not has_exclude_technician:  # Skip if exclude_technician exists
         out = _apply_technician_filter(out, technician_name)
+    elif technician_name and has_exclude_technician:
+        logger.warning(f"[FILTER] Skipping technician inclusion filter - exclusion takes precedence")
 
     # ---- ADDRESS FILTER ----
     address = params.get("address")
-    if address:
+    if address and not has_exclude_address:  # Skip if exclude_address exists
         out = _apply_address_filter(out, address)
+    elif address and has_exclude_address:
+        logger.warning(f"[FILTER] Skipping address inclusion filter - exclusion takes precedence")
 
     # ════════════════════════════════════════════════════════════════════════════
     # EXCLUSION FILTERS (negation support)
