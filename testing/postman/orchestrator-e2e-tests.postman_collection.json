@@ -1,0 +1,1176 @@
+{
+  "info": {
+    "_postman_id": "e2e-orchestrator-tests-v1",
+    "name": "Orchestrator E2E Conversation Tests",
+    "description": "End-to-End Chat Conversation Test Matrix (7 Sets) for QA/UAT testing of the Intelligent Orchestrator",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://your-api-gateway-url.execute-api.us-east-1.amazonaws.com/prod"
+    },
+    {
+      "key": "lambda_url_dev",
+      "value": "https://your-lambda-url.lambda-url.us-east-1.on.aws"
+    },
+    {
+      "key": "lambda_url_prod",
+      "value": "https://your-lambda-url.lambda-url.us-east-2.on.aws"
+    },
+    {
+      "key": "pf_client_id",
+      "value": "1"
+    },
+    {
+      "key": "pf_user_id",
+      "value": "your-user-id"
+    },
+    {
+      "key": "session_id",
+      "value": "test-session-{{$timestamp}}"
+    }
+  ],
+  "item": [
+    {
+      "name": "Set 1 - Explore > Filter > Schedule",
+      "description": "User explores projects, filters by category, and schedules",
+      "item": [
+        {
+          "name": "1.1 Greeting",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Hi\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"{{session_id}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "_postman_previewlanguage": "json",
+          "expected": {
+            "intent": "chitchat",
+            "action": null,
+            "description": "Should return a greeting response"
+          }
+        },
+        {
+          "name": "1.2 List all projects",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"What projects do I have?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"{{session_id}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {},
+            "description": "Should list all projects without filters"
+          }
+        },
+        {
+          "name": "1.3 Filter by category (kitchen)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Show my kitchen jobs\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"{{session_id}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"category": "kitchen"},
+            "description": "Should filter projects by kitchen category bucket"
+          }
+        },
+        {
+          "name": "1.4 Filter by schedulable status",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"What can I schedule?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"{{session_id}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"status": "schedulable"},
+            "description": "Should filter to only schedulable projects (New, Ready To Schedule)"
+          }
+        },
+        {
+          "name": "1.5 Get details by context reference",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Tell me about the dishwasher one\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"{{session_id}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_project_details",
+            "description": "Should resolve 'dishwasher one' from context and return project details"
+          }
+        },
+        {
+          "name": "1.6 Schedule project",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Yes, schedule it\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"{{session_id}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_available_dates",
+            "description": "Should initiate scheduling workflow and show available dates"
+          }
+        },
+        {
+          "name": "1.7 Select date",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Nov 19\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"{{session_id}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_time_slots",
+            "description": "Should show available time slots for Nov 19"
+          }
+        },
+        {
+          "name": "1.8 Confirm time",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"11am works\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"{{session_id}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "schedule_appointment",
+            "description": "Should confirm appointment at 11am"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Set 2 - Eligibility > Narrow > Change Mind",
+      "description": "User checks schedulable projects, narrows by category, changes date selection",
+      "item": [
+        {
+          "name": "2.1 Check schedulable projects",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Do I have any jobs I can schedule?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set2-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"status": "schedulable"},
+            "description": "Should list only schedulable projects"
+          }
+        },
+        {
+          "name": "2.2 Narrow to decking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Just the decking one\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set2-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"status": "schedulable", "category": "decking"},
+            "description": "Should filter to schedulable decking projects"
+          }
+        },
+        {
+          "name": "2.3 Book it",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Yes, book it\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set2-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_available_dates",
+            "description": "Should initiate scheduling and show dates"
+          }
+        },
+        {
+          "name": "2.4 Select first date",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"The first one\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set2-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_time_slots",
+            "description": "Should resolve 'first one' to first available date"
+          }
+        },
+        {
+          "name": "2.5 Change to second date",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Actually, can we do the second date?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set2-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_time_slots",
+            "description": "Should switch to second date and show time slots"
+          }
+        },
+        {
+          "name": "2.6 Select morning",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Morning is fine\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set2-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "schedule_appointment",
+            "description": "Should infer morning time slot and confirm"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Set 3 - Review > Reschedule > Cancel",
+      "description": "User reviews calendar, reschedules one project, cancels another",
+      "item": [
+        {
+          "name": "3.1 Check calendar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"What's on my calendar?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set3-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"status": "scheduled"},
+            "description": "Should list scheduled projects"
+          }
+        },
+        {
+          "name": "3.2 Get washer dryer details",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Tell me about the washer dryer job\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set3-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_project_details",
+            "description": "Should return details for washer dryer project"
+          }
+        },
+        {
+          "name": "3.3 Request reschedule",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"I need to reschedule\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set3-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_rescheduler_slots",
+            "description": "Should initiate reschedule workflow"
+          }
+        },
+        {
+          "name": "3.4 Select Nov 22",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Nov 22\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set3-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_time_slots",
+            "description": "Should show time slots for Nov 22"
+          }
+        },
+        {
+          "name": "3.5 Select 3pm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"3pm\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set3-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "reschedule_appointment",
+            "description": "Should confirm reschedule to 3pm"
+          }
+        },
+        {
+          "name": "3.6 Cancel different project",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Actually cancel the exterior doors one\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set3-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "cancel_appointment",
+            "description": "Should resolve 'exterior doors one' and cancel that appointment"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Set 4 - Filter > Drill Down > Cancel",
+      "description": "User lists jobs, filters to scheduled, drills into details, cancels",
+      "item": [
+        {
+          "name": "4.1 List all jobs",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"What jobs do I have?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set4-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "description": "Should list all projects"
+          }
+        },
+        {
+          "name": "4.2 Filter to scheduled",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Show only the scheduled ones\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set4-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"status": "scheduled"},
+            "description": "Should filter to scheduled projects only"
+          }
+        },
+        {
+          "name": "4.3 Get storm door details",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Tell me about the storm door job\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set4-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_project_details",
+            "description": "Should return storm door project details"
+          }
+        },
+        {
+          "name": "4.4 Cancel it",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Cancel it\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set4-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "cancel_appointment",
+            "description": "Should initiate cancellation for storm door project"
+          }
+        },
+        {
+          "name": "4.5 Confirm cancellation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Yes, go ahead\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set4-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "cancel_appointment",
+            "description": "Should confirm and execute cancellation"
+          }
+        },
+        {
+          "name": "4.6 Check remaining scheduled",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Anything else scheduled?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set4-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"status": "scheduled"},
+            "description": "Should list remaining scheduled projects"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Set 5 - Eligibility > Category > Exit Gracefully",
+      "description": "User checks schedulable, filters to kitchen, decides not to schedule",
+      "item": [
+        {
+          "name": "5.1 Check schedulable now",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Anything I can schedule right now?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set5-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"status": "schedulable"},
+            "description": "Should list schedulable projects"
+          }
+        },
+        {
+          "name": "5.2 Filter to kitchen",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Just kitchen stuff\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set5-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"status": "schedulable", "category": "kitchen"},
+            "description": "Should filter to schedulable kitchen projects"
+          }
+        },
+        {
+          "name": "5.3 Ask count",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"How many are there?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set5-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "information",
+            "description": "Should reuse last result set and return count"
+          }
+        },
+        {
+          "name": "5.4 Get first one details",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Tell me about the first one\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set5-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_project_details",
+            "description": "Should resolve 'first one' from context"
+          }
+        },
+        {
+          "name": "5.5 Decline scheduling",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Not now\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set5-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "chitchat",
+            "description": "Should exit workflow gracefully"
+          }
+        },
+        {
+          "name": "5.6 End conversation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"I'll come back later\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set5-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "chitchat",
+            "description": "Should acknowledge and end"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Set 6 - Review > Reschedule with Corrections",
+      "description": "User reviews calendar, reschedules with date and time corrections",
+      "item": [
+        {
+          "name": "6.1 Check calendar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"What's on my calendar?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set6-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"status": "scheduled"},
+            "description": "Should list scheduled projects"
+          }
+        },
+        {
+          "name": "6.2 Filter to kitchen",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Show only kitchen jobs\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set6-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"status": "scheduled", "category": "kitchen"},
+            "description": "Should filter to scheduled kitchen projects"
+          }
+        },
+        {
+          "name": "6.3 Reschedule second one",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"The second one needs to move\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set6-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_rescheduler_slots",
+            "description": "Should resolve 'second one' and initiate reschedule"
+          }
+        },
+        {
+          "name": "6.4 Ask for available dates",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"What dates are available?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set6-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_rescheduler_slots",
+            "description": "Should show available reschedule dates"
+          }
+        },
+        {
+          "name": "6.5 Select earlier date",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"The earlier date\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set6-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_time_slots",
+            "description": "Should resolve 'earlier date' and show time slots"
+          }
+        },
+        {
+          "name": "6.6 Select afternoon",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Afternoon\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set6-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "description": "Should select afternoon time slot"
+          }
+        },
+        {
+          "name": "6.7 Change to morning",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Actually morning is better\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set6-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "description": "Should switch to morning time slot"
+          }
+        },
+        {
+          "name": "6.8 Confirm reschedule",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Yes, book it\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set6-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "reschedule_appointment",
+            "description": "Should confirm and execute reschedule"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Set 7 - Browse > Weather > Decide > Schedule",
+      "description": "User browses decking projects, checks weather, then schedules",
+      "item": [
+        {
+          "name": "7.1 Show decking projects",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Show my decking projects\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set7-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"category": "decking"},
+            "description": "Should list decking projects"
+          }
+        },
+        {
+          "name": "7.2 Check which are schedulable",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Any of these ready to schedule?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set7-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"status": "schedulable"},
+            "description": "Should filter to schedulable from previous decking results"
+          }
+        },
+        {
+          "name": "7.3 Check weather",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"What's the weather next week?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set7-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "information",
+            "action": "get_weather",
+            "description": "Should fetch weather forecast for project location"
+          }
+        },
+        {
+          "name": "7.4 Schedule deck job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Ok then schedule the deck job\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set7-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_available_dates",
+            "description": "Should resolve 'deck job' from context and initiate scheduling"
+          }
+        },
+        {
+          "name": "7.5 Ask for dates",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"What dates do you have?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set7-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_available_dates",
+            "description": "Should show available dates"
+          }
+        },
+        {
+          "name": "7.6 Select later date",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"The later one\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set7-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_time_slots",
+            "description": "Should resolve 'later one' to last available date"
+          }
+        },
+        {
+          "name": "7.7 Select 10am",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"10 am\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set7-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "schedule_appointment",
+            "description": "Should confirm appointment at 10am"
+          }
+        },
+        {
+          "name": "7.8 Complete",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Done\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"set7-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "chitchat",
+            "description": "Should acknowledge completion"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bug Fix Tests - v1.1.9",
+      "description": "Tests for specific bug fixes in v1.1.9",
+      "item": [
+        {
+          "name": "Order Number Resolution - AI-PRO format",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Please provide the full details for project number AI-PRO-1000010\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"bugfix-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_project_details",
+            "description": "Should resolve AI-PRO-1000010 Order Number to internal Project ID"
+          }
+        },
+        {
+          "name": "Order Number Resolution - Underscore format",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"What is the category for project 21083_09PF05VD_1762166550719_1\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"bugfix-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_project_details",
+            "description": "Should resolve underscore-format Order Number to internal Project ID"
+          }
+        },
+        {
+          "name": "Technician Filtering",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Can you show me all the projects assigned to John Demo technician\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"bugfix-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"technician_name": "John Demo"},
+            "description": "Should filter projects by technician name"
+          }
+        },
+        {
+          "name": "Multi-field Query - Address and Technician",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Can you retrieve the installation address and technician info for AI-PRO-1000010?\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"bugfix-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "get_project_details",
+            "description": "Should resolve Order Number and return both address and technician info"
+          }
+        },
+        {
+          "name": "Category Partial Match - Door",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Show my door projects\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"bugfix-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"category": "door"},
+            "description": "Should match 'door' to 'Exterior Doors', 'Storm Door', etc."
+          }
+        },
+        {
+          "name": "Category Partial Match - Fence",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcript\": \"Show my fence projects\",\n  \"pf_client_id\": \"{{pf_client_id}}\",\n  \"pf_user_id\": \"{{pf_user_id}}\",\n  \"session_id\": \"bugfix-{{$timestamp}}\"\n}"
+            },
+            "url": "{{lambda_url_dev}}"
+          },
+          "response": [],
+          "expected": {
+            "intent": "scheduling",
+            "action": "list_projects",
+            "params": {"category": "fence"},
+            "description": "Should match 'fence' to 'Fence Installation', 'Fencing', etc."
+          }
+        }
+      ]
+    }
+  ]
+}
