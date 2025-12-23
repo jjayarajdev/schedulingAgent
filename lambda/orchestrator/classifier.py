@@ -371,16 +371,26 @@ def apply_project_filters(projects: List[Dict[str, Any]], params: Optional[Dict[
             if isinstance(addr_field, str):
                 return addr_field
             if isinstance(addr_field, dict):
-                # Handle object format: {street, city, state, zip}
+                # Handle object format - check all common field names
                 parts = [
                     addr_field.get('street', ''),
-                    addr_field.get('address', ''),  # Some APIs use 'address' inside object
+                    addr_field.get('address', ''),
+                    addr_field.get('address1', ''),
+                    addr_field.get('addressLine1', ''),
+                    addr_field.get('line1', ''),
                     addr_field.get('city', ''),
                     addr_field.get('state', ''),
                     addr_field.get('zip', ''),
+                    addr_field.get('zipCode', ''),
+                    addr_field.get('postalCode', ''),
                 ]
                 return ' '.join(p for p in parts if p)
             return ''
+
+        # Debug: Log first project's address to see format
+        if out:
+            sample_addr = out[0].get('address', out[0].get('Address', 'NO_ADDRESS_FIELD'))
+            logger.info(f"[FILTER] Sample address format: {type(sample_addr).__name__} = {sample_addr}")
 
         out = [
             p for p in out
