@@ -359,6 +359,35 @@ def apply_project_filters(projects: List[Dict[str, Any]], params: Optional[Dict[
         ]
         logger.info(f"[FILTER] After technician filter: {len(out)} projects")
 
+    # ---- ADDRESS FILTER ----
+    address = params.get("address")
+    if address:
+        addr = _norm(address)
+        logger.info(f"[FILTER] Filtering by address: '{address}'")
+
+        def _get_address_string(project: Dict) -> str:
+            """Extract address as searchable string from project."""
+            addr_field = project.get('address', project.get('Address', ''))
+            if isinstance(addr_field, str):
+                return addr_field
+            if isinstance(addr_field, dict):
+                # Handle object format: {street, city, state, zip}
+                parts = [
+                    addr_field.get('street', ''),
+                    addr_field.get('address', ''),  # Some APIs use 'address' inside object
+                    addr_field.get('city', ''),
+                    addr_field.get('state', ''),
+                    addr_field.get('zip', ''),
+                ]
+                return ' '.join(p for p in parts if p)
+            return ''
+
+        out = [
+            p for p in out
+            if addr in _norm(_get_address_string(p))
+        ]
+        logger.info(f"[FILTER] After address filter: {len(out)} projects")
+
     return out
 
 
@@ -481,8 +510,10 @@ Analyze the user utterance and extract structured information.
 ### Information Request Intents (user wants to VIEW/CHECK data):
 - **Project_List_Request**: User wants to see a LIST of projects
   Triggers: "show my projects", "list jobs", "what projects do I have", "display orders"
-  Parameters: status, category, projectType, technician_name (optional filters)
-  Note: technician_name is for filtering by assigned technician/installer (e.g., "projects assigned to John Demo")
+  Parameters: status, category, projectType, technician_name, address (optional filters)
+  Notes:
+    - technician_name: filter by assigned technician/installer (e.g., "projects assigned to John")
+    - address: filter by installation address (e.g., "projects at 401 Chicago Avenue", "orders at Main Street")
 
 - **Project_Information_Request**: User wants DETAILS about a specific project or category
   Triggers: "details for X", "tell me about X", "what is this X project about", "show me X project"

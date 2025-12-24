@@ -1696,7 +1696,7 @@ def route_request(
                 response_body = response_body_str
 
             # POST-FILTER PROJECTS: Apply semantic filters since upstream API doesn't filter
-            # merged_params may contain status, category, projectType from classification
+            # merged_params may contain status, category, projectType, address from classification
             if action == 'list_projects' and 'projects' in response_body and isinstance(response_body['projects'], list):
                 original_count = len(response_body['projects'])
                 response_body['projects'] = apply_project_filters(response_body['projects'], merged_params)
