@@ -563,6 +563,8 @@ Analyze the user utterance and extract structured information.
 
 ### project_id:
 - Extract explicit IDs: "project 123" → "123"
+- Extract Order Numbers EXACTLY as written: "AI-PRO-1000010" → "AI-PRO-1000010" (preserve full format including prefix)
+- For Order Numbers like AI-PRO-XXXXXX, extract the COMPLETE string, not just the numbers
 - Resolve ordinals from context: "2nd project" → use ID from history
 - If ordinal cannot be resolved, set project_id: null
 

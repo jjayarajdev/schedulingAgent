@@ -360,18 +360,35 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
         message_lower = message.lower()
 
         # 1. Check for explicit project_id mention
-        project_patterns = [
-            r'project\s*#?\s*(\d{6,8})',  # "project #7751746" or "project 7751746"
-            r'#(\d{6,8})',                 # "#7751746"
-            r'\b(\d{7})\b',                # standalone 7-digit number (common project ID format)
-        ]
+        # First check for Order Number formats (AI-PRO-XXXXXX, etc.)
+        order_number_pattern = r'(AI-PRO-\d{6,8})'  # "AI-PRO-100000", "AI-PRO-1000010"
+        order_match = re.search(order_number_pattern, message, re.IGNORECASE)
 
         message_project_id = None
-        for pattern in project_patterns:
-            match = re.search(pattern, message_lower)
-            if match:
-                message_project_id = match.group(1)
-                break
+        message_order_number = None
+
+        if order_match:
+            message_order_number = order_match.group(1).upper()
+            logger.info(f"[CONTINUATION] Found Order Number in message: {message_order_number}")
+            # Try to resolve Order Number to internal project_id using project_mapping
+            if project_mapping and message_order_number in project_mapping:
+                info = project_mapping[message_order_number]
+                message_project_id = info.get('project_id')
+                logger.info(f"[CONTINUATION] Resolved Order Number '{message_order_number}' to project_id '{message_project_id}'")
+
+        # If no Order Number found, try numeric patterns for internal IDs
+        if not message_project_id and not message_order_number:
+            project_patterns = [
+                r'project\s*#?\s*(\d{6,8})',  # "project #7751746" or "project 7751746"
+                r'#(\d{6,8})',                 # "#7751746"
+                r'\b(\d{7,8})\b',              # standalone 7-8 digit number (common project ID format)
+            ]
+
+            for pattern in project_patterns:
+                match = re.search(pattern, message_lower)
+                if match:
+                    message_project_id = match.group(1)
+                    break
 
         # 1b. Check for PARTIAL ID references like "ending in 717", "ending 717"
         if not message_project_id:
