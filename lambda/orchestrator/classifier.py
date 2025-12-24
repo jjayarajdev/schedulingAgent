@@ -562,9 +562,13 @@ Analyze the user utterance and extract structured information.
 ## PARAMETER EXTRACTION
 
 ### project_id:
-- Extract explicit IDs: "project 123" → "123"
-- Extract Order Numbers EXACTLY as written: "AI-PRO-1000010" → "AI-PRO-1000010" (preserve full format including prefix)
-- For Order Numbers like AI-PRO-XXXXXX, extract the COMPLETE string, not just the numbers
+- Extract project references EXACTLY as written by the user (preserve complete format)
+- Project IDs can be ANY format: numeric ("90000087"), alphanumeric ("AI-PRO-1000010"), or complex ("21083_09PF05VD_123")
+- Examples:
+  * "AI-PRO-1000010 status" → project_id: "AI-PRO-1000010"
+  * "project 90000087" → project_id: "90000087"
+  * "what about 21083_09PF05VD_123" → project_id: "21083_09PF05VD_123"
+- NEVER strip prefixes or modify the ID format - extract it exactly as the user wrote it
 - Resolve ordinals from context: "2nd project" → use ID from history
 - If ordinal cannot be resolved, set project_id: null
 

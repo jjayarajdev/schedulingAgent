@@ -19,7 +19,7 @@ import logging
 import re
 import time
 import boto3
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from botocore.config import Config as BotoConfig
 
 from config import get_config
@@ -126,6 +126,74 @@ def find_project_by_partial_id(search_id: str, project_mapping: Dict[str, Any]) 
                 resolved = info.get('project_id', pid)
                 logger.info(f"[PARTIAL-MATCH] Numeric match: '{search_id}' -> '{pid}' -> project_id '{resolved}'")
                 return resolved
+
+    return None
+
+
+def find_project_reference_in_message(message: str, project_mapping: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+    """
+    Find any project reference in the message by matching against known project IDs/numbers.
+
+    This is format-agnostic - works with ANY project ID format (AI-PRO-XXXXXX,
+    numeric IDs, alphanumeric codes, etc.) by using the project_mapping as source of truth.
+
+    Args:
+        message: User's message
+        project_mapping: Dict of project_id/projectNumber -> project_info
+
+    Returns:
+        Tuple of (matched_reference, resolved_project_id) or None if no match
+    """
+    if not message or not project_mapping:
+        return None
+
+    # Tokenize message - extract potential ID-like tokens (alphanumeric with hyphens/underscores)
+    # This captures: "AI-PRO-1000010", "90000087", "21083_09PF05VD_123", etc.
+    tokens = re.findall(r'[A-Za-z0-9][\w-]*[A-Za-z0-9]|[A-Za-z0-9]+', message)
+
+    # Filter to tokens that look like IDs (at least 3 chars, contains digit)
+    potential_ids = [t for t in tokens if len(t) >= 3 and any(c.isdigit() for c in t)]
+
+    logger.debug(f"[PROJECT-REF] Potential ID tokens from message: {potential_ids}")
+
+    for token in potential_ids:
+        token_lower = token.lower()
+
+        # 1. Exact match (case-insensitive) against project_mapping keys
+        for known_id in project_mapping.keys():
+            if token_lower == known_id.lower():
+                info = project_mapping[known_id]
+                resolved_id = info.get('project_id', known_id)
+                logger.info(f"[PROJECT-REF] Exact match: '{token}' -> '{known_id}' -> project_id '{resolved_id}'")
+                return (known_id, resolved_id)
+
+        # 2. Token is contained in a known ID (e.g., "1000010" in "AI-PRO-1000010")
+        for known_id in project_mapping.keys():
+            if token_lower in known_id.lower():
+                info = project_mapping[known_id]
+                resolved_id = info.get('project_id', known_id)
+                logger.info(f"[PROJECT-REF] Contains match: '{token}' in '{known_id}' -> project_id '{resolved_id}'")
+                return (known_id, resolved_id)
+
+        # 3. Known ID is contained in token (e.g., "AI-PRO-1000010" contains "1000010")
+        for known_id in project_mapping.keys():
+            if known_id.lower() in token_lower:
+                info = project_mapping[known_id]
+                resolved_id = info.get('project_id', known_id)
+                logger.info(f"[PROJECT-REF] Reverse contains: '{known_id}' in '{token}' -> project_id '{resolved_id}'")
+                return (known_id, resolved_id)
+
+    # 4. Numeric partial match - extract digits and try matching
+    for token in potential_ids:
+        token_digits = re.sub(r'[^0-9]', '', token)
+        if len(token_digits) >= 5:  # Need at least 5 digits for meaningful match
+            for known_id in project_mapping.keys():
+                known_digits = re.sub(r'[^0-9]', '', known_id)
+                if token_digits in known_digits or known_digits in token_digits:
+                    info = project_mapping[known_id]
+                    resolved_id = info.get('project_id', known_id)
+                    logger.info(f"[PROJECT-REF] Numeric match: '{token}' ({token_digits}) ~ '{known_id}' ({known_digits}) -> project_id '{resolved_id}'")
+                    return (known_id, resolved_id)
 
     return None
 
@@ -356,47 +424,23 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
     project_mapping = workflow_state.get('project_mapping', {}) or context.get('project_mapping', {})
 
     if context_project_id:
-        import re
         message_lower = message.lower()
-
-        # 1. Check for explicit project_id mention
-        # First check for Order Number formats (AI-PRO-XXXXXX, etc.)
-        order_number_pattern = r'(AI-PRO-\d{6,8})'  # "AI-PRO-100000", "AI-PRO-1000010"
-        order_match = re.search(order_number_pattern, message, re.IGNORECASE)
-
         message_project_id = None
-        message_order_number = None
 
-        if order_match:
-            message_order_number = order_match.group(1).upper()
-            logger.info(f"[CONTINUATION] Found Order Number in message: {message_order_number}")
-            # Try to resolve Order Number to internal project_id using project_mapping
-            if project_mapping and message_order_number in project_mapping:
-                info = project_mapping[message_order_number]
-                message_project_id = info.get('project_id')
-                logger.info(f"[CONTINUATION] Resolved Order Number '{message_order_number}' to project_id '{message_project_id}'")
+        # 1. Use intelligent project reference matching (format-agnostic)
+        # This works with ANY format: AI-PRO-XXXXXX, numeric IDs, alphanumeric codes, etc.
+        if project_mapping:
+            ref_match = find_project_reference_in_message(message, project_mapping)
+            if ref_match:
+                matched_ref, message_project_id = ref_match
+                logger.info(f"[CONTINUATION] Found project reference '{matched_ref}' -> project_id '{message_project_id}'")
 
-        # If no Order Number found, try numeric patterns for internal IDs
-        if not message_project_id and not message_order_number:
-            project_patterns = [
-                r'project\s*#?\s*(\d{6,8})',  # "project #7751746" or "project 7751746"
-                r'#(\d{6,8})',                 # "#7751746"
-                r'\b(\d{7,8})\b',              # standalone 7-8 digit number (common project ID format)
-            ]
-
-            for pattern in project_patterns:
-                match = re.search(pattern, message_lower)
-                if match:
-                    message_project_id = match.group(1)
-                    break
-
-        # 1b. Check for PARTIAL ID references like "ending in 717", "ending 717"
+        # 2. Fallback: Check for PARTIAL ID references like "ending in 717", "ending 717"
         if not message_project_id:
             partial_id = extract_partial_id_reference(message)
             if partial_id:
                 # Try to resolve partial ID using workflow state
                 state_manager = get_state_manager()
-                # We need session_id - get it from workflow_state if available
                 session_id = workflow_state.get('session_id')
                 if session_id:
                     matched_project = state_manager.find_project_by_partial_id(session_id, partial_id)
@@ -409,7 +453,7 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
             logger.info(f"[CONTINUATION] CONTEXT SWITCH DETECTED (by ID): User mentioned project {message_project_id}, but workflow has project {context_project_id}. Clearing workflow state.")
             return {'context_switch': True, 'clear_state': True}
 
-        # 2. Check for category-based context switch (e.g., "show the dishwasher project")
+        # 3. Check for category-based context switch (e.g., "show the dishwasher project")
         # Only check if user didn't mention a specific project_id
         if not message_project_id and context_category and project_mapping:
             # Common project categories to detect
