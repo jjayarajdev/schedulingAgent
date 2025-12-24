@@ -14,7 +14,7 @@ from config import get_config
 from classifier import classify_intent_and_action, apply_project_filters
 from context_extraction import extract_location_from_history, extract_pronoun_reference
 from context_resolver import resolve_context_references
-from voice_formatter import format_for_voice
+from voice_formatter import format_for_voice, format_voice_with_context, format_projects_summary_for_voice
 
 logger = logging.getLogger()
 
@@ -334,7 +334,7 @@ Skip the JSON - that'll show separately."""
         return fallback_messages.get(action, "Here's what I found:")
 
 
-def format_lambda_response(action: str, response_body: Dict[str, Any], user_message: str = "", channel: str = 'chat') -> str:
+def format_lambda_response(action: str, response_body: Dict[str, Any], user_message: str = "", channel: str = 'chat', voice_context: Optional[Dict] = None) -> str:
     """
     Format Lambda response with conversational text + structured JSON
 
@@ -343,6 +343,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
         response_body: The Lambda response body (parsed JSON)
         user_message: Original user message for context
         channel: 'chat' or 'voice' - voice gets concise responses without JSON
+        voice_context: Optional enriched context for voice channel (proactive reminders, etc.)
 
     Returns:
         Formatted response with conversational text and structured JSON (chat)
@@ -363,8 +364,12 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
             # Generate conversational response using Claude
             conversational = generate_conversational_response(action, user_message, result, channel)
 
-            # For voice, return only conversational text (no JSON)
+            # For voice, apply context-aware formatting if available
             if channel == 'voice':
+                if voice_context:
+                    # Use intelligent summary with context (proactive reminders, status grouping)
+                    logger.info("[VOICE_CTX] Applying context-aware formatting for list_projects")
+                    return format_voice_with_context(conversational, action, voice_context)
                 return conversational
 
             # Return both conversational and structured

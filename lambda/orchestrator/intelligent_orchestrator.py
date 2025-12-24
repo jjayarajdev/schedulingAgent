@@ -37,6 +37,13 @@ from weather_aware_scheduling import (
     find_better_weather_dates,
     add_weather_indicators_to_dates
 )
+from response_context import (
+    build_voice_context,
+    save_action_to_context,
+    cache_upcoming_appointments,
+    get_filler_for_action,
+    ConversationState
+)
 
 logger = logging.getLogger()
 
@@ -1962,6 +1969,17 @@ def orchestrate_intelligent_workflow(
 
                 response_text = f"All set! Your {project_name} appointment is confirmed for {date_str} at {time_str}. Is there anything else I can help you with?"
 
+                # VOICE ENHANCEMENT: Save action to context for intelligent responses
+                if channel == 'voice':
+                    save_action_to_context(
+                        state_manager, session_id,
+                        action='confirm_appointment',
+                        result='success',
+                        project_id=pending.get('preview', {}).get('project_id'),
+                        project_name=project_name,
+                        extra_context={'scheduled_date': date_str, 'scheduled_time': time_str}
+                    )
+
                 timing['total'] = time.time() - start_time
                 return {
                     'response': response_text,
@@ -2267,6 +2285,21 @@ def orchestrate_intelligent_workflow(
 
             # Update workflow state
             if next_stage == 'complete':
+                # VOICE ENHANCEMENT: Save action to context before clearing state
+                if channel == 'voice' and action == 'confirm_appointment':
+                    project_name = preserve_context.get('category', preserve_context.get('project_name', 'project'))
+                    save_action_to_context(
+                        state_manager, session_id,
+                        action='confirm_appointment',
+                        result='success',
+                        project_id=params.get('project_id', preserve_context.get('project_id')),
+                        project_name=project_name,
+                        extra_context={
+                            'scheduled_date': params.get('date', preserve_context.get('date')),
+                            'scheduled_time': params.get('time', preserve_context.get('time'))
+                        }
+                    )
+
                 state_manager.clear_state(session_id)
                 logger.info("[CONTINUATION] Workflow complete, state cleared")
             else:
@@ -3447,6 +3480,17 @@ What would you like to do?"""
                     # Format response
                     formatted_cancel = format_lambda_response('cancel_appointment', cancel_body, message, channel)
 
+                    # VOICE ENHANCEMENT: Save action to context before clearing state
+                    if channel == 'voice':
+                        project_name = cancel_context.get('category', 'project')
+                        save_action_to_context(
+                            state_manager, session_id,
+                            action='cancel_appointment',
+                            result='success',
+                            project_id=project_id,
+                            project_name=project_name
+                        )
+
                     # Clear workflow state
                     state_manager.clear_state(session_id)
                     logger.info("[CANCEL] Cancellation complete, workflow state cleared")
@@ -4585,7 +4629,20 @@ What would you like to do?"""
                         logger.warning(f"No location found in workflow state for weather check")
 
             # Format response for user (with conversational wrapper from Claude)
-            formatted_response = format_lambda_response(lambda_action, response_body, message, channel)
+            # VOICE ENHANCEMENT: Build voice context for intelligent formatting
+            voice_ctx = None
+            if channel == 'voice':
+                try:
+                    voice_ctx = build_voice_context(
+                        session_id=session_id,
+                        workflow_state=workflow_state,
+                        current_action=lambda_action,
+                        projects=response_body.get('projects') if lambda_action == 'list_projects' else None
+                    )
+                except Exception as ctx_err:
+                    logger.warning(f"[VOICE_CTX] Failed to build voice context (non-fatal): {ctx_err}")
+
+            formatted_response = format_lambda_response(lambda_action, response_body, message, channel, voice_context=voice_ctx)
 
             response_text = formatted_response
 
@@ -4721,6 +4778,10 @@ What would you like to do?"""
                             }
                         }
                         logger.info(f"[PROJECTS] Created workflow state with project_ids and project_mapping")
+
+                    # VOICE ENHANCEMENT: Cache upcoming appointments for proactive highlights
+                    if channel == 'voice':
+                        cache_upcoming_appointments(state_manager, session_id, projects_list)
 
             # SAVE CURRENT PROJECT_ID: When viewing a single project, save its ID for follow-up queries
             # This enables "details for ovens project" -> "what's the weather" to work correctly

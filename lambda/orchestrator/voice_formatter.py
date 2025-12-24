@@ -576,3 +576,143 @@ def format_response_for_channel(
     else:
         logger.info("Text mode - keeping original")
         return response_text
+
+
+# ============================================================================
+# CONTEXT-AWARE VOICE FORMATTING (Voice Enhancement)
+# ============================================================================
+
+def format_voice_with_context(
+    response_text: str,
+    action: str,
+    voice_context: Optional[Dict] = None,
+    use_ssml: bool = True
+) -> str:
+    """
+    Format response with conversation context awareness.
+
+    VOICE-ONLY: This function applies intelligent context-aware formatting
+    based on what just happened in the conversation.
+
+    Context-Aware Rules:
+    1. POST_ACTION: After scheduling, lead with celebration, suggest next action
+    2. REMINDER: If appointment is today/tomorrow, mention it first
+    3. BRIEF: If we already told them about projects, don't repeat full list
+    4. RETURNING: Welcome back, reference last interaction
+
+    Args:
+        response_text: Raw response from Lambda
+        action: The action that was just performed
+        voice_context: Enriched context from build_voice_context()
+        use_ssml: Whether to include SSML tags
+
+    Returns:
+        Context-aware, SSML-formatted voice response
+    """
+    if not voice_context:
+        # No context - use standard formatting
+        return format_for_voice(response_text, action, use_ssml=use_ssml)
+
+    try:
+        from response_context import ConversationState, get_response_rules, summarize_projects_by_status
+
+        rules = get_response_rules(voice_context)
+        final_text = ""
+
+        # Rule 1: Lead with reminder if appointment is today/tomorrow
+        if rules.get('lead_with_reminder') and rules.get('reminder_text'):
+            final_text = rules['reminder_text'] + f"{_ssml_break(400)} "
+            logger.info("[VOICE_CTX] Adding proactive reminder to response")
+
+        # Rule 2: Celebration mode after successful action
+        if rules.get('celebration_mode'):
+            last_action = voice_context.get('last_action')
+            last_project = voice_context.get('last_project_name', 'your project')
+
+            if last_action == 'confirm_appointment':
+                # Response already has confirmation - just add context-aware follow-up
+                logger.info("[VOICE_CTX] Post-scheduling celebration mode")
+
+        # Rule 3: Use brief format if many projects already mentioned
+        if rules.get('use_brief_format'):
+            # Summarize instead of listing
+            logger.info("[VOICE_CTX] Using brief format (many projects mentioned)")
+
+        # Add the main response
+        final_text += response_text
+
+        # Rule 4: Add contextual next action suggestion
+        if rules.get('suggest_next_action') and rules.get('next_action_text'):
+            if not final_text.rstrip().endswith('?'):
+                final_text = final_text.rstrip()
+                if not final_text.endswith('.'):
+                    final_text += '.'
+                final_text += f"{_ssml_break(300)} {rules['next_action_text']}"
+                logger.info("[VOICE_CTX] Added next action suggestion")
+
+        # Apply standard voice formatting
+        return format_for_voice(final_text, action, use_ssml=use_ssml)
+
+    except Exception as e:
+        logger.warning(f"Context-aware formatting failed (falling back to standard): {e}")
+        return format_for_voice(response_text, action, use_ssml=use_ssml)
+
+
+def format_projects_summary_for_voice(projects: List[Dict], voice_context: Optional[Dict] = None) -> str:
+    """
+    Format project list with intelligent summarization for voice.
+
+    Instead of listing all 10 projects:
+    - Summarize by status: "You have 10 projects - 3 scheduled, 4 ready to schedule, 3 in progress"
+    - Highlight what's actionable: "Would you like to schedule one of the ready ones?"
+    - Mention upcoming appointments first if relevant
+
+    Args:
+        projects: List of project dictionaries
+        voice_context: Enriched context from build_voice_context()
+
+    Returns:
+        Voice-friendly summary of projects
+    """
+    try:
+        from response_context import summarize_projects_by_status
+
+        summary = summarize_projects_by_status(projects)
+        total = summary['total']
+
+        if total == 0:
+            return "I don't see any projects for you right now."
+
+        if total == 1:
+            project = projects[0]
+            category = project.get('category', 'project')
+            status = (project.get('status') or '').lower()
+            return f"You have one {category} project, and it's {status}."
+
+        # Build intelligent summary
+        result = f"You have {total} projects.{_ssml_break(200)} "
+
+        # Lead with scheduled count if any
+        scheduled_count = summary.get('scheduled_count', 0)
+        schedulable_count = summary.get('schedulable_count', 0)
+
+        if scheduled_count > 0:
+            result += f"{scheduled_count} {'is' if scheduled_count == 1 else 'are'} already scheduled"
+            if schedulable_count > 0:
+                result += f", and {schedulable_count} {'is' if schedulable_count == 1 else 'are'} ready to schedule"
+            result += f".{_ssml_break(300)} "
+        elif schedulable_count > 0:
+            result += f"{schedulable_count} {'is' if schedulable_count == 1 else 'are'} ready to schedule.{_ssml_break(300)} "
+
+        # Add proactive suggestion
+        if summary.get('has_schedulable'):
+            result += _ssml_question("Would you like to schedule one?")
+        else:
+            result += _ssml_question("Which one would you like to hear about?")
+
+        return result
+
+    except Exception as e:
+        logger.warning(f"Project summary formatting failed: {e}")
+        # Fallback to standard formatting
+        return _format_projects_for_voice({'projects': projects})
