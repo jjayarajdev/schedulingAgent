@@ -173,8 +173,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         )
 
-        # Return successful response with status codes
-        return create_success_response({
+        # Build response payload
+        response_payload = {
             "response": response_text,
             "agent_name": agent_name,
             "intent": intent,
@@ -184,7 +184,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "performance": timing,
             "pf_http_status_code": pf_http_status_code,
             "agenticscheduler_http_status_code": 200
-        })
+        }
+
+        # Include confirmation fields if present (for chat scheduling confirmation flow)
+        if result.get('confirmation_required'):
+            response_payload['confirmation_required'] = True
+            response_payload['pending_action'] = result.get('pending_action', {})
+
+        # Return successful response with status codes
+        return create_success_response(response_payload)
 
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON in request body: {e}")

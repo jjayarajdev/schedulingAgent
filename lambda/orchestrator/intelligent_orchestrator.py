@@ -703,7 +703,7 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
             logger.info(f"[CONTINUATION] IMPLICIT SCHEDULE: Detected scheduling request with context project {context_project_id}")
             return {
                 'continue_workflow': True,
-                'action': 'fetch_available_dates',
+                'action': 'get_available_dates',
                 'params': {
                     'project_id': context_project_id
                 },
@@ -1908,6 +1908,105 @@ def orchestrate_intelligent_workflow(
     workflow_state = state_manager.get_state(session_id)
 
     # ========================================================================
+    # PENDING CONFIRMATION HANDLER (Chat/SMS only)
+    # Handle confirm/decline for pending scheduling actions
+    # ========================================================================
+    # Check for pending_action in context (where it's actually stored)
+    context = workflow_state.get('context', {}) if workflow_state else {}
+    pending_action_data = context.get('pending_action')
+    logger.info(f"[CONFIRM-CHECK] pending_action in context: {pending_action_data is not None}, channel: {channel}")
+    if workflow_state and pending_action_data and channel != 'voice':
+        pending = pending_action_data
+        pending_action = pending.get('action')
+        message_lower = message.lower().strip()
+
+        # Check for confirmation
+        confirm_patterns = ['confirm', 'yes', 'ok', 'okay', 'sure', 'go ahead', 'book it', 'schedule it', 'do it', 'proceed']
+        decline_patterns = ['decline', 'no', 'cancel', 'never mind', 'nevermind', 'back', 'different', 'change']
+
+        is_confirm = any(p in message_lower for p in confirm_patterns)
+        is_decline = any(p in message_lower for p in decline_patterns)
+
+        if is_confirm and pending_action == 'confirm_appointment':
+            logger.info(f"[CONFIRM] User confirmed pending appointment - executing schedule")
+            # Clear pending and execute the actual scheduling
+            pending_params = pending.get('params', {})
+            pending_params['customer_id'] = customer_id
+            pending_params['client_id'] = client_id
+            pending_params['pf_bearer_token'] = pf_bearer_token
+
+            try:
+                lambda_response = call_lambda_directly('confirm_appointment', pending_params)
+
+                # Extract response
+                response_data = lambda_response.get('response', {})
+                function_response = response_data.get('functionResponse', {})
+                response_body_wrapper = function_response.get('responseBody', {})
+                text_wrapper = response_body_wrapper.get('TEXT', {})
+                response_body_str = text_wrapper.get('body', '{}')
+
+                if isinstance(response_body_str, str):
+                    response_body = json.loads(response_body_str)
+                else:
+                    response_body = response_body_str
+
+                # Clear pending action from context
+                if 'context' in workflow_state:
+                    workflow_state['context'].pop('pending_action', None)
+                state_manager.save_state(session_id, workflow_state)
+
+                # Format success response
+                project_name = pending.get('preview', {}).get('project_name', 'your project')
+                date_str = pending.get('preview', {}).get('date', '')
+                time_str = pending.get('preview', {}).get('time', '')
+
+                response_text = f"All set! Your {project_name} appointment is confirmed for {date_str} at {time_str}. Is there anything else I can help you with?"
+
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': response_text,
+                    'intent': 'scheduling',
+                    'action': 'confirm_appointment',
+                    'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                    'direct_call': True,
+                    'timing': timing,
+                    'pf_http_status_code': 200
+                }
+            except Exception as e:
+                logger.error(f"[CONFIRM] Failed to execute pending appointment: {e}")
+                if 'context' in workflow_state:
+                    workflow_state['context'].pop('pending_action', None)
+                state_manager.save_state(session_id, workflow_state)
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': "I had trouble confirming that appointment. Would you like to try again?",
+                    'intent': 'scheduling',
+                    'action': 'confirm_appointment',
+                    'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                    'direct_call': True,
+                    'timing': timing,
+                    'pf_http_status_code': 500
+                }
+
+        elif is_decline and pending_action:
+            logger.info(f"[CONFIRM] User declined pending {pending_action}")
+            # Clear pending action from context
+            if 'context' in workflow_state:
+                workflow_state['context'].pop('pending_action', None)
+            state_manager.save_state(session_id, workflow_state)
+
+            timing['total'] = time.time() - start_time
+            return {
+                'response': "No problem! Would you like to pick a different time, or is there something else I can help with?",
+                'intent': 'scheduling',
+                'action': 'decline_pending',
+                'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                'direct_call': True,
+                'timing': timing,
+                'pf_http_status_code': 200
+            }
+
+    # ========================================================================
     # STEP 0: Check for workflow continuation FIRST (before classification)
     # This prevents "5th Dec" from being interpreted as "5th project"
     # ========================================================================
@@ -1991,6 +2090,70 @@ def orchestrate_intelligent_workflow(
                 'client_id': client_id,
                 'pf_bearer_token': pf_bearer_token
             })
+
+            # ================================================================
+            # CONFIRMATION INTERCEPTION (Chat/SMS only) - In Continuation Handler
+            # Before executing confirm_appointment, return preview for user approval
+            # ================================================================
+            if action == 'confirm_appointment' and channel != 'voice':
+                logger.info(f"[CONFIRM] Intercepting confirm_appointment in continuation handler (channel={channel})")
+
+                # Get context for preview from preserve_context and params
+                project_name = preserve_context.get('category', preserve_context.get('project_name', 'Project'))
+                project_id = params.get('project_id', preserve_context.get('project_id', ''))
+                date_str = params.get('date', preserve_context.get('date', ''))
+                time_str = params.get('time', preserve_context.get('time', ''))
+                address = preserve_context.get('address', preserve_context.get('full_address', ''))
+
+                # Store pending action in workflow state
+                pending_action = {
+                    'action': 'confirm_appointment',
+                    'params': {
+                        'project_id': project_id,
+                        'date': date_str,
+                        'time': time_str,
+                        'request_id': params.get('request_id', preserve_context.get('request_id', ''))
+                    },
+                    'preview': {
+                        'project_name': project_name,
+                        'project_id': project_id,
+                        'date': date_str,
+                        'time': time_str,
+                        'address': address
+                    }
+                }
+
+                # Update workflow state with pending action
+                # NOTE: pending_action must be stored in 'context' as save_state only saves specific fields
+                if 'context' not in workflow_state:
+                    workflow_state['context'] = {}
+                workflow_state['context']['pending_action'] = pending_action
+                workflow_state['current_stage'] = 'awaiting_confirmation'
+                state_manager.save_state(session_id, workflow_state)
+                logger.info(f"[CONFIRM] Stored pending action in context, stage=awaiting_confirmation")
+
+                # Build confirmation preview response
+                preview_text = f"📋 **Appointment Preview**\n\n"
+                preview_text += f"**Project:** {project_name}\n"
+                preview_text += f"**Date:** {date_str}\n"
+                preview_text += f"**Time:** {time_str}\n"
+                if address:
+                    preview_text += f"**Location:** {address}\n"
+                preview_text += f"\nWould you like to confirm this appointment?"
+
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': preview_text,
+                    'intent': 'scheduling',
+                    'action': 'confirm_appointment_preview',
+                    'confirmation_required': True,
+                    'pending_action': pending_action.get('preview', {}),
+                    'agent_name': 'Intelligent Orchestrator (Confirmation)',
+                    'direct_call': True,
+                    'timing': timing,
+                    'channel': channel,
+                    'pf_http_status_code': 200
+                }
 
             logger.info(f"[CONTINUATION] Calling Lambda: action={action}, params={list(params.keys())}")
 
@@ -4028,6 +4191,70 @@ What would you like to do?"""
                 except Exception as details_error:
                     logger.warning(f"Auto-fetch project details failed (non-fatal): {details_error}")
                     # Continue with scheduling - weather check will be skipped
+
+        # ====================================================================
+        # CONFIRMATION INTERCEPTION (Chat/SMS only)
+        # Before executing confirm_appointment, return preview for user approval
+        # ====================================================================
+        if lambda_action == 'confirm_appointment' and channel != 'voice':
+            logger.info(f"[CONFIRM] Intercepting confirm_appointment for user confirmation (channel={channel})")
+
+            # Get context for preview
+            context = workflow_state.get('context', {}) if workflow_state else {}
+            project_name = context.get('category', context.get('project_name', 'Project'))
+            project_id = lambda_params.get('project_id', context.get('project_id', ''))
+            date_str = lambda_params.get('date', context.get('date', ''))
+            time_str = lambda_params.get('time', context.get('time', ''))
+            address = context.get('address', context.get('full_address', ''))
+
+            # Store pending action in workflow state
+            pending_action = {
+                'action': 'confirm_appointment',
+                'params': {
+                    'project_id': project_id,
+                    'date': date_str,
+                    'time': time_str,
+                    'request_id': lambda_params.get('request_id', context.get('request_id', ''))
+                },
+                'preview': {
+                    'project_name': project_name,
+                    'project_id': project_id,
+                    'date': date_str,
+                    'time': time_str,
+                    'address': address
+                }
+            }
+
+            if workflow_state is None:
+                workflow_state = {}
+            # NOTE: pending_action must be stored in 'context' as save_state only saves specific fields
+            if 'context' not in workflow_state:
+                workflow_state['context'] = {}
+            workflow_state['context']['pending_action'] = pending_action
+            workflow_state['current_stage'] = 'awaiting_confirmation'
+            state_manager.save_state(session_id, workflow_state)
+
+            # Build confirmation preview response
+            preview_text = f"📋 **Appointment Preview**\n\n"
+            preview_text += f"**Project:** {project_name}\n"
+            preview_text += f"**Date:** {date_str}\n"
+            preview_text += f"**Time:** {time_str}\n"
+            if address:
+                preview_text += f"**Location:** {address}\n"
+            preview_text += f"\nWould you like to confirm this appointment?"
+
+            timing['total'] = time.time() - start_time
+            return {
+                'response': preview_text,
+                'intent': 'scheduling',
+                'action': 'confirm_appointment_preview',
+                'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                'direct_call': True,
+                'timing': timing,
+                'confirmation_required': True,
+                'pending_action': pending_action.get('preview', {}),
+                'pf_http_status_code': 200
+            }
 
         try:
             lambda_response = call_lambda_directly(lambda_action, lambda_params)

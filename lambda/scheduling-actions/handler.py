@@ -1917,12 +1917,20 @@ def lambda_handler(event, context):
         return format_success_response(event, action, result)
 
     except ValueError as e:
-        logger.error(f"Validation error: {str(e)}")
+        error_msg = str(e)
+        logger.error(f"Validation error: {error_msg}")
+
+        # Return 401 for session expired errors (not 400)
+        if 'SESSION_EXPIRED' in error_msg:
+            status_code = 401
+        else:
+            status_code = 400
+
         return format_error_response(
             event,
             action if 'action' in locals() else 'unknown',
-            f'Validation error: {str(e)}',
-            400
+            error_msg,
+            status_code
         )
 
     except requests.RequestException as e:
