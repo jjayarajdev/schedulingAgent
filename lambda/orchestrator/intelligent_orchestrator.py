@@ -3907,16 +3907,27 @@ What would you like to do?"""
                                 # Also map by Order Number for reverse lookup
                                 if project_number:
                                     project_mapping[project_number] = {'project_id': pid, 'category': p.get('category', '')}
-                        logger.info(f"[ORDER-RESOLVE] Auto-fetched {len(list_body['projects'])} projects")
+                        logger.info(f"[ORDER-RESOLVE] Auto-fetched {len(list_body['projects'])} projects, mapping keys: {list(project_mapping.keys())[:10]}")
 
                         # Try resolution again with fresh mapping
                         resolved_id = find_project_by_partial_id(raw_project_id, project_mapping)
+                        if resolved_id:
+                            logger.info(f"[ORDER-RESOLVE] find_project_by_partial_id returned: '{resolved_id}' for '{raw_project_id}'")
+                        else:
+                            logger.warning(f"[ORDER-RESOLVE] find_project_by_partial_id returned None for '{raw_project_id}'")
+                    else:
+                        # list_projects didn't return projects - likely an error
+                        error_msg = list_body.get('error', list_body.get('message', 'unknown error'))
+                        logger.warning(f"[ORDER-RESOLVE] list_projects failed: {error_msg}")
                 except Exception as fetch_err:
                     logger.warning(f"[ORDER-RESOLVE] Auto-fetch failed: {fetch_err}")
 
             if resolved_id and resolved_id != raw_project_id:
-                logger.info(f"[ORDER-RESOLVE] Resolved '{raw_project_id}' -> Project ID '{resolved_id}'")
+                logger.info(f"[ORDER-RESOLVE] ✅ Resolved Order Number '{raw_project_id}' -> Internal Project ID '{resolved_id}'")
                 lambda_params['project_id'] = resolved_id
+            elif raw_project_id and not raw_project_id.isdigit():
+                # Order Number couldn't be resolved - this will likely cause issues downstream
+                logger.warning(f"[ORDER-RESOLVE] ⚠️ Could not resolve Order Number '{raw_project_id}' to internal ID - passing as-is")
 
         # Convert schedule_project to get_available_dates (schedule_project is the classifier action,
         # but the Lambda only understands get_available_dates)
