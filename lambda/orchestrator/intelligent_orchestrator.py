@@ -2192,10 +2192,15 @@ def orchestrate_intelligent_workflow(
     calendar_patterns = [
         "what's on my calendar", "whats on my calendar", "what is on my calendar",
         "what's scheduled", "whats scheduled", "what is scheduled",
-        "show my appointments", "my appointments", "show scheduled",
+        "show my appointments", "show scheduled",
         "what appointments", "scheduled projects", "what's booked", "whats booked"
     ]
-    if any(pattern in msg_lower for pattern in calendar_patterns):
+    # Don't trigger calendar query if user wants to SCHEDULE something
+    # e.g., "schedule my appointments" should NOT show scheduled projects
+    schedule_intent_words = ['schedule ', 'book ', 'set up ', 'make ']
+    has_schedule_intent = any(word in msg_lower for word in schedule_intent_words)
+
+    if any(pattern in msg_lower for pattern in calendar_patterns) and not has_schedule_intent:
         logger.info(f"[CALENDAR-QUERY] Detected calendar/scheduled query - bypassing workflow context")
         try:
             # Directly call list_projects with status=Scheduled filter
