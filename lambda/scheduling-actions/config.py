@@ -72,10 +72,9 @@ def get_auth_headers(authorization: str = None, client_id: str = None) -> Dict[s
     Generate authentication headers for ProjectForce API
     Uses provided authorization token OR reads from AWS Secrets Manager
 
-    Architecture (Phase 1+2):
+    Architecture:
     - If valid authorization provided, use it (from session attributes)
     - Otherwise, use TokenManager to read from Secrets Manager
-    - Supports auto-refresh on 401/403 (handled in handler.py)
 
     Args:
         authorization: Optional Bearer token (if provided, skips Secrets Manager)

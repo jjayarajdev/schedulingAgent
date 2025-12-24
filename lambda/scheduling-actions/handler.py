@@ -46,25 +46,6 @@ from mock_data import (
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Import TokenManager for cache invalidation on auth failures
-try:
-    from token_manager import get_token_manager
-    try:
-        from token_refresh import get_refresh_manager
-        TOKEN_REFRESH_AVAILABLE = True
-    except ImportError:
-        TOKEN_REFRESH_AVAILABLE = False
-        logger.warning("TokenRefreshManager not available - auto-refresh disabled")
-
-    TOKEN_MANAGER_AVAILABLE = True
-except ImportError:
-    TOKEN_MANAGER_AVAILABLE = False
-    logger.warning("TokenManager not available for cache invalidation")
-
-# Configure logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
 # DynamoDB client for notes storage
 dynamodb = boto3.resource('dynamodb')
 
@@ -174,21 +155,15 @@ def make_api_request_with_retry(
     **kwargs
 ) -> requests.Response:
     """
-    OPTIMIZED: Make API request with connection pooling and automatic token refresh on 401/403 errors
+    Make API request with connection pooling.
     Uses module-level session object for TCP connection reuse (100-300ms savings)
-
-    Phase 2 Architecture:
-    - On 401/403 errors, calls token_refresh.auto_refresh_on_failure()
-    - Regenerates token via ProjectForce regenerate-token API
-    - Updates AWS Secrets Manager with fresh token
-    - Retries request once with new token
 
     Args:
         method: HTTP method (GET, POST, etc.)
         url: Request URL
         headers: Request headers (including Authorization)
-        client_id: ProjectForce client ID (required for auto-refresh)
-        user_id: ProjectForce user/customer ID (required for auto-refresh)
+        client_id: ProjectForce client ID (for logging)
+        user_id: ProjectForce user/customer ID (for logging)
         environment: Environment (dev/staging/prod)
         **kwargs: Additional arguments for requests (json, timeout, etc.)
 
@@ -196,83 +171,16 @@ def make_api_request_with_retry(
         Response object
 
     Raises:
-        requests.HTTPError: If request fails after retry
+        requests.HTTPError: If request fails
     """
     # OPTIMIZATION: Add compression header if not present
     if 'Accept-Encoding' not in headers:
         headers['Accept-Encoding'] = 'gzip, deflate'
 
-    try:
-        # OPTIMIZATION: Use session instead of requests directly (reuses TCP connections)
-        response = session.request(method, url, headers=headers, **kwargs)
-        response.raise_for_status()
-        return response
-
-    except requests.HTTPError as e:
-        # If 401/403 (Unauthorized/Forbidden), try Phase 2 auto-refresh
-        if e.response.status_code in [401, 403]:
-            logger.warning(f"Received {e.response.status_code} error, attempting auto-refresh...")
-
-            # Phase 2: Auto-refresh token via regenerate-token API
-            if TOKEN_REFRESH_AVAILABLE and client_id and user_id:
-                logger.info(" Phase 2: Attempting auto-refresh via regenerate-token API")
-
-                refresh_manager = get_refresh_manager()
-                success, new_token = refresh_manager.auto_refresh_on_failure(
-                    client_id=client_id,
-                    user_id=user_id,
-                    environment=environment
-                )
-
-                if success and new_token:
-                    logger.info(" Token refreshed successfully, retrying request")
-
-                    # Update Authorization header with fresh token
-                    headers['Authorization'] = f"Bearer {new_token}"
-
-                    # Retry once with fresh token (using session)
-                    try:
-                        response = session.request(method, url, headers=headers, **kwargs)
-                        response.raise_for_status()
-                        logger.info(" Request succeeded after Phase 2 auto-refresh")
-                        return response
-                    except requests.HTTPError as retry_error:
-                        logger.error(f" Request failed even after auto-refresh: {retry_error}")
-                        raise
-                else:
-                    logger.error(" Auto-refresh failed, cannot retry request")
-                    raise
-
-            # Fallback to Phase 1 (cache invalidation) if Phase 2 not available
-            elif TOKEN_MANAGER_AVAILABLE:
-                logger.warning(" Phase 2 not available, falling back to Phase 1 (cache invalidation)")
-
-                # Invalidate cached token
-                token_manager = get_token_manager()
-                token_manager.invalidate_cache()
-
-                # Get fresh auth headers
-                fresh_headers = get_auth_headers()
-
-                # Merge with original headers (preserve client_id, etc.)
-                headers.update(fresh_headers)
-
-                # Retry once with fresh token (using session)
-                try:
-                    response = session.request(method, url, headers=headers, **kwargs)
-                    response.raise_for_status()
-                    logger.info("Request succeeded after Phase 1 token refresh")
-                    return response
-                except requests.HTTPError as retry_error:
-                    logger.error(f"Request failed even after Phase 1 token refresh: {retry_error}")
-                    raise
-            else:
-                # No refresh mechanism available
-                logger.error(" No token refresh mechanism available")
-                raise
-        else:
-            # Not a 401/403, re-raise original error
-            raise
+    # Use session for connection reuse
+    response = session.request(method, url, headers=headers, **kwargs)
+    response.raise_for_status()
+    return response
 
 def format_success_response(event: Dict, action: str, result: Dict[str, Any]) -> Dict[str, Any]:
     """OPTIMIZED: Format successful response for Bedrock Agent - supports both OpenAPI and Function formats"""
@@ -351,6 +259,39 @@ def format_error_response(event: Dict, action: str, error_message: str, status_c
 # ============================================================================
 # Action Handlers
 # ============================================================================
+
+def resolve_project_id(project_ref: str, projects: List[Dict]) -> Optional[str]:
+    """
+    Resolve a project reference (Order Number or internal ID) to the internal project ID.
+
+    This is format-agnostic - works with:
+    - Internal IDs: "90000079"
+    - Order Numbers: "AI-PRO-1000010"
+    - Any alphanumeric format
+
+    Args:
+        project_ref: The project reference to resolve (could be Order Number or internal ID)
+        projects: List of raw project data from the API
+
+    Returns:
+        The internal project ID if found, None otherwise
+    """
+    if not project_ref or not projects:
+        return None
+
+    project_ref_lower = str(project_ref).lower()
+
+    for item in projects:
+        item_project_id = str(safe_get(item, "project_project_id", default=""))
+        item_project_number = str(safe_get(item, "project_project_number", default=""))
+
+        # Match by internal ID (exact) or Order Number (case-insensitive)
+        if item_project_id == str(project_ref) or item_project_number.lower() == project_ref_lower:
+            logger.info(f"Resolved project reference '{project_ref}' to internal ID '{item_project_id}'")
+            return item_project_id
+
+    return None
+
 
 def extract_project_minimal(item: Dict) -> Dict[str, Any]:
     """
@@ -479,7 +420,7 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
         url = f"{config['dashboard_url']}/{client_id}/{customer_id}"
         logger.info(f"Making API request to: {url}")
 
-        # OPTIMIZATION: Use make_api_request_with_retry for auto-refresh on 401/403
+        # Use make_api_request_with_retry for connection pooling
         api_start = time.time()
         try:
             res = make_api_request_with_retry(
@@ -594,7 +535,7 @@ def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -
         url = f"{config['dashboard_url']}/{client_id}/{customer_id}"
         logger.info(f"Making API request to: {url}")
 
-        # Use make_api_request_with_retry for auto-refresh on 401/403
+        # Use make_api_request_with_retry for connection pooling
         res = make_api_request_with_retry(
             "GET",
             url,
@@ -609,14 +550,18 @@ def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -
         raw_data = response.get("data", [])
         logger.info(f"Received {len(raw_data)} projects from API, filtering for project_id {project_id}")
 
-        # Find the specific project
+        # Find the specific project - match by internal ID OR Order Number
         project_data = None
         for item in raw_data:
             # Check if this is the project we're looking for
             item_project_id = str(safe_get(item, "project_project_id", default=""))
-            if item_project_id == str(project_id):
+            item_project_number = str(safe_get(item, "project_project_number", default=""))
+
+            # Match by internal ID or Order Number (case-insensitive for Order Numbers)
+            if item_project_id == str(project_id) or item_project_number.lower() == str(project_id).lower():
                 project_data = item
-                logger.info(f"Found project {project_id} in results")
+                match_type = 'internal ID' if item_project_id == str(project_id) else 'Order Number'
+                logger.info(f"Found project {project_id} in results (matched by {match_type})")
                 break
 
         if not project_data:
@@ -800,6 +745,24 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
     if not project_id:
         raise ValueError("Missing required parameter: project_id")
 
+    # Resolve Order Number to internal ID if needed (scheduler API requires internal ID)
+    # Check if project_id contains non-digit characters (likely an Order Number)
+    if not str(project_id).isdigit() and not USE_MOCK_API and customer_id and client_id:
+        logger.info(f"Project ID '{project_id}' appears to be an Order Number, resolving to internal ID...")
+        try:
+            # Fetch projects to resolve Order Number
+            url = f"{config['dashboard_url']}/{client_id}/{customer_id}"
+            res = make_api_request_with_retry("GET", url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
+            raw_data = res.json().get("data", [])
+            resolved_id = resolve_project_id(project_id, raw_data)
+            if resolved_id:
+                logger.info(f"Resolved Order Number '{project_id}' to internal ID '{resolved_id}'")
+                project_id = resolved_id
+            else:
+                logger.warning(f"Could not resolve Order Number '{project_id}', proceeding with original value")
+        except Exception as e:
+            logger.warning(f"Failed to resolve Order Number '{project_id}': {e}, proceeding with original value")
+
     if USE_MOCK_API:
         logger.info(f"[MOCK] Fetching available dates for project {project_id}")
         response = get_mock_available_dates(project_id)
@@ -819,7 +782,7 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
         logger.info(f"GET {url}")
 
         try:
-            # Use retry logic with automatic token refresh on 401
+            # Make API request with connection pooling
             res = make_api_request_with_retry("GET", url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
             pf_http_status_code = res.status_code
             response = res.json()
@@ -921,6 +884,22 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
     if not all([project_id, date, request_id]):
         raise ValueError("Missing required parameters: project_id, date, request_id")
 
+    # Resolve Order Number to internal ID if needed (scheduler API requires internal ID)
+    if not str(project_id).isdigit() and not USE_MOCK_API and customer_id and client_id:
+        logger.info(f"[get_time_slots] Project ID '{project_id}' appears to be an Order Number, resolving to internal ID...")
+        try:
+            url = f"{config['dashboard_url']}/{client_id}/{customer_id}"
+            res = make_api_request_with_retry("GET", url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
+            raw_data = res.json().get("data", [])
+            resolved_id = resolve_project_id(project_id, raw_data)
+            if resolved_id:
+                logger.info(f"Resolved Order Number '{project_id}' to internal ID '{resolved_id}'")
+                project_id = resolved_id
+            else:
+                logger.warning(f"Could not resolve Order Number '{project_id}', proceeding with original value")
+        except Exception as e:
+            logger.warning(f"Failed to resolve Order Number '{project_id}': {e}, proceeding with original value")
+
     if USE_MOCK_API:
         logger.info(f"[MOCK] Fetching time slots for project {project_id} on {date}")
         response = get_mock_time_slots(project_id, date, request_id)
@@ -937,7 +916,7 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
         logger.info(f"GET {url}")
 
         try:
-            # Use retry logic with automatic token refresh on 401
+            # Make API request with connection pooling
             res = make_api_request_with_retry("GET", url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
             pf_http_status_code = res.status_code
             response = res.json()
@@ -1049,6 +1028,22 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
     if not all([project_id, date, time, request_id]):
         raise ValueError("Missing required parameters: project_id, date, time, request_id")
 
+    # Resolve Order Number to internal ID if needed (scheduler API requires internal ID)
+    if not str(project_id).isdigit() and not USE_MOCK_API and customer_id and client_id:
+        logger.info(f"[confirm_appointment] Project ID '{project_id}' appears to be an Order Number, resolving to internal ID...")
+        try:
+            url = f"{config['dashboard_url']}/{client_id}/{customer_id}"
+            res = make_api_request_with_retry("GET", url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
+            raw_data = res.json().get("data", [])
+            resolved_id = resolve_project_id(project_id, raw_data)
+            if resolved_id:
+                logger.info(f"Resolved Order Number '{project_id}' to internal ID '{resolved_id}'")
+                project_id = resolved_id
+            else:
+                logger.warning(f"Could not resolve Order Number '{project_id}', proceeding with original value")
+        except Exception as e:
+            logger.warning(f"Failed to resolve Order Number '{project_id}': {e}, proceeding with original value")
+
     # Use mock if global flag is set OR if real confirm is not enabled
     use_mock = USE_MOCK_API or not ENABLE_REAL_CONFIRM
 
@@ -1099,7 +1094,7 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
         logger.info(f"Payload: {json.dumps(payload)}")
 
         try:
-            # Use retry logic with automatic token refresh on 401
+            # Make API request with connection pooling
             res = make_api_request_with_retry("POST", url, auth_headers, client_id=client_id, user_id=customer_id, json=payload, timeout=30)
             pf_http_status_code = res.status_code
             response = res.json()
@@ -1357,6 +1352,22 @@ def handle_cancel_appointment(params: Dict, config: Dict, auth_headers: Dict) ->
     if not project_id:
         raise ValueError("Missing required parameter: project_id")
 
+    # Resolve Order Number to internal ID if needed (scheduler API requires internal ID)
+    if not str(project_id).isdigit() and not USE_MOCK_API and customer_id and client_id:
+        logger.info(f"[cancel_appointment] Project ID '{project_id}' appears to be an Order Number, resolving to internal ID...")
+        try:
+            url = f"{config['dashboard_url']}/{client_id}/{customer_id}"
+            res = make_api_request_with_retry("GET", url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
+            raw_data = res.json().get("data", [])
+            resolved_id = resolve_project_id(project_id, raw_data)
+            if resolved_id:
+                logger.info(f"Resolved Order Number '{project_id}' to internal ID '{resolved_id}'")
+                project_id = resolved_id
+            else:
+                logger.warning(f"Could not resolve Order Number '{project_id}', proceeding with original value")
+        except Exception as e:
+            logger.warning(f"Failed to resolve Order Number '{project_id}': {e}, proceeding with original value")
+
     # STEP 1: Pre-flight validation - fetch project details to validate before cancel
     if not confirmed:
         logger.info(f"[CANCEL] Step 1: Validating project {project_id} before cancellation")
@@ -1437,7 +1448,7 @@ def handle_cancel_appointment(params: Dict, config: Dict, auth_headers: Dict) ->
         logger.info(f"GET {url}")
 
         try:
-            # Use retry logic with automatic token refresh on 401
+            # Make API request with connection pooling
             # NOTE: API uses GET method (not POST) for cancel-reschedule
             res = make_api_request_with_retry("GET", url, auth_headers, timeout=30)
             response = res.json()
@@ -1506,6 +1517,7 @@ def handle_get_rescheduler_slots(params: Dict, config: Dict, auth_headers: Dict)
     """
     project_id = params.get('project_id')
     client_id = params.get('client_id')
+    customer_id = params.get('customer_id')
     date = params.get('date')  # Format: YYYY-MM-DD
     selected_date = params.get('selected_date', date)  # Defaults to date
 
@@ -1513,6 +1525,22 @@ def handle_get_rescheduler_slots(params: Dict, config: Dict, auth_headers: Dict)
         raise ValueError("Missing required parameter: project_id")
     if not date:
         raise ValueError("Missing required parameter: date")
+
+    # Resolve Order Number to internal ID if needed (scheduler API requires internal ID)
+    if not str(project_id).isdigit() and not USE_MOCK_API and customer_id and client_id:
+        logger.info(f"[get_rescheduler_slots] Project ID '{project_id}' appears to be an Order Number, resolving to internal ID...")
+        try:
+            url = f"{config['dashboard_url']}/{client_id}/{customer_id}"
+            res = make_api_request_with_retry("GET", url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
+            raw_data = res.json().get("data", [])
+            resolved_id = resolve_project_id(project_id, raw_data)
+            if resolved_id:
+                logger.info(f"Resolved Order Number '{project_id}' to internal ID '{resolved_id}'")
+                project_id = resolved_id
+            else:
+                logger.warning(f"Could not resolve Order Number '{project_id}', proceeding with original value")
+        except Exception as e:
+            logger.warning(f"Failed to resolve Order Number '{project_id}': {e}, proceeding with original value")
 
     if USE_MOCK_API:
         logger.info(f"[MOCK] Getting rescheduler slots for project {project_id}, date {date}")
@@ -1624,7 +1652,7 @@ def handle_get_business_hours(params: Dict, config: Dict, auth_headers: Dict) ->
         logger.info(f"GET {url}")
 
         try:
-            # Use retry logic with automatic token refresh on 401
+            # Make API request with connection pooling
             res = make_api_request_with_retry("GET", url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
             response = res.json()
             logger.info(f"Business hours retrieved successfully")
