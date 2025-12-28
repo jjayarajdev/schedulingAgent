@@ -587,6 +587,7 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                     'preserve_context': {
                         'project_id': context.get('project_id'),
                         'category': context.get('category'),
+                        'project_type': context.get('project_type'),
                         'city': context.get('city'),
                         'state': context.get('state')
                     },
@@ -637,6 +638,7 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                 'preserve_context': {
                     'project_id': context.get('project_id'),
                     'category': context.get('category'),
+                    'project_type': context.get('project_type'),
                     'city': context.get('city'),
                     'state': context.get('state')
                 },
@@ -662,6 +664,7 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                     'date': date,
                     'request_id': context.get('request_id'),
                     'category': context.get('category'),
+                    'project_type': context.get('project_type'),
                     'city': context.get('city'),
                     'state': context.get('state'),
                     # Preserve batch mode context if present
@@ -718,6 +721,7 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                 'preserve_context': {
                     'project_id': context_project_id,
                     'category': context.get('category'),
+                    'project_type': context.get('project_type'),
                     'city': context.get('city'),
                     'state': context.get('state'),
                     'address': context.get('address')
@@ -2122,6 +2126,7 @@ def orchestrate_intelligent_workflow(
                 date_str = params.get('date', preserve_context.get('date', ''))
                 time_str = params.get('time', preserve_context.get('time', ''))
                 address = preserve_context.get('address', preserve_context.get('full_address', ''))
+                project_type = preserve_context.get('project_type', '')
 
                 # Store pending action in workflow state
                 pending_action = {
@@ -2135,6 +2140,7 @@ def orchestrate_intelligent_workflow(
                     'preview': {
                         'project_name': project_name,
                         'project_id': project_id,
+                        'project_type': project_type,
                         'date': date_str,
                         'time': time_str,
                         'address': address
@@ -2153,6 +2159,8 @@ def orchestrate_intelligent_workflow(
                 # Build confirmation preview response
                 preview_text = f"📋 **Appointment Preview**\n\n"
                 preview_text += f"**Project:** {project_name}\n"
+                if project_type:
+                    preview_text += f"**Type:** {project_type}\n"
                 preview_text += f"**Date:** {date_str}\n"
                 preview_text += f"**Time:** {time_str}\n"
                 if address:
@@ -2398,7 +2406,8 @@ def orchestrate_intelligent_workflow(
                                 'category_bucket': get_category_bucket(exact_category),
                                 'address': p.get('address', ''),
                                 'status': p.get('status', ''),
-                                'projectNumber': project_number  # Order Number for user display
+                                'projectNumber': project_number,  # Order Number for user display
+                                'project_type': p.get('projectType', p.get('ProjectType', ''))
                             }
                             # Also map by projectNumber (Order Number) for reverse lookup
                             if project_number:
@@ -2407,7 +2416,8 @@ def orchestrate_intelligent_workflow(
                                     'category_bucket': get_category_bucket(exact_category),
                                     'address': p.get('address', ''),
                                     'status': p.get('status', ''),
-                                    'project_id': pid  # Internal project ID for API calls
+                                    'project_id': pid,  # Internal project ID for API calls
+                                    'project_type': p.get('projectType', p.get('ProjectType', ''))
                                 }
                     if project_ids:
                         logger.info(f"[VOICE-PRECHECK] Saving {len(project_ids)} project_ids and project_mapping to workflow state")
@@ -4174,12 +4184,14 @@ What would you like to do?"""
                     else:
                         project_info = details_body_str
 
-                    # Extract category and location from project details
-                    # Response structure: {"project": {"address": {...}}, "category": "...", "full_address": "..."}
+                    # Extract category, project_type and location from project details
+                    # Response structure: {"project": {"address": {...}, "projectType": "..."}, "category": "...", "full_address": "..."}
                     project_category = project_info.get('category', '')
 
                     # Try nested project.address first
                     project_obj = project_info.get('project', {})
+                    # Extract project_type from nested project object
+                    project_type_val = project_obj.get('projectType', project_obj.get('ProjectType', '')) if isinstance(project_obj, dict) else ''
                     address_obj = project_obj.get('address', {}) if isinstance(project_obj, dict) else {}
 
                     if isinstance(address_obj, dict) and address_obj:
@@ -4214,6 +4226,7 @@ What would you like to do?"""
 
                         decision['update_workflow_state']['context'].update({
                             'category': project_category,
+                            'project_type': project_type_val,
                             'city': project_city,
                             'state': project_state,
                             'address': project_address,
@@ -4227,6 +4240,7 @@ What would you like to do?"""
                             workflow_state['context'] = {}
                         workflow_state['context'].update({
                             'category': project_category,
+                            'project_type': project_type_val,
                             'city': project_city,
                             'state': project_state,
                             'address': project_address
@@ -4250,6 +4264,7 @@ What would you like to do?"""
             date_str = lambda_params.get('date', context.get('date', ''))
             time_str = lambda_params.get('time', context.get('time', ''))
             address = context.get('address', context.get('full_address', ''))
+            project_type = context.get('project_type', '')
 
             # Store pending action in workflow state
             pending_action = {
@@ -4263,6 +4278,7 @@ What would you like to do?"""
                 'preview': {
                     'project_name': project_name,
                     'project_id': project_id,
+                    'project_type': project_type,
                     'date': date_str,
                     'time': time_str,
                     'address': address
@@ -4281,6 +4297,8 @@ What would you like to do?"""
             # Build confirmation preview response
             preview_text = f"📋 **Appointment Preview**\n\n"
             preview_text += f"**Project:** {project_name}\n"
+            if project_type:
+                preview_text += f"**Type:** {project_type}\n"
             preview_text += f"**Date:** {date_str}\n"
             preview_text += f"**Time:** {time_str}\n"
             if address:
@@ -4666,6 +4684,7 @@ What would you like to do?"""
                         'project_id': project_id,
                         'project': project,
                         'category': project.get('category', ''),
+                        'project_type': project.get('projectType', project.get('ProjectType', '')),
                         'scheduled_date': project.get('scheduledDate', ''),
                         'city': project.get('city', project.get('address', {}).get('city', '')),
                         'state': project.get('state', project.get('address', {}).get('state', ''))
@@ -4691,6 +4710,7 @@ What would you like to do?"""
 
                 # Get project details from workflow state or response
                 project_category = workflow_state.get('context', {}).get('category', '') if workflow_state else ''
+                project_type_ctx = workflow_state.get('context', {}).get('project_type', '') if workflow_state else ''
                 project_city = workflow_state.get('context', {}).get('city', '') if workflow_state else ''
                 project_state = workflow_state.get('context', {}).get('state', '') if workflow_state else ''
 
@@ -4701,6 +4721,7 @@ What would you like to do?"""
                     'context': {
                         'project_id': project_id,
                         'category': project_category,
+                        'project_type': project_type_ctx,
                         'city': project_city,
                         'state': project_state
                     },
@@ -4745,7 +4766,7 @@ What would you like to do?"""
                 projects_list = response_body['projects']
                 project_ids = [str(p.get('id', '')) for p in projects_list if p.get('id')]
 
-                # Build project_mapping: project_id -> {category, category_bucket, address, status}
+                # Build project_mapping: project_id -> {category, category_bucket, address, status, project_type}
                 # category_bucket enables "show kitchen projects" to match Dishwasher, Ovens, etc.
                 project_mapping = {}
                 for p in projects_list:
@@ -4756,7 +4777,8 @@ What would you like to do?"""
                             'category': exact_category,
                             'category_bucket': get_category_bucket(exact_category),
                             'address': p.get('address', ''),
-                            'status': p.get('status', '')
+                            'status': p.get('status', ''),
+                            'project_type': p.get('projectType', p.get('ProjectType', ''))
                         }
 
                 if project_ids:

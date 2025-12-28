@@ -387,8 +387,10 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 notes = fetch_project_notes(str(project_id))
 
             # Prepare structured data
+            # Use projectNumber (Order Number) for customer-facing message, fallback to id
+            display_number = project.get('projectNumber', project.get('id', 'Unknown'))
             result = {
-                "message": f"Project #{project.get('id', 'Unknown')} Details",
+                "message": f"Project #{display_number} Details",
                 "project": project
             }
 
@@ -1673,8 +1675,23 @@ def route_request(
                 **merged_params  # Add merged params (extracted + resolved entities)
             }
 
+            # STATIC GREETING: Return consistent Riley greeting for SMS/Chat (skip chitchat Lambda)
+            if action == 'greet':
+                static_greeting = "Hi, this is Riley from ProjectForce! I can help you view your projects, check available dates, or schedule appointments. What would you like to do today?"
+                logger.info(f"[GREET] Returning static Riley greeting for channel={channel}")
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': static_greeting,
+                    'agent_name': 'chitchat',
+                    'intent': 'chitchat',
+                    'action': 'greet',
+                    'direct_call': True,
+                    'timing': timing,
+                    'routing_method': 'static_greeting'
+                }
+
             # CHITCHAT ACTIONS: Always pass the message so chitchat Lambda can do its own intent detection
-            chitchat_actions = ['greet', 'help', 'general', 'chitchat']
+            chitchat_actions = ['help', 'general', 'chitchat']  # 'greet' handled above
             if action in chitchat_actions:
                 lambda_params['message'] = message  # Pass original message
                 logger.info(f"[CHITCHAT] Passing message to chitchat Lambda: '{message[:50]}...'")
