@@ -7,7 +7,7 @@ Architecture: Hybrid LLM + Deterministic
 
 Key design decisions:
 1. Upstream ProjectForce API does NOT support filtering - we fetch all and post-filter
-2. Post-filters (status, category, projectType, address) are applied via apply_project_filters()
+2. Post-filters (status, category, projectType, address, technician_name) are applied via apply_project_filters()
 3. Category buckets map user terms ("kitchen") to actual categories ("Dishwasher", "Ovens")
 4. Workflow state tracks: project_ids, project_mapping, viewed_projects for ordinal resolution
 
@@ -123,15 +123,16 @@ def find_project_by_partial_id(search_id: str, project_mapping: Dict[str, Any]) 
             logger.info(f"[PARTIAL-MATCH] Contains match: '{search_id}' -> '{pid}' -> project_id '{resolved}'")
             return resolved
 
-    # 5. Numeric suffix match - extract numeric part and match
+    # 5. Numeric EXACT match - extract numeric part and match exactly
+    # Avoid partial matches like "100000" matching "100002"
     search_digits = re.sub(r'[^0-9_]', '', search_id_str)
     if search_digits:
         for pid in project_mapping.keys():
             pid_digits = re.sub(r'[^0-9_]', '', pid)
-            if search_digits in pid_digits:
+            if search_digits == pid_digits:
                 info = project_mapping[pid]
                 resolved = info.get('project_id', pid)
-                logger.info(f"[PARTIAL-MATCH] Numeric match: '{search_id}' -> '{pid}' -> project_id '{resolved}'")
+                logger.info(f"[PARTIAL-MATCH] Numeric exact match: '{search_id}' -> '{pid}' -> project_id '{resolved}'")
                 return resolved
 
     return None
@@ -190,16 +191,18 @@ def find_project_reference_in_message(message: str, project_mapping: Dict[str, A
                 logger.info(f"[PROJECT-REF] Reverse contains: '{known_id}' in '{token}' -> project_id '{resolved_id}'")
                 return (known_id, resolved_id)
 
-    # 4. Numeric partial match - extract digits and try matching
+    # 4. Numeric EXACT match only - no partial matching to avoid false positives
+    # e.g., "100002" should NOT match "100000" just because they share digits
     for token in potential_ids:
         token_digits = re.sub(r'[^0-9]', '', token)
         if len(token_digits) >= 5:  # Need at least 5 digits for meaningful match
             for known_id in project_mapping.keys():
                 known_digits = re.sub(r'[^0-9]', '', known_id)
-                if token_digits in known_digits or known_digits in token_digits:
+                # Only match if digits are exactly equal
+                if token_digits == known_digits:
                     info = project_mapping[known_id]
                     resolved_id = info.get('project_id', known_id)
-                    logger.info(f"[PROJECT-REF] Numeric match: '{token}' ({token_digits}) ~ '{known_id}' ({known_digits}) -> project_id '{resolved_id}'")
+                    logger.info(f"[PROJECT-REF] Numeric exact match: '{token}' ({token_digits}) == '{known_id}' ({known_digits}) -> project_id '{resolved_id}'")
                     return (known_id, resolved_id)
 
     return None
@@ -433,6 +436,16 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
     if context_project_id:
         message_lower = message.lower()
         message_project_id = None
+        message_project_ref = None  # The raw reference from the message (e.g., "AI-PRO-100002")
+
+        # 0. FIRST: Extract any project-ID-like pattern directly from message
+        # This catches cases where user asks about a NEW project not in mapping yet
+        # Patterns: "AI-PRO-100002", "21083_09PF05VD_...", "9000489", etc.
+        id_patterns = re.findall(r'[A-Za-z0-9][\w-]*[A-Za-z0-9]|[A-Za-z0-9]+', message)
+        potential_refs = [t for t in id_patterns if len(t) >= 5 and any(c.isdigit() for c in t)]
+        if potential_refs:
+            message_project_ref = potential_refs[0]  # Take first project-like reference
+            logger.info(f"[CONTINUATION] Extracted potential project reference: '{message_project_ref}'")
 
         # 1. Use intelligent project reference matching (format-agnostic)
         # This works with ANY format: AI-PRO-XXXXXX, numeric IDs, alphanumeric codes, etc.
@@ -459,6 +472,26 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
         if message_project_id and str(message_project_id) != str(context_project_id):
             logger.info(f"[CONTINUATION] CONTEXT SWITCH DETECTED (by ID): User mentioned project {message_project_id}, but workflow has project {context_project_id}. Clearing workflow state.")
             return {'context_switch': True, 'clear_state': True}
+
+        # 2b. NEW: If user mentioned a project reference NOT in mapping, and it's different from context projectNumber
+        # This catches cases like: context has AI-PRO-100000, user asks for AI-PRO-100002 (not in mapping)
+        context_project_number = context.get('projectNumber', context.get('project_number', ''))
+        if not message_project_id and message_project_ref:
+            # Check if the reference is different from context's projectNumber or project_id
+            ref_lower = message_project_ref.lower()
+            context_pn_lower = str(context_project_number).lower() if context_project_number else ''
+            context_pid_lower = str(context_project_id).lower() if context_project_id else ''
+
+            # If message reference doesn't match context's projectNumber or project_id, it's a new project
+            if ref_lower != context_pn_lower and ref_lower != context_pid_lower:
+                # Also check if it's not a substring match (to avoid false positives from partial typing)
+                if context_pn_lower and ref_lower not in context_pn_lower and context_pn_lower not in ref_lower:
+                    logger.info(f"[CONTINUATION] CONTEXT SWITCH DETECTED (new project): User asked for '{message_project_ref}', context has projectNumber='{context_project_number}', project_id='{context_project_id}'. Clearing workflow state.")
+                    return {'context_switch': True, 'clear_state': True}
+                elif not context_pn_lower:
+                    # No projectNumber in context, just compare with project_id
+                    logger.info(f"[CONTINUATION] CONTEXT SWITCH DETECTED (new project): User asked for '{message_project_ref}', context has project_id='{context_project_id}'. Clearing workflow state.")
+                    return {'context_switch': True, 'clear_state': True}
 
         # 3. Check for category-based context switch (e.g., "show the dishwasher project")
         # Only check if user didn't mention a specific project_id
@@ -1330,6 +1363,8 @@ IMPORTANT RULES:
    - "new projects" -> entities.status = "New" (exact match)
    - "orders at 401 Chicago Avenue" / "projects at Main Street" -> entities.address = "401 Chicago Avenue" or "Main Street"
    - "how many jobs at Minneapolis" -> entities.address = "Minneapolis"
+   - "projects assigned to John" / "jobs for technician Rajat" -> entities.technician_name = "John" or "Rajat"
+   - "scheduled projects for installer Mike" -> entities.status = "scheduled", entities.technician_name = "Mike"
 9. Handle batch/multiple project references:
    - "first two projects" -> extract project_ids for positions [0, 1] from conversation
    - "first 3 projects" -> extract project_ids for positions [0, 1, 2]
@@ -1568,6 +1603,14 @@ Start over (reset conversation):
     "action": "start_over",
     "entities": {{}},
     "reasoning": "User said 'start over' or 'restart' - clear all context and start fresh."
+}}
+
+List projects with technician filter:
+{{
+    "intent": "scheduling",
+    "action": "list_projects",
+    "entities": {{"status": "scheduled", "technician_name": "Rajat N"}},
+    "reasoning": "User wants scheduled projects assigned to technician Rajat N. Apply both status and technician_name filters."
 }}
 
 Respond ONLY with valid JSON."""
@@ -2490,14 +2533,16 @@ def orchestrate_intelligent_workflow(
             else:
                 response_body = list_body_str
 
-            # Apply status filter on the result
+            # Apply ALL filters (status, technician_name, etc.) on the result
             if 'projects' in response_body:
                 original_count = len(response_body['projects'])
-                response_body['projects'] = [
-                    p for p in response_body['projects']
-                    if p.get('status') in SCHEDULED_STATUSES
-                ]
-                logger.info(f"[CALENDAR-QUERY] Filtered {original_count} → {len(response_body['projects'])} scheduled projects")
+                # Build filter params from classification entities
+                filter_params = classification.get('entities', {}).copy()
+                # Ensure scheduled status filter is applied
+                if 'status' not in filter_params:
+                    filter_params['status'] = 'scheduled'
+                response_body['projects'] = apply_project_filters(response_body['projects'], filter_params)
+                logger.info(f"[CALENDAR-QUERY] Filtered {original_count} → {len(response_body['projects'])} projects (params={filter_params})")
 
             # Format response
             response_text = format_lambda_response('list_projects', response_body, message, channel)
@@ -4088,14 +4133,28 @@ What would you like to do?"""
             if workflow_state:
                 project_mapping = workflow_state.get('project_mapping', {}) or workflow_state.get('context', {}).get('project_mapping', {})
 
-            # Try to resolve from existing mapping first
+            # Try to resolve from existing mapping first (EXACT match only to avoid stale data issues)
             resolved_id = None
             if project_mapping:
-                resolved_id = find_project_by_partial_id(raw_project_id, project_mapping)
+                # Only use mapping if we have an EXACT match (case-insensitive for alphanumeric)
+                # First try exact case match
+                if raw_project_id in project_mapping:
+                    info = project_mapping[raw_project_id]
+                    resolved_id = info.get('project_id', raw_project_id)
+                    logger.info(f"[ORDER-RESOLVE] Exact match in mapping: '{raw_project_id}' -> '{resolved_id}'")
+                else:
+                    # Try case-insensitive match for alphanumeric projectNumbers
+                    raw_lower = raw_project_id.lower()
+                    for pid in project_mapping.keys():
+                        if pid.lower() == raw_lower:
+                            info = project_mapping[pid]
+                            resolved_id = info.get('project_id', pid)
+                            logger.info(f"[ORDER-RESOLVE] Case-insensitive match: '{raw_project_id}' -> '{pid}' -> '{resolved_id}'")
+                            break
 
-            # If not resolved and raw_project_id doesn't look like a pure numeric internal ID,
-            # auto-fetch projects to build the mapping
-            if not resolved_id and not raw_project_id.isdigit():
+            # If not resolved, ALWAYS auto-fetch fresh projects
+            # This handles: projectNumbers (numeric or alphanumeric), stale mappings, new projects
+            if not resolved_id:
                 logger.info(f"[ORDER-RESOLVE] '{raw_project_id}' not found in mapping - auto-fetching projects")
                 try:
                     list_response = call_lambda_directly('list_projects', {
@@ -4126,12 +4185,24 @@ What would you like to do?"""
                                     project_mapping[project_number] = {'project_id': pid, 'category': p.get('category', '')}
                         logger.info(f"[ORDER-RESOLVE] Auto-fetched {len(list_body['projects'])} projects, mapping keys: {list(project_mapping.keys())[:10]}")
 
-                        # Try resolution again with fresh mapping
-                        resolved_id = find_project_by_partial_id(raw_project_id, project_mapping)
-                        if resolved_id:
-                            logger.info(f"[ORDER-RESOLVE] find_project_by_partial_id returned: '{resolved_id}' for '{raw_project_id}'")
+                        # Try EXACT match first (case-insensitive for alphanumeric projectNumbers)
+                        if raw_project_id in project_mapping:
+                            info = project_mapping[raw_project_id]
+                            resolved_id = info.get('project_id', raw_project_id)
+                            logger.info(f"[ORDER-RESOLVE] Exact match after fetch: '{raw_project_id}' -> '{resolved_id}'")
                         else:
-                            logger.warning(f"[ORDER-RESOLVE] find_project_by_partial_id returned None for '{raw_project_id}'")
+                            # Try case-insensitive match
+                            raw_lower = raw_project_id.lower()
+                            for pid in project_mapping.keys():
+                                if pid.lower() == raw_lower:
+                                    info = project_mapping[pid]
+                                    resolved_id = info.get('project_id', pid)
+                                    logger.info(f"[ORDER-RESOLVE] Case-insensitive match after fetch: '{raw_project_id}' -> '{resolved_id}'")
+                                    break
+
+                        # If still not found, project doesn't exist for this customer
+                        if not resolved_id:
+                            logger.warning(f"[ORDER-RESOLVE] Project '{raw_project_id}' not found in customer's projects")
                     else:
                         # list_projects didn't return projects - likely an error
                         error_msg = list_body.get('error', list_body.get('message', 'unknown error'))
@@ -4140,11 +4211,11 @@ What would you like to do?"""
                     logger.warning(f"[ORDER-RESOLVE] Auto-fetch failed: {fetch_err}")
 
             if resolved_id and resolved_id != raw_project_id:
-                logger.info(f"[ORDER-RESOLVE] ✅ Resolved Order Number '{raw_project_id}' -> Internal Project ID '{resolved_id}'")
+                logger.info(f"[ORDER-RESOLVE] ✅ Resolved '{raw_project_id}' -> Internal Project ID '{resolved_id}'")
                 lambda_params['project_id'] = resolved_id
-            elif raw_project_id and not raw_project_id.isdigit():
-                # Order Number couldn't be resolved - this will likely cause issues downstream
-                logger.warning(f"[ORDER-RESOLVE] ⚠️ Could not resolve Order Number '{raw_project_id}' to internal ID - passing as-is")
+            elif not resolved_id:
+                # Project not found - pass as-is and let Lambda handle the error
+                logger.warning(f"[ORDER-RESOLVE] ⚠️ Could not resolve '{raw_project_id}' - passing as-is")
 
         # Convert schedule_project to get_available_dates (schedule_project is the classifier action,
         # but the Lambda only understands get_available_dates)
@@ -4338,10 +4409,15 @@ What would you like to do?"""
             # Use lambda_params which contains status, category, projectType from classification
             if lambda_action == 'list_projects' and 'projects' in response_body and isinstance(response_body['projects'], list):
                 original_count = len(response_body['projects'])
+                # DEBUG: Log filter params before applying
+                logger.info(f"[FILTER-DEBUG] About to filter {original_count} projects with params: {lambda_params}")
+                if original_count > 0:
+                    # Log first project's installer info for debugging
+                    first_proj = response_body['projects'][0]
+                    logger.info(f"[FILTER-DEBUG] First project installer: {first_proj.get('installer', 'NOT FOUND')}")
                 response_body['projects'] = apply_project_filters(response_body['projects'], lambda_params)
                 filtered_count = len(response_body['projects'])
-                if original_count != filtered_count:
-                    logger.info(f"[FILTER] Applied post-filters: {original_count} -> {filtered_count} projects (params={lambda_params})")
+                logger.info(f"[FILTER] Applied post-filters: {original_count} -> {filtered_count} projects")
 
             # Extract PF API HTTP status code from Lambda response
             # Check both 'pf_http_status_code' and 'pf_status_code' for compatibility

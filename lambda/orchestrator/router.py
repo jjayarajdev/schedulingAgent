@@ -1718,13 +1718,17 @@ def route_request(
                 response_body = response_body_str
 
             # POST-FILTER PROJECTS: Apply semantic filters since upstream API doesn't filter
-            # merged_params may contain status, category, projectType, address from classification
+            # merged_params may contain status, category, projectType, address, technician_name from classification
             if action == 'list_projects' and 'projects' in response_body and isinstance(response_body['projects'], list):
                 original_count = len(response_body['projects'])
+                # DEBUG: Log filter params and first project's installer
+                logger.info(f"[FILTER-DEBUG] Filtering {original_count} projects with params: {merged_params}")
+                if original_count > 0:
+                    first_proj = response_body['projects'][0]
+                    logger.info(f"[FILTER-DEBUG] Sample project installer: {first_proj.get('installer', 'NOT FOUND')}, technician: {first_proj.get('technician', 'NOT FOUND')}")
                 response_body['projects'] = apply_project_filters(response_body['projects'], merged_params)
                 filtered_count = len(response_body['projects'])
-                if original_count != filtered_count:
-                    logger.info(f"[FILTER] Applied post-filters: {original_count} -> {filtered_count} projects (params={merged_params})")
+                logger.info(f"[FILTER] Result: {original_count} -> {filtered_count} projects")
 
             # Format response for UI - conversational text + structured JSON
             # Pass channel so voice gets concise responses directly from Claude
