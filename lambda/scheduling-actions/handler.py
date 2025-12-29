@@ -455,6 +455,12 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
     raw_data = response.get("data", [])
     logger.info(f"Processing {len(raw_data)} projects from API")
 
+    # DEBUG: Log raw fields from first project to check installer data
+    if raw_data:
+        first_item = raw_data[0]
+        installer_fields = {k: v for k, v in first_item.items() if 'user' in k.lower() or 'installer' in k.lower()}
+        logger.info(f"[DEBUG] First project installer-related fields: {installer_fields}")
+
     # Extract comprehensive fields from each project (fast iteration)
     projects = [extract_project_minimal(item) for item in raw_data]
 

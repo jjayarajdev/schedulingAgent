@@ -1709,6 +1709,7 @@ Determine the next step:
        - category: bucket name ("Kitchen", "Windows", "Decking", "Bathroom", "Flooring") or exact category ("Storm Door", "Dishwasher")
        - projectType: "Call Back", "Installation", "Repair", "Measurement"
        - address: partial address match (e.g., "401 Chicago Avenue", "Main Street", "Minneapolis")
+       - technician_name: filter by assigned technician/installer (e.g., "projects assigned to John", "Mildred's projects")
    - For get_weather: need location as "City, State" format (e.g., "Minneapolis, MN") - combine city and state from entities
 
 IMPORTANT - POST-FILTERS vs API PARAMS:

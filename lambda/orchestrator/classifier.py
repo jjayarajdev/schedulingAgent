@@ -332,7 +332,8 @@ def apply_project_filters(projects: List[Dict[str, Any]], params: Optional[Dict[
         ]
 
     # ---- TECHNICIAN/INSTALLER FILTER ----
-    technician_name = params.get("technician_name")
+    # Check both 'technician_name' (NLU) and 'assignee' (Sonnet enricher)
+    technician_name = params.get("technician_name") or params.get("assignee")
     if technician_name:
         tn = _norm(technician_name)
         logger.info(f"[FILTER] Filtering by technician_name: '{technician_name}'")

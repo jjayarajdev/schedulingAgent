@@ -153,6 +153,7 @@ Extract any of:
 - status: "schedulable" (New, Ready To Schedule) or "scheduled" (Scheduled, Tentatively Scheduled)
 - category: Kitchen, Decking, Windows, Flooring, Doors, etc.
 - location: Any address or area mentioned
+- technician_name: Name of assigned technician/installer
 
 Examples:
 - "show scheduled projects" → {{"status": "scheduled"}}
@@ -160,6 +161,8 @@ Examples:
 - "kitchen projects" → {{"category": "Kitchen"}}
 - "just the dishwasher" → {{"category": "Dishwasher"}}
 - "projects at North Loop" → {{"location": "North Loop"}}
+- "projects assigned to John" → {{"technician_name": "John"}}
+- "Mildred's projects" → {{"technician_name": "Mildred"}}
 
 Return ONLY valid JSON. Only include fields that are explicitly mentioned.""",
 
@@ -345,7 +348,7 @@ def needs_enrichment(action: str, existing_entities: Dict) -> bool:
     """
     if action == 'list_projects':
         # Only enrich if no filters already extracted
-        return not any(k in existing_entities for k in ['status', 'category', 'location'])
+        return not any(k in existing_entities for k in ['status', 'category', 'location', 'technician_name'])
 
     elif action == 'get_time_slots':
         # Need date
