@@ -1513,6 +1513,15 @@ Category-based with synonym (deck = decking):
     "reasoning": "User said 'schedule the deck job'. Semantic match: 'deck' = 'Decking' category. Found project #7751748 with category 'Decking'."
 }}
 
+Date preference (schedule for next month/January/next week):
+{{
+    "intent": "scheduling",
+    "action": "get_available_dates",
+    "entities": {{"project_id": "7751748", "date": "next month"}},
+    "workflow_type": "schedule_appointment",
+    "reasoning": "User said 'schedule the deck for next month'. Include date preference so available dates start from January."
+}}
+
 Partial location match:
 {{
     "intent": "scheduling",
@@ -1699,6 +1708,7 @@ Determine the next step:
 1. Do we have everything needed to call a Lambda function?
    - For get_project_details: need project_id - IF user refers to project by category (e.g., "kitchen sink project"), use project_mapping from workflow context to find the matching project_id
    - For get_available_dates: need project_id (returns dates + request_id) - IF user refers to project by category, use project_mapping to resolve to project_id
+     OPTIONAL: date - if user specifies a date preference ("next month", "January", "next week"), include it in lambda_params so dates start from that period
    - For get_time_slots: need project_id + date + request_id (request_id comes from get_available_dates)
    - For confirm_appointment: need project_id + date + time + request_id
    - For cancel_appointment: need project_id - extract from conversation context if user says "cancel this appointment" after viewing project details
@@ -1786,6 +1796,23 @@ OR if we need more info:
     "response_to_user": "Which time works best for you?",
     "missing_info": ["time"],
     "update_workflow_state": {{...}},
+    "workflow_complete": false
+}}
+
+EXAMPLE FOR DATE PREFERENCE (schedule for next month/January):
+When user says "schedule this for next month" or "schedule for January":
+{{
+    "should_call_lambda": true,
+    "lambda_action": "get_available_dates",
+    "lambda_params": {{
+        "project_id": "7751748",
+        "date": "next month"  // IMPORTANT: Include date preference from classification
+    }},
+    "update_workflow_state": {{
+        "workflow_type": "schedule_appointment",
+        "current_stage": "awaiting_date_selection",
+        "context": {{"project_id": "7751748", "date_preference": "next month"}}
+    }},
     "workflow_complete": false
 }}
 
@@ -2156,6 +2183,13 @@ def orchestrate_intelligent_workflow(
                 'client_id': client_id,
                 'pf_bearer_token': pf_bearer_token
             })
+
+            # INJECT BASE_DATE FOR GET_TIME_SLOTS in continuation handler
+            # This is critical for "next month" scheduling - API URL needs base_date from get_available_dates
+            if action == 'get_time_slots':
+                if 'start_date' in preserve_context and 'base_date' not in params:
+                    params['base_date'] = preserve_context['start_date']
+                    logger.info(f"[CONTINUATION][TIME_SLOTS] Injected base_date from preserve_context: {preserve_context['start_date']}")
 
             # ================================================================
             # CONFIRMATION INTERCEPTION (Chat/SMS only) - In Continuation Handler
@@ -4124,6 +4158,14 @@ What would you like to do?"""
             'pf_bearer_token': pf_bearer_token
         })
 
+        # INJECT BASE_DATE FOR GET_TIME_SLOTS: Use start_date from workflow state (saved by get_available_dates)
+        # This is critical for "next month" scheduling - the API URL needs base_date from get_available_dates
+        if lambda_action == 'get_time_slots':
+            context = workflow_state.get('context', {}) if workflow_state else {}
+            if 'start_date' in context and 'base_date' not in lambda_params:
+                lambda_params['base_date'] = context['start_date']
+                logger.info(f"[TIME_SLOTS] Injected base_date from workflow state: {context['start_date']}")
+
         # ORDER NUMBER → PROJECT ID RESOLUTION
         # Users see/say Order Numbers (projectNumber) but API requires internal Project IDs
         # Order Numbers can be ANY format (e.g., "AI-PRO-100000", "21083_09PF05VD_...", etc.)
@@ -4827,7 +4869,7 @@ What would you like to do?"""
                     decision['update_workflow_state']['context']['request_id'] = response_body['request_id']
                     logger.info(f"[STATE] Added request_id to workflow state context")
 
-            # Save available_dates to workflow state for later weather date suggestions
+            # Save available_dates AND start_date to workflow state for get_time_slots
             if 'available_dates' in response_body and response_body['available_dates']:
                 logger.info(f"[DATES] Saving {len(response_body['available_dates'])} available dates to workflow state")
 
@@ -4835,6 +4877,11 @@ What would you like to do?"""
                     if 'context' not in decision['update_workflow_state']:
                         decision['update_workflow_state']['context'] = {}
                     decision['update_workflow_state']['context']['available_dates'] = response_body['available_dates']
+
+                    # CRITICAL: Save start_date (base_date) for get_time_slots URL construction
+                    if response_body.get('start_date'):
+                        decision['update_workflow_state']['context']['start_date'] = response_body['start_date']
+                        logger.info(f"[DATES] Saved start_date/base_date: {response_body['start_date']}")
 
             # SAVE PROJECT_IDS AND PROJECT_MAPPING: Save to workflow state when listing projects
             # This enables ordinal references like "last project", "first project", "2nd project"

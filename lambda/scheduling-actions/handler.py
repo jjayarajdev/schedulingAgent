@@ -46,6 +46,77 @@ from mock_data import (
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+
+def convert_natural_date(date_str: str) -> Optional[str]:
+    """
+    Convert natural language date to YYYY-MM-DD format.
+
+    Handles:
+    - Already formatted dates (YYYY-MM-DD) - passthrough
+    - "next month" - first day of next month
+    - "next week" - next Monday
+    - Month names ("january", "feb") - first day of that month
+
+    Returns None if can't parse (caller should fall back to today).
+    """
+    import re
+    from datetime import timedelta
+
+    if not date_str:
+        return None
+
+    today = datetime.now()
+    date_lower = date_str.lower().strip()
+
+    # Already in YYYY-MM-DD format? Pass through
+    if re.match(r'^\d{4}-\d{2}-\d{2}$', date_str):
+        return date_str
+
+    # YYYY-MM format (e.g., "2026-01") - convert to first day of that month
+    yyyy_mm_match = re.match(r'^(\d{4})-(\d{2})$', date_str)
+    if yyyy_mm_match:
+        year = yyyy_mm_match.group(1)
+        month = yyyy_mm_match.group(2)
+        result = f"{year}-{month}-01"
+        logger.info(f"[DATE] Converted '{date_str}' (YYYY-MM) -> {result}")
+        return result
+
+    # "next month" - first day of next month
+    if 'next month' in date_lower:
+        if today.month == 12:
+            result = f"{today.year + 1}-01-01"
+        else:
+            result = f"{today.year}-{today.month + 1:02d}-01"
+        logger.info(f"[DATE] Converted 'next month' -> {result}")
+        return result
+
+    # "next week" - next Monday
+    if 'next week' in date_lower:
+        days_until_monday = (7 - today.weekday()) % 7
+        if days_until_monday == 0:
+            days_until_monday = 7  # If today is Monday, go to next Monday
+        next_monday = today + timedelta(days=days_until_monday)
+        result = next_monday.strftime("%Y-%m-%d")
+        logger.info(f"[DATE] Converted 'next week' -> {result}")
+        return result
+
+    # Month names: "january", "feb", etc.
+    months = {
+        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+        'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+    }
+    for name, num in months.items():
+        if name in date_lower:
+            # If month is in the past this year, use next year
+            year = today.year if num >= today.month else today.year + 1
+            result = f"{year}-{num:02d}-01"
+            logger.info(f"[DATE] Converted '{date_str}' -> {result}")
+            return result
+
+    logger.warning(f"[DATE] Could not parse date preference: '{date_str}'")
+    return None
+
+
 # DynamoDB client for notes storage
 dynamodb = boto3.resource('dynamodb')
 
@@ -779,11 +850,21 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
 
         logger.info(f"[REAL] Fetching available dates for client {client_id}, project {project_id}")
 
-        # Use today's date as starting point for available dates
-        today = datetime.now().strftime("%Y-%m-%d")
+        # Determine start_date: check for date preference, then fall back to today
+        start_date = params.get('start_date')
+        if not start_date:
+            # Check if 'date' parameter has a natural language value (e.g., "next month")
+            date_param = params.get('date')
+            if date_param:
+                start_date = convert_natural_date(date_param)
+                logger.info(f"[DATE] Using date preference: '{date_param}' -> start_date={start_date}")
+
+        if not start_date:
+            start_date = datetime.now().strftime("%Y-%m-%d")
+            logger.info(f"[DATE] Using today as start_date: {start_date}")
 
         # Construct URL matching real portal API
-        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/date/{today}/selected/{today}/slots"
+        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/date/{start_date}/selected/{start_date}/slots"
 
         logger.info(f"GET {url}")
 
@@ -867,6 +948,7 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
         "dates": formatted_dates,  # Enhanced format for UI
         "dateCount": len(raw_dates),
         "request_id": data.get("request_id"),
+        "start_date": start_date,  # IMPORTANT: Base date used for URL - needed for get_time_slots
         "mock_mode": USE_MOCK_API,
         "pf_http_status_code": pf_http_status_code
     }
@@ -876,19 +958,28 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
     Action: get_time_slots
     Returns available time slots for a specific date
 
-    Real API Endpoint: GET /scheduler/client/{client_id}/project/{project_id}/date/{date}/selected/{selected_date}/slots
+    Real API Endpoint: GET /scheduler/client/{client_id}/project/{project_id}/date/{base_date}/selected/{selected_date}/slots?request_id={request_id}
+
+    IMPORTANT: The 'date' param in URL must be the SAME base_date used in get_available_dates,
+    while 'selected' is the user's chosen date. They are NOT the same!
     """
     project_id = params.get('project_id')
     client_id = params.get('client_id')
-    date = params.get('date')
+    selected_date = params.get('date')  # User's selected date
+    base_date = params.get('base_date') or params.get('start_date')  # Original start_date from get_available_dates
     request_id = params.get('request_id')
     customer_id = params.get('customer_id')
 
     # Track PF API HTTP status code
     pf_http_status_code = 200  # Default for mock/success
 
-    if not all([project_id, date, request_id]):
+    if not all([project_id, selected_date, request_id]):
         raise ValueError("Missing required parameters: project_id, date, request_id")
+
+    # If base_date not provided, fall back to selected_date (less accurate but maintains backward compat)
+    if not base_date:
+        logger.warning(f"[get_time_slots] base_date not provided, falling back to selected_date: {selected_date}")
+        base_date = selected_date
 
     # Resolve Order Number to internal ID if needed (scheduler API requires internal ID)
     if not str(project_id).isdigit() and not USE_MOCK_API and customer_id and client_id:
@@ -907,17 +998,18 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
             logger.warning(f"Failed to resolve Order Number '{project_id}': {e}, proceeding with original value")
 
     if USE_MOCK_API:
-        logger.info(f"[MOCK] Fetching time slots for project {project_id} on {date}")
-        response = get_mock_time_slots(project_id, date, request_id)
+        logger.info(f"[MOCK] Fetching time slots for project {project_id} on {selected_date} (base: {base_date})")
+        response = get_mock_time_slots(project_id, selected_date, request_id)
     else:
         # Validate client_id is present for real API calls
         if not client_id:
             raise ValueError("Missing required parameter for real API: client_id")
 
-        logger.info(f"[REAL] Fetching time slots for client {client_id}, project {project_id} on {date}")
+        logger.info(f"[REAL] Fetching time slots for client {client_id}, project {project_id}, selected: {selected_date}, base: {base_date}")
 
-        # Construct URL matching real portal API: /scheduler/client/{client_id}/project/{project_id}/date/{date}/selected/{date}/slots
-        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/date/{date}/selected/{date}/slots"
+        # Construct URL matching real portal API: /scheduler/client/{client_id}/project/{project_id}/date/{base_date}/selected/{selected_date}/slots
+        # IMPORTANT: base_date = the start_date used in get_available_dates, selected_date = user's chosen date
+        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/date/{base_date}/selected/{selected_date}/slots?request_id={request_id}"
 
         logger.info(f"GET {url}")
 
@@ -997,7 +1089,7 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
     return {
         "action": "get_time_slots",
         "project_id": project_id,
-        "date": date,
+        "date": selected_date,
         "available_slots": raw_slots,  # Keep original for compatibility
         "timeSlots": raw_slots,  # Alias for UI compatibility
         "timeSlotsGrouped": time_slots_grouped,  # Grouped format for enhanced UI
