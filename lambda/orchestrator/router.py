@@ -238,6 +238,7 @@ Examples:
 "Your Solar project is scheduled for December fifteenth with Mike."
 "5 dates available. December tenth through the fifteenth. Which works?"
 "Got 3 morning slots: 8 AM, 9 AM, and 10 AM. Which time?"
+"It's 72 and sunny in Minneapolis. Great day for outdoor work."
 """
         user_prompt = f"""User asked: "{user_message}"
 Data: {json.dumps(structured_data, indent=2)}
@@ -271,10 +272,12 @@ BAD EXAMPLES (don't do this):
 "I have retrieved your project information. You currently have 3 projects in our system."
 "Let me check on that for you. One moment please. I found 5 available dates."
 
-Weather notes:
-- If there are weather concerns, mention them casually: "Heads up - Wednesday might be rainy"
-- Suggest better dates if available: "Thursday looks clearer if that works"
-- Don't be alarming, just helpful
+Weather responses:
+- Start with location and current conditions: "It's 72°F and sunny in Minneapolis right now"
+- Include relevant forecast briefly: "Tomorrow looks similar, high of 75"
+- For outdoor projects, note scheduling impact: "Great weather for deck work this week"
+- If rain/bad weather: "Heads up - Wednesday might be rainy. Thursday looks better"
+- Keep it conversational, not a data dump - NO raw numbers like "humidity: 65"
 
 Keep it to 2-3 sentences max. Be helpful, not verbose."""
 
@@ -329,6 +332,7 @@ Skip the JSON - that'll show separately."""
             'confirm_appointment': "Your appointment is confirmed!",
             'cancel_appointment': "Your appointment has been cancelled.",
             'reschedule_appointment': "Your appointment has been rescheduled.",
+            'get_weather': f"Current weather: {structured_data.get('current', {}).get('temperature', 'N/A')}°F and {structured_data.get('current', {}).get('condition', 'unknown conditions')} in {structured_data.get('location', 'your area')}.",
         }
 
         return fallback_messages.get(action, "Here's what I found:")
@@ -993,6 +997,19 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 },
                 "forecast": formatted_forecast
             }
+
+            # Validate weather data - don't return zeros/Unknown
+            is_invalid = (
+                location_str in ['Unknown', 'Unknown Location'] or
+                (result['current']['temperature'] == 0 and
+                 result['current']['humidity'] == 0 and
+                 result['current']['condition'] == 'Unknown')
+            )
+            if is_invalid:
+                logger.warning(f"[WEATHER] Invalid weather data - location: {location_str}, temp: {result['current']['temperature']}")
+                if channel == 'voice':
+                    return "I couldn't get the weather. Which city would you like me to check?"
+                return "I couldn't retrieve weather data. Please specify a city name (e.g., 'weather in Minneapolis') or ask about a specific project's location."
 
             # Generate conversational response using Claude
             conversational = generate_conversational_response(action, user_message, result, channel)

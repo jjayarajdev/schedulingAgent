@@ -3531,7 +3531,16 @@ What would you like to do?"""
                 }
         else:
             logger.warning("[WEATHER] Could not determine location for weather query")
-            # Fall through to let normal flow handle it (Sonnet might ask for location)
+            # Return helpful prompt asking for location instead of falling through
+            timing['total'] = time.time() - start_time
+            return {
+                'response': "I'd be happy to check the weather! Which city or project would you like the forecast for?",
+                'intent': 'information',
+                'action': 'get_weather',
+                'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                'needs_input': True,
+                'timing': timing
+            }
 
     # HANDLE CANCEL CONFIRMATION (User says "yes" after seeing project details for cancel)
     if workflow_state and workflow_state.get('current_stage') == 'awaiting_cancel_confirmation':
