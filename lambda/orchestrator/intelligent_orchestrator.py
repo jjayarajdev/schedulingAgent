@@ -3408,7 +3408,7 @@ What would you like to do?"""
         entities = classification.get('entities', {})
         project_index = entities.get('project_index')
         project_id = entities.get('project_id')
-        location = entities.get('location')  # May already be extracted by Sonnet
+        location = entities.get('location')  # May already be extracted by Sonnet enricher
 
         # If no location, try to get it from workflow_state's project_mapping
         # This handles "what's the weather" after user viewed a project

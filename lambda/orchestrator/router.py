@@ -1627,18 +1627,19 @@ def route_request(
         'pf_bearer_token': pf_bearer_token
     }
 
-    # INTELLIGENT ORCHESTRATION: Use Sonnet 3.5 for ALL workflow decisions
+    # INTELLIGENT ORCHESTRATION: Use Sonnet 3.7 for ALL workflow decisions
     # NO hardcoding, NO regex - pure intelligence!
     workflow_actions = [
         'schedule_project', 'confirm_appointment', 'reschedule_appointment',
         'cancel_appointment', 'add_note', 'list_notes'
     ]
 
-    # Weather requests without explicit location need intelligent context extraction
+    # Weather ALWAYS goes through intelligent orchestration for proper context extraction
+    # Sonnet enricher handles location resolution from project context
     needs_intelligent_orchestration = (
         action in workflow_actions or
         intent == 'scheduling' or
-        (action == 'get_weather' and not merged_params.get('location') and not merged_params.get('latitude'))
+        action == 'get_weather'  # Always use Sonnet for weather context
     )
 
     if needs_intelligent_orchestration:

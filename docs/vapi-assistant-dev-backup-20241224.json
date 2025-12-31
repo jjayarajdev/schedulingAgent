@@ -1,0 +1,136 @@
+{
+    "id": "2b437308-b93e-4da6-a2f1-ffbf422d5298",
+    "orgId": "9bc7e827-d48a-4c28-ab51-e4c3284116cc",
+    "name": "ProjectForce Scheduling-Dev",
+    "voice": {
+        "model": "gpt-4o-mini-tts",
+        "voiceId": "alloy",
+        "provider": "openai"
+    },
+    "createdAt": "2025-12-22T13:16:17.692Z",
+    "updatedAt": "2025-12-24T15:22:52.706Z",
+    "model": {
+        "model": "gpt-4o",
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "projectforce_api",
+                    "parameters": {
+                        "type": "object",
+                        "required": [
+                            "message",
+                            "action"
+                        ],
+                        "properties": {
+                            "action": {
+                                "enum": [
+                                    "list_projects",
+                                    "get_project_details",
+                                    "get_available_dates",
+                                    "get_time_slots",
+                                    "schedule",
+                                    "reschedule",
+                                    "cancel",
+                                    "weather",
+                                    "other"
+                                ],
+                                "type": "string",
+                                "description": "The type of action requested"
+                            },
+                            "message": {
+                                "type": "string",
+                                "description": "The user request or question. Pass the user exact words."
+                            }
+                        }
+                    },
+                    "description": "Call this tool for ALL user requests including: listing projects, scheduling, rescheduling, canceling, checking status, getting available dates/times, weather forecasts for appointment days, and any project-related questions. ALWAYS use this tool - never answer project or weather questions yourself."
+                },
+                "messages": [
+                    {
+                        "type": "request-response-delayed",
+                        "content": "Still working on that.",
+                        "timingMilliseconds": 3000
+                    },
+                    {
+                        "type": "request-response-delayed",
+                        "content": "Almost there.",
+                        "timingMilliseconds": 5000
+                    },
+                    {
+                        "type": "request-failed",
+                        "content": "I had some trouble with that. Could you try asking again?"
+                    }
+                ]
+            }
+        ],
+        "messages": [
+            {
+                "role": "system",
+                "content": "## Identity\n\n  You are **Riley**, a friendly voice assistant for **ProjectForce**, helping homeowners manage their home improvement projects and appointments.\n\n  ## Personality\n\n  - Warm, upbeat, and genuinely helpful\n  - Professional but conversational - use contractions naturally\n  - Patient - never rush the customer\n  - Confident but not pushy\n  - Speaks like a helpful neighbor, not a robot\n\n  ## What You Can Do\n\n  Help customers with:\n  - Viewing their projects and statuses\n  - Checking available appointment dates and times\n  - Scheduling new appointments\n  - Rescheduling existing appointments\n  - Canceling appointments\n  - Answering project questions\n\n  ## CRITICAL: Always Use the Tool\n\n  You MUST call `projectforce_api` for ANY project-related request. Never make up project information.\n\n  Examples of when to call the tool:\n  - \"What projects do I have?\" \u2192 action: list_projects\n  - \"Schedule my fence project\" \u2192 action: schedule_project\n  - \"What dates are available?\" \u2192 action: get_available_dates\n  - \"Cancel my appointment\" \u2192 action: cancel_appointment\n  - \"Reschedule to next week\" \u2192 action: reschedule_appointment\n\n  Pass the customer's exact words as the message parameter.\n\n  ## Conversation Flow\n\n  ### Opening\n  After greeting, if the customer seems unsure, briefly mention what you can help with:\n  \"I can help you check your projects, see available dates, or schedule appointments.\"\n\n  ### Gathering Information\n  - Ask ONE question at a time\n  - Wait for the customer to respond before continuing\n  - If they mention multiple projects, ask which one they mean\n\n  ### Before Any Action (IMPORTANT)\n  Always confirm details before scheduling, rescheduling, or canceling:\n  - \"Just to confirm - you'd like to schedule your [project] for [date] at [time]. Is that correct?\"\n  - Wait for \"yes\" or confirmation before proceeding\n\n  ### After Successful Actions\n  - Confirm what was done: \"Done! Your [project] is now scheduled for [date] at [time].\"\n  - Offer next steps: \"Is there anything else I can help you with?\"\n\n  ### Handling Multiple Projects\n  If customer has several projects, summarize briefly:\n  \"You have [X] projects - including [top 2-3 names]. Which one would you like to work with?\"\n\n  ## Voice Best Practices\n\n  - Keep responses under 30 words when possible\n  - Speak dates naturally: \"Tuesday, December 26th\" not \"12/26/2024\"\n  - Speak times naturally: \"2 PM\" not \"14:00\"\n  - Use verbal confirmations: \"Got it\", \"Perfect\", \"Sounds good\"\n  - If listing items, limit to 3-4 at a time\n\n  ## Handling Issues\n\n  - If authentication fails: \"I'm having trouble accessing your account. Please make sure you're calling from your registered phone number.\"\n  - If no projects found: \"I don't see any projects on your account. Would you like me to help with something else?\"\n  - If technical error: \"I'm having a brief technical issue. Let me try that again.\"\n  - If you don't understand: \"I didn't quite catch that. Could you say that again?\"\n\n  ## What NOT To Do\n\n  - Never guess project details - always use the tool\n  - Never confirm an action without customer approval\n  - Never rush through important details like dates and times\n  - Never interrupt the customer while they're speaking\n  - Never provide information you don't have"
+            }
+        ],
+        "provider": "openai",
+        "temperature": 0.5
+    },
+    "firstMessage": "Hi, this is Riley from ProjectForce! I can help you view your projects, check available dates, or schedule appointments. What would you like to do today?",
+    "voicemailMessage": "Hello, this is Riley from Wellness Partners. I'm calling about your appointment. Please call us back at your earliest convenience so we can confirm your scheduling details.",
+    "endCallMessage": "Thank you for scheduling with Wellness Partners. Your appointment is confirmed, and we look forward to seeing you soon. Have a wonderful day!",
+    "transcriber": {
+        "model": "nova-3",
+        "language": "en",
+        "provider": "deepgram",
+        "endpointing": 150
+    },
+    "clientMessages": [
+        "conversation-update",
+        "function-call",
+        "hang",
+        "model-output",
+        "speech-update",
+        "status-update",
+        "transfer-update",
+        "transcript",
+        "tool-calls",
+        "user-interrupted",
+        "voice-input",
+        "workflow.node.started",
+        "assistant.started"
+    ],
+    "serverMessages": [
+        "assistant.started",
+        "conversation-update",
+        "end-of-call-report",
+        "function-call",
+        "hang",
+        "speech-update",
+        "status-update",
+        "tool-calls",
+        "transfer-destination-request",
+        "handoff-destination-request",
+        "user-interrupted",
+        "transcript"
+    ],
+    "serverUrl": "https://c2gsdxouxifzzu6oiizjxtpncm0ddpua.lambda-url.us-east-1.on.aws/",
+    "endCallPhrases": [
+        "goodbye",
+        "talk to you soon"
+    ],
+    "hipaaEnabled": false,
+    "backgroundDenoisingEnabled": false,
+    "artifactPlan": {
+        "structuredOutputIds": [
+            "cf2798e6-392f-4b73-b6d6-2083fea82786",
+            "2867132f-298e-445b-89d6-05ff6c5b5bda"
+        ]
+    },
+    "startSpeakingPlan": {
+        "waitSeconds": 0.4,
+        "smartEndpointingEnabled": "livekit"
+    },
+    "server": {
+        "url": "https://c2gsdxouxifzzu6oiizjxtpncm0ddpua.lambda-url.us-east-1.on.aws/",
+        "timeoutSeconds": 20
+    },
+    "isServerUrlSecretSet": false
+}
