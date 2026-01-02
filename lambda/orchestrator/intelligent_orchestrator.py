@@ -3412,9 +3412,12 @@ What would you like to do?"""
 
         # If no location, try to get it from workflow_state's project_mapping
         # This handles "what's the weather" after user viewed a project
+        logger.info(f"[WEATHER] location={location}, workflow_state exists={workflow_state is not None}")
         if not location and workflow_state:
             context = workflow_state.get('context', {})
-            project_mapping = context.get('project_mapping', {})
+            # Check both context-level AND top-level project_mapping (context switch preserves at top level)
+            project_mapping = context.get('project_mapping', {}) or workflow_state.get('project_mapping', {})
+            logger.info(f"[WEATHER] Fallback: current_project_id={context.get('project_id')}, project_mapping keys={list(project_mapping.keys())[:3]}")
 
             # If user just viewed a project, get its location
             current_project_id = context.get('project_id')
@@ -3441,6 +3444,98 @@ What would you like to do?"""
                         location = f"{addr_match.group(1).strip()}, {addr_match.group(2)}"
                         project_id = first_pid
                         logger.info(f"[WEATHER] Got location from first project #{first_pid}: {location}")
+
+        # AUTO-FETCH: If project ID mentioned in message, fetch THAT project's details
+        # This takes priority over enricher location (which may be from previous context)
+        # Extract project ID from message (PF ID like 21083_09PF05VD_xxx or internal 7-digit or short like 9000407_1_1)
+        pf_id_match = re.search(r'\b(\d+_[A-Za-z0-9]+_\d+(?:_\d+)*)\b', message)
+        short_id_match = re.search(r'\b(\d{7}_\d+(?:_\d+)*)\b', message)  # e.g., 9000407_1_1
+        internal_id_match = re.search(r'\b(\d{7})\b', message)
+
+        msg_project_id = None
+        if pf_id_match:
+            msg_project_id = pf_id_match.group(1)
+        elif short_id_match:
+            msg_project_id = short_id_match.group(1)
+        elif internal_id_match:
+            msg_project_id = internal_id_match.group(1)
+
+        # If project ID in message, always auto-fetch that project's location (override enricher)
+        if msg_project_id:
+            logger.info(f"[WEATHER] Project ID in message: {msg_project_id}, will auto-fetch its location")
+            # Clear enricher location to force fetch
+            location = None
+
+        if not location and msg_project_id:
+            logger.info(f"[WEATHER] Auto-fetching project details for: {msg_project_id}")
+            try:
+                # First resolve the project ID through list_projects
+                list_response = call_lambda_directly('list_projects', {
+                    'customer_id': customer_id,
+                    'client_id': client_id,
+                    'pf_bearer_token': pf_bearer_token
+                })
+
+                list_data = list_response.get('response', {})
+                list_func = list_data.get('functionResponse', {})
+                list_body_wrapper = list_func.get('responseBody', {})
+                list_text = list_body_wrapper.get('TEXT', {})
+                list_body_str = list_text.get('body', '{}')
+
+                if isinstance(list_body_str, str):
+                    list_body = json.loads(list_body_str)
+                else:
+                    list_body = list_body_str
+
+                # Find the project and get its internal ID
+                projects = list_body.get('projects', [])
+                resolved_project_id = None
+                project_address = None
+                project_category = None
+                project_scheduled_date = None
+
+                for proj in projects:
+                    pf_id = proj.get('projectNumber', '')
+                    internal_id = str(proj.get('projectId', '') or proj.get('id', ''))
+
+                    if msg_project_id == pf_id or msg_project_id == internal_id:
+                        resolved_project_id = internal_id
+                        project_address = proj.get('address', '')
+                        project_category = proj.get('category', '')
+                        project_scheduled_date = proj.get('scheduledDate', '')
+                        logger.info(f"[WEATHER] Found project: internal_id={resolved_project_id}, address={project_address}, scheduledDate={project_scheduled_date}")
+                        break
+
+                if project_address:
+                    # Handle address as dict or string
+                    if isinstance(project_address, dict):
+                        # Address is a dict like {'address1': '...', 'city': 'Minneapolis', 'state': 'MN', 'zipcode': '55415'}
+                        city = project_address.get('city', '')
+                        state = project_address.get('state', '')
+                        if city and state:
+                            location = f"{city}, {state}"
+                            project_id = resolved_project_id
+                            logger.info(f"[WEATHER] Auto-fetched location from dict: {location} for project #{resolved_project_id}")
+                    else:
+                        # Address is a string like "123 Main St, Minneapolis, MN 55401"
+                        addr_match = re.search(r',\s*([A-Za-z\s]+),\s*([A-Z]{2})\s*\d*', project_address)
+                        if addr_match:
+                            location = f"{addr_match.group(1).strip()}, {addr_match.group(2)}"
+                            project_id = resolved_project_id
+                            logger.info(f"[WEATHER] Auto-fetched location from string: {location} for project #{resolved_project_id}")
+
+                    # Store in classification for context (applies to both dict and string addresses)
+                    if location and resolved_project_id:
+                        if 'entities' not in classification:
+                            classification['entities'] = {}
+                        classification['entities']['project_id'] = resolved_project_id
+                        classification['entities']['project_category'] = project_category
+                        if project_scheduled_date:
+                            classification['entities']['scheduled_date'] = project_scheduled_date
+                            logger.info(f"[WEATHER] Project has scheduled date: {project_scheduled_date}")
+
+            except Exception as fetch_err:
+                logger.warning(f"[WEATHER] Auto-fetch project details failed: {fetch_err}")
 
         # If we have a project reference but no location, extract from conversation history
         if (project_index is not None or project_id) and not location:
@@ -3469,16 +3564,63 @@ What would you like to do?"""
                         logger.info(f"[WEATHER] Built location from city/state: {location}")
 
         if location:
-            logger.info(f"[WEATHER] Fetching weather for location: {location}")
+            # Determine target date for weather forecast
+            # Priority: user-specified date > scheduled date > current date + 7 days
+            from datetime import datetime, timedelta
+            target_date = None
+            entities = classification.get('entities', {})
+            user_date = entities.get('date')  # Date extracted from user message by Sonnet
+            scheduled_date = entities.get('scheduled_date', '')
+
+            if user_date:
+                # Priority 1: User specified a date in their message
+                target_date = user_date
+                logger.info(f"[WEATHER] Using user-specified date: {target_date}")
+            elif scheduled_date:
+                # Priority 2: Use project's scheduled date
+                # Parse various date formats to YYYY-MM-DD
+                try:
+                    # Try MM-DD-YYYY HH:MM AM/PM format (e.g., "01-07-2026 08:00 AM")
+                    if ' ' in scheduled_date:
+                        date_part = scheduled_date.split(' ')[0]
+                    else:
+                        date_part = scheduled_date
+
+                    # Try different formats
+                    for fmt in ['%m-%d-%Y', '%Y-%m-%d', '%d-%m-%Y', '%m/%d/%Y', '%Y/%m/%d']:
+                        try:
+                            parsed = datetime.strptime(date_part, fmt)
+                            target_date = parsed.strftime('%Y-%m-%d')
+                            break
+                        except ValueError:
+                            continue
+
+                    if not target_date:
+                        target_date = scheduled_date  # Fallback to original
+
+                    logger.info(f"[WEATHER] Using project scheduled date: {scheduled_date} -> {target_date}")
+                except Exception as date_err:
+                    logger.warning(f"[WEATHER] Failed to parse scheduled date: {scheduled_date}, error: {date_err}")
+                    target_date = scheduled_date
+            else:
+                # Priority 3: Use current date + 7 days for unscheduled projects
+                target_date = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
+                logger.info(f"[WEATHER] No scheduled date, using current+7 days: {target_date}")
+
+            logger.info(f"[WEATHER] Fetching weather for location: {location}, date: {target_date}")
 
             try:
                 weather_start = time.time()
-                weather_response = call_lambda_directly('get_weather', {
+                weather_params = {
                     'location': location,
                     'customer_id': customer_id,
                     'client_id': client_id,
                     'pf_bearer_token': pf_bearer_token
-                })
+                }
+                if target_date:
+                    weather_params['date'] = target_date
+
+                weather_response = call_lambda_directly('get_weather', weather_params)
                 timing['weather_call'] = time.time() - weather_start
 
                 # Extract weather data from Lambda response
@@ -3538,6 +3680,7 @@ What would you like to do?"""
                 'intent': 'information',
                 'action': 'get_weather',
                 'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                'direct_call': True,
                 'needs_input': True,
                 'timing': timing
             }
@@ -4868,29 +5011,58 @@ What would you like to do?"""
 
             # CRITICAL: Extract request_id from Lambda response and add to workflow state
             # request_id is required for get_time_slots and confirm_appointment
+            # FIX: Create update_workflow_state if missing - ensures request_id is always saved
             if 'request_id' in response_body and response_body['request_id']:
                 logger.info(f"[STATE] Extracted request_id from Lambda response: {response_body['request_id']}")
 
-                # Add request_id to Sonnet's workflow state update
-                if decision.get('update_workflow_state'):
-                    if 'context' not in decision['update_workflow_state']:
-                        decision['update_workflow_state']['context'] = {}
-                    decision['update_workflow_state']['context']['request_id'] = response_body['request_id']
-                    logger.info(f"[STATE] Added request_id to workflow state context")
+                # Ensure update_workflow_state exists - create if Sonnet didn't provide one
+                if not decision.get('update_workflow_state'):
+                    # Preserve existing workflow context if available
+                    existing_context = workflow_state.get('context', {}) if workflow_state else {}
+                    decision['update_workflow_state'] = {
+                        'workflow_type': workflow_state.get('workflow_type', 'schedule_appointment') if workflow_state else 'schedule_appointment',
+                        'current_stage': 'awaiting_date_selection',
+                        'context': {
+                            'project_id': existing_context.get('project_id') or lambda_params.get('project_id'),
+                            'category': existing_context.get('category'),
+                            'city': existing_context.get('city'),
+                            'state': existing_context.get('state')
+                        }
+                    }
+                    logger.info(f"[STATE] Created update_workflow_state for request_id preservation")
+
+                if 'context' not in decision['update_workflow_state']:
+                    decision['update_workflow_state']['context'] = {}
+                decision['update_workflow_state']['context']['request_id'] = response_body['request_id']
+                logger.info(f"[STATE] Added request_id to workflow state context: {response_body['request_id']}")
 
             # Save available_dates AND start_date to workflow state for get_time_slots
             if 'available_dates' in response_body and response_body['available_dates']:
                 logger.info(f"[DATES] Saving {len(response_body['available_dates'])} available dates to workflow state")
 
-                if decision.get('update_workflow_state'):
-                    if 'context' not in decision['update_workflow_state']:
-                        decision['update_workflow_state']['context'] = {}
-                    decision['update_workflow_state']['context']['available_dates'] = response_body['available_dates']
+                # Ensure update_workflow_state exists for dates
+                if not decision.get('update_workflow_state'):
+                    existing_context = workflow_state.get('context', {}) if workflow_state else {}
+                    decision['update_workflow_state'] = {
+                        'workflow_type': workflow_state.get('workflow_type', 'schedule_appointment') if workflow_state else 'schedule_appointment',
+                        'current_stage': 'awaiting_date_selection',
+                        'context': {
+                            'project_id': existing_context.get('project_id') or lambda_params.get('project_id'),
+                            'category': existing_context.get('category'),
+                            'city': existing_context.get('city'),
+                            'state': existing_context.get('state')
+                        }
+                    }
+                    logger.info(f"[STATE] Created update_workflow_state for available_dates preservation")
 
-                    # CRITICAL: Save start_date (base_date) for get_time_slots URL construction
-                    if response_body.get('start_date'):
-                        decision['update_workflow_state']['context']['start_date'] = response_body['start_date']
-                        logger.info(f"[DATES] Saved start_date/base_date: {response_body['start_date']}")
+                if 'context' not in decision['update_workflow_state']:
+                    decision['update_workflow_state']['context'] = {}
+                decision['update_workflow_state']['context']['available_dates'] = response_body['available_dates']
+
+                # CRITICAL: Save start_date (base_date) for get_time_slots URL construction
+                if response_body.get('start_date'):
+                    decision['update_workflow_state']['context']['start_date'] = response_body['start_date']
+                    logger.info(f"[DATES] Saved start_date/base_date: {response_body['start_date']}")
 
             # SAVE PROJECT_IDS AND PROJECT_MAPPING: Save to workflow state when listing projects
             # This enables ordinal references like "last project", "first project", "2nd project"

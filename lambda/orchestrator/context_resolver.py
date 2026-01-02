@@ -442,7 +442,7 @@ def _resolve_pronoun_references(message: str, context: Dict) -> tuple:
         r'\b(it)\b(?!\s+(?:is|was|can|will|would|should|could|has|have|had))',  # "schedule it" but not "it is"
         r'\b(that)\b(?:\s+(?:one|project))?\s*$',  # "schedule that" at end, or "that one", "that project"
         r'\b(that)\b(?:\s+(?:one|project))',  # "show me that one"
-        r'\b(this)(?:\s+one)?\b'
+        r'\b(this)(?:\s+(?:one|project))?\b(?!\s+(?:month|week|year|day))'  # "this one" but not "this month/week"
     ]
 
     for pattern in pronoun_patterns:

@@ -11,6 +11,7 @@ This replaces the fuzzy "intent + action in one prompt" approach with structured
 import json
 import logging
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
@@ -414,10 +415,9 @@ def _fast_path(message: str) -> Optional[Dict[str, Any]]:
     if m in _FASTPATH_BYE:
         return _build_response("Farewell", None)
     if "weather" in m or "forecast" in m:
-        # Extract location if present
-        loc_match = re.search(r"(?:weather|forecast)\s+(?:in|for|at)\s+(\w+(?:\s+\w+)?)", m)
-        params = {"location": loc_match.group(1)} if loc_match else None
-        return _build_response("Weather_Request", params)
+        # Let Sonnet enricher handle location extraction from context
+        # Don't extract here - regex can mistake project IDs for locations
+        return _build_response("Weather_Request", None)
 
     return None
 
@@ -522,10 +522,13 @@ Analyze the user utterance and extract structured information.
 
 - **Availability_Check**: User wants to see available DATES for scheduling
   Triggers: "what dates are available", "when can I schedule", "show dates for project X"
-  Parameters: project_id
+  ALSO use for DATE RANGES like: "last week of Feb", "first week of March", "end of January", "late February"
+  Parameters: project_id, date (use start of the requested period)
 
-- **Time_Slot_Check**: User wants to see available TIME SLOTS on a specific date
-  Triggers: "what times on Nov 14", "show slots for tomorrow", "available times"
+- **Time_Slot_Check**: User wants to see available TIME SLOTS on a SINGLE SPECIFIC date
+  Triggers: "what times on Nov 14", "show slots for tomorrow", "available times on Jan 5"
+  ONLY use when user asks for times/slots on ONE specific date (e.g., "slots for Jan 27")
+  Do NOT use for date ranges like "last week of Feb" - use Availability_Check instead
   Parameters: date, project_id
 
 - **Note_List_Request**: User wants to see notes on a project
@@ -563,14 +566,17 @@ Analyze the user utterance and extract structured information.
 ## PARAMETER EXTRACTION
 
 ### project_id:
+CRITICAL: Extract project_id from the CURRENT MESSAGE, not from conversation history!
+- If user mentions ANY project ID in their current message, use THAT ID (not one from history)
 - Extract project references EXACTLY as written by the user (preserve complete format)
 - Project IDs can be ANY format: numeric ("90000087"), alphanumeric ("AI-PRO-1000010"), or complex ("21083_09PF05VD_123")
 - Examples:
   * "AI-PRO-1000010 status" → project_id: "AI-PRO-1000010"
   * "project 90000087" → project_id: "90000087"
   * "what about 21083_09PF05VD_123" → project_id: "21083_09PF05VD_123"
+  * "details for 9000407_1" → project_id: "9000407_1" (extract from current message!)
 - NEVER strip prefixes or modify the ID format - extract it exactly as the user wrote it
-- Resolve ordinals from context: "2nd project" → use ID from history
+- ONLY use ordinals or history when user says "the project", "this project", "2nd project" WITHOUT an ID
 - If ordinal cannot be resolved, set project_id: null
 
 ### category:
@@ -596,7 +602,19 @@ For **Project_Information_Request** (specific project details): Use EXACT catego
 - "ready to schedule", "ready to go" → "Ready To Schedule"
 
 ### date/time:
+- TODAY'S DATE: {today_date}
 - Extract date mentions: "Nov 14", "tomorrow", "next Tuesday"
+- Convert SPECIFIC dates to YYYY-MM-DD format using TODAY'S DATE for year context
+- If a date is in the past this year, assume NEXT YEAR
+- KEEP these relative expressions AS-IS (do NOT convert to specific date):
+  - "next week" → date="next week"
+  - "this week" → date="this week"
+  - "this month" → date="this month"
+  - "next month" → date="next month"
+  - "last week of February" → date="last week of February"
+  - "first week of March" → date="first week of March"
+  - "end of January" → date="end of January"
+  - Month names alone (e.g., "January", "March") → date="2026-01" (YYYY-MM format)
 - Extract time mentions: "2pm", "morning", "afternoon"
 
 ## CRITICAL DISTINCTIONS
@@ -655,7 +673,8 @@ def classify_intent_and_action(message: str, conversation_history: Optional[List
 
     prompt = NLU_PROMPT_TEMPLATE.format(
         context_section=context_section,
-        message=message
+        message=message,
+        today_date=datetime.now().strftime("%Y-%m-%d")
     )
 
     classification_text = ""

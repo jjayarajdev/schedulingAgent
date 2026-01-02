@@ -47,7 +47,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-def convert_natural_date(date_str: str) -> Optional[str]:
+def convert_natural_date(date_str: str, return_strategy: bool = False) -> Optional[str]:
     """
     Convert natural language date to YYYY-MM-DD format.
 
@@ -57,28 +57,60 @@ def convert_natural_date(date_str: str) -> Optional[str]:
     - "next week" - next Monday
     - Month names ("january", "feb") - first day of that month
 
-    Returns None if can't parse (caller should fall back to today).
+    Args:
+        date_str: Natural language date string
+        return_strategy: If True, returns tuple (date, strategy, days_to_fetch)
+                        strategy: 'specific_day', 'week', or 'month'
+                        days_to_fetch: 1 for specific day, 7 for week, 30 for month
+
+    Returns:
+        If return_strategy=False: date string or None
+        If return_strategy=True: tuple (date, strategy, days_to_fetch) or (None, None, None)
     """
     import re
     from datetime import timedelta
 
     if not date_str:
-        return None
+        return (None, None, None) if return_strategy else None
 
     today = datetime.now()
     date_lower = date_str.lower().strip()
+    strategy = 'month'  # Default strategy
+    days_to_fetch = 5  # Default: 5 days (balance between user needs and performance)
 
-    # Already in YYYY-MM-DD format? Pass through
+    # Already in YYYY-MM-DD format? Pass through - treat as specific day
     if re.match(r'^\d{4}-\d{2}-\d{2}$', date_str):
+        if return_strategy:
+            return (date_str, 'specific_day', 1)
         return date_str
 
-    # YYYY-MM format (e.g., "2026-01") - convert to first day of that month
+    # YYYY-MM format (e.g., "2026-01") - if current month, start from tomorrow
     yyyy_mm_match = re.match(r'^(\d{4})-(\d{2})$', date_str)
     if yyyy_mm_match:
-        year = yyyy_mm_match.group(1)
-        month = yyyy_mm_match.group(2)
-        result = f"{year}-{month}-01"
-        logger.info(f"[DATE] Converted '{date_str}' (YYYY-MM) -> {result}")
+        year = int(yyyy_mm_match.group(1))
+        month = int(yyyy_mm_match.group(2))
+        if year == today.year and month == today.month:
+            # Current month - start from tomorrow
+            from datetime import timedelta
+            tomorrow = today + timedelta(days=1)
+            result = tomorrow.strftime("%Y-%m-%d")
+            logger.info(f"[DATE] Converted '{date_str}' (YYYY-MM, current month) -> {result} (tomorrow)")
+        else:
+            result = f"{year}-{month:02d}-01"
+            logger.info(f"[DATE] Converted '{date_str}' (YYYY-MM) -> {result}")
+        if return_strategy:
+            return (result, 'week', 5)  # Month format = 5 days
+        return result
+
+    # "this month" - first day of current month (or tomorrow if we're at start of month)
+    if 'this month' in date_lower:
+        # Use tomorrow as start to avoid showing past dates
+        from datetime import timedelta
+        tomorrow = today + timedelta(days=1)
+        result = tomorrow.strftime("%Y-%m-%d")
+        logger.info(f"[DATE] Converted 'this month' -> {result} (tomorrow)")
+        if return_strategy:
+            return (result, 'week', 5)  # "this month" = show 5 days
         return result
 
     # "next month" - first day of next month
@@ -88,6 +120,8 @@ def convert_natural_date(date_str: str) -> Optional[str]:
         else:
             result = f"{today.year}-{today.month + 1:02d}-01"
         logger.info(f"[DATE] Converted 'next month' -> {result}")
+        if return_strategy:
+            return (result, 'week', 5)  # "next month" = show 5 days
         return result
 
     # "next week" - next Monday
@@ -98,23 +132,104 @@ def convert_natural_date(date_str: str) -> Optional[str]:
         next_monday = today + timedelta(days=days_until_monday)
         result = next_monday.strftime("%Y-%m-%d")
         logger.info(f"[DATE] Converted 'next week' -> {result}")
+        if return_strategy:
+            return (result, 'week', 5)  # "next week" = show 5 days
         return result
 
-    # Month names: "january", "feb", etc.
+    # "last week of [month]" - e.g., "last week of February" → Feb 22
+    last_week_match = re.search(r'last week of (\w+)', date_lower)
+    if last_week_match:
+        month_name = last_week_match.group(1)[:3].lower()
+        months_map = {'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                      'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12}
+        if month_name in months_map:
+            month_num = months_map[month_name]
+            year = today.year if month_num >= today.month else today.year + 1
+            # Last week starts around the 22nd-25th depending on month
+            # Use 22nd as a safe start for last week
+            result = f"{year}-{month_num:02d}-22"
+            logger.info(f"[DATE] Converted 'last week of {month_name}' -> {result}")
+            if return_strategy:
+                return (result, 'week', 5)
+            return result
+
+    # "first week of [month]" - e.g., "first week of March" → Mar 1
+    first_week_match = re.search(r'first week of (\w+)', date_lower)
+    if first_week_match:
+        month_name = first_week_match.group(1)[:3].lower()
+        months_map = {'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                      'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12}
+        if month_name in months_map:
+            month_num = months_map[month_name]
+            year = today.year if month_num >= today.month else today.year + 1
+            result = f"{year}-{month_num:02d}-01"
+            logger.info(f"[DATE] Converted 'first week of {month_name}' -> {result}")
+            if return_strategy:
+                return (result, 'week', 5)
+            return result
+
+    # "end of [month]" - e.g., "end of January" → Jan 25
+    end_of_match = re.search(r'end of (\w+)', date_lower)
+    if end_of_match:
+        month_name = end_of_match.group(1)[:3].lower()
+        months_map = {'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                      'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12}
+        if month_name in months_map:
+            month_num = months_map[month_name]
+            year = today.year if month_num >= today.month else today.year + 1
+            result = f"{year}-{month_num:02d}-25"
+            logger.info(f"[DATE] Converted 'end of {month_name}' -> {result}")
+            if return_strategy:
+                return (result, 'week', 5)
+            return result
+
+    # Month names: "january", "feb", etc. with optional day number
+    # Examples: "Jan 10", "10th Jan", "January 15", "feb 20th"
     months = {
         'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
         'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
     }
     for name, num in months.items():
         if name in date_lower:
-            # If month is in the past this year, use next year
-            year = today.year if num >= today.month else today.year + 1
-            result = f"{year}-{num:02d}-01"
+            # Try to extract day number from string like "Jan 10", "10th Jan", "january 15"
+            day_match = re.search(r'(\d{1,2})(?:st|nd|rd|th)?', date_lower)
+
+            # Determine strategy: specific day vs month request
+            if day_match:
+                # User specified a day number (e.g., "Jan 10", "the 15th of March")
+                day = int(day_match.group(1))
+                day = max(1, min(day, 31))  # Clamp to valid range
+                strategy = 'specific_day'
+                days_to_fetch = 1
+                # If month is in the past this year, use next year
+                year = today.year if num >= today.month else today.year + 1
+                result = f"{year}-{num:02d}-{day:02d}"
+                logger.info(f"[DATE STRATEGY] Specific day request: {day_match.group()} -> 1 day only")
+            else:
+                # User only said month name (e.g., "January", "March")
+                # If we're already in that month, start from tomorrow
+                # If it's a future month, start from the first day of that month
+                strategy = 'week'
+                days_to_fetch = 5
+                if num == today.month:
+                    # Same month - start from tomorrow
+                    from datetime import timedelta
+                    tomorrow = today + timedelta(days=1)
+                    result = tomorrow.strftime("%Y-%m-%d")
+                    logger.info(f"[DATE STRATEGY] Current month request: {name} -> tomorrow + 5 days")
+                else:
+                    # Future/past month - start from 1st of that month
+                    year = today.year if num > today.month else today.year + 1
+                    result = f"{year}-{num:02d}-01"
+                    logger.info(f"[DATE STRATEGY] Month request: {name} -> 5 days from 1st")
+
             logger.info(f"[DATE] Converted '{date_str}' -> {result}")
+            if return_strategy:
+                return (result, strategy, days_to_fetch)
             return result
 
     logger.warning(f"[DATE] Could not parse date preference: '{date_str}'")
-    return None
+    return (None, None, None) if return_strategy else None
 
 
 # DynamoDB client for notes storage
@@ -809,7 +924,7 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
     Action: get_available_dates
     Returns available dates for scheduling a project
 
-    Real API Endpoint: GET /scheduler/client/{client_id}/project/{project_id}/date/{date}/selected/{selected_date}/slots
+    Real API Endpoint: GET /scheduler/client/{client_id}/project/{project_id}/startDate/{start_date}/endDate/{end_date}/slotsChatbot
     (Returns both available dates and slots)
     """
     project_id = params.get('project_id')
@@ -840,6 +955,30 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
         except Exception as e:
             logger.warning(f"Failed to resolve Order Number '{project_id}': {e}, proceeding with original value")
 
+    # Determine start_date and date limiting strategy (used for both mock and real API)
+    # Strategy determines how many dates to return:
+    # - 'specific_day': user asked for "Jan 10" -> return only that 1 day
+    # - 'week': user asked for "January" or "next month" -> return 7 days
+    # - None: default "schedule this" -> return 7 days
+    start_date = params.get('start_date')
+    date_strategy = None
+    days_to_fetch = 5  # Default: 5 days for performance
+
+    if not start_date:
+        # Check if 'date' parameter has a natural language value (e.g., "next month")
+        date_param = params.get('date')
+        if date_param:
+            start_date, date_strategy, days_to_fetch = convert_natural_date(date_param, return_strategy=True)
+            logger.info(f"[DATE] Using date preference: '{date_param}' -> start_date={start_date}, strategy={date_strategy}, days={days_to_fetch}")
+
+    if not start_date:
+        # Use tomorrow as default - today rarely has available slots
+        from datetime import timedelta
+        start_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        date_strategy = 'week'
+        days_to_fetch = 5
+        logger.info(f"[DATE] Using tomorrow as start_date: {start_date}, strategy={date_strategy}")
+
     if USE_MOCK_API:
         logger.info(f"[MOCK] Fetching available dates for project {project_id}")
         response = get_mock_available_dates(project_id)
@@ -850,22 +989,21 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
 
         logger.info(f"[REAL] Fetching available dates for client {client_id}, project {project_id}")
 
-        # Determine start_date: check for date preference, then fall back to today
-        start_date = params.get('start_date')
-        if not start_date:
-            # Check if 'date' parameter has a natural language value (e.g., "next month")
-            date_param = params.get('date')
-            if date_param:
-                start_date = convert_natural_date(date_param)
-                logger.info(f"[DATE] Using date preference: '{date_param}' -> start_date={start_date}")
+        # Calculate end_date based on days_to_fetch for API-level limiting
+        # New API uses startDate/endDate format for cleaner date range specification
+        from datetime import timedelta
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        if date_strategy == 'specific_day':
+            # For specific day, end = start (same day)
+            end_date = start_date
+        else:
+            # For week/default, end = start + days_to_fetch - 1
+            end_date = (start_dt + timedelta(days=days_to_fetch - 1)).strftime("%Y-%m-%d")
 
-        if not start_date:
-            start_date = datetime.now().strftime("%Y-%m-%d")
-            logger.info(f"[DATE] Using today as start_date: {start_date}")
+        # Construct URL with new date range format: startDate/endDate/slotsChatbot
+        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/startDate/{start_date}/endDate/{end_date}/slotsChatbot"
 
-        # Construct URL matching real portal API
-        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/date/{start_date}/selected/{start_date}/slots"
-
+        logger.info(f"[DATE RANGE] startDate={start_date}, endDate={end_date}, days={days_to_fetch}")
         logger.info(f"GET {url}")
 
         try:
@@ -919,6 +1057,28 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
     # Sort dates chronologically
     raw_dates = sorted(raw_dates)
 
+    # Track original count before filtering for logging
+    original_count = len(raw_dates)
+
+    # SMART DATE LIMITING: Filter dates based on user's request strategy
+    # This reduces response payload and focuses on relevant dates
+    if days_to_fetch and days_to_fetch < len(raw_dates):
+        if date_strategy == 'specific_day':
+            # User asked for specific date (e.g., "Jan 10") - only return that day if available
+            if start_date in raw_dates:
+                raw_dates = [start_date]
+                logger.info(f"[DATE LIMIT] Specific day: filtered {original_count} dates to 1 (requested date {start_date})")
+            else:
+                # Requested date not available - return first available as fallback
+                raw_dates = raw_dates[:1] if raw_dates else []
+                logger.info(f"[DATE LIMIT] Specific day {start_date} not available, showing first available: {raw_dates}")
+        else:
+            # Week strategy - return up to 7 days
+            raw_dates = raw_dates[:days_to_fetch]
+            logger.info(f"[DATE LIMIT] Week strategy: filtered {original_count} dates to {len(raw_dates)}")
+    else:
+        logger.info(f"[DATE LIMIT] No filtering needed: {original_count} dates (days_to_fetch={days_to_fetch})")
+
     # Format dates with day names and group by week for better UI rendering
     formatted_dates = []
     for date_str in raw_dates:
@@ -949,6 +1109,8 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
         "dateCount": len(raw_dates),
         "request_id": data.get("request_id"),
         "start_date": start_date,  # IMPORTANT: Base date used for URL - needed for get_time_slots
+        "date_strategy": date_strategy,  # 'specific_day' or 'week' - for debugging
+        "dates_filtered_from": original_count,  # How many dates the API returned before filtering
         "mock_mode": USE_MOCK_API,
         "pf_http_status_code": pf_http_status_code
     }
@@ -1007,9 +1169,8 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
 
         logger.info(f"[REAL] Fetching time slots for client {client_id}, project {project_id}, selected: {selected_date}, base: {base_date}")
 
-        # Construct URL matching real portal API: /scheduler/client/{client_id}/project/{project_id}/date/{base_date}/selected/{selected_date}/slots
-        # IMPORTANT: base_date = the start_date used in get_available_dates, selected_date = user's chosen date
-        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/date/{base_date}/selected/{selected_date}/slots?request_id={request_id}"
+        # Construct URL with new slotsChatbot endpoint - use selected_date for both start and end (single day)
+        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/startDate/{selected_date}/endDate/{selected_date}/slotsChatbot?request_id={request_id}"
 
         logger.info(f"GET {url}")
 

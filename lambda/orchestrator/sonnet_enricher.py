@@ -166,6 +166,35 @@ Examples:
 
 Return ONLY valid JSON. Only include fields that are explicitly mentioned.""",
 
+    # Weather query - extract location AND date from context
+    'get_weather': """Extract location and date for weather query.
+
+User message: "{message}"
+Conversation context: {context}
+Today's date: {today}
+
+IMPORTANT: Extract BOTH location AND date if mentioned.
+
+LOCATION:
+- If user mentions a city/state: use that location
+- If user references a project (by ID, category, or "the project"): extract the project's ADDRESS from context
+- Project IDs (like "21083_09PF05VD_...") are NOT locations - look up the project's address instead
+
+DATE:
+- If user mentions a specific date: extract it in YYYY-MM-DD format
+- Handle relative dates: "tomorrow", "next Tuesday", "January 15th", "the 7th", etc.
+- If no date mentioned, return null for date
+
+Examples:
+- "weather in Minneapolis" → {{"location": "Minneapolis"}}
+- "weather for January 15th" → {{"date": "2026-01-15"}}
+- "what's the weather for next Tuesday" → {{"date": "[calculated date]"}}
+- "how's the weather for the 7th" → {{"date": "2026-01-07"}}
+- "weather in Chicago on Friday" → {{"location": "Chicago", "date": "[Friday's date]"}}
+- "how's the weather" (with project in context) → {{"location": "[project address from context]"}}
+
+Return ONLY valid JSON: {{"location": "...", "date": "YYYY-MM-DD"}} with available fields.""",
+
     # Generic entity extraction fallback
     'generic': """Extract any relevant entities from this message.
 
@@ -218,6 +247,8 @@ def enrich_entities(
         return _extract_project_reference(message, context)
     elif action in ['confirm_appointment', 'cancel_appointment']:
         return _extract_confirmation(message, context)
+    elif action == 'get_weather':
+        return _extract_weather_location(message, context)
     else:
         return _extract_generic(message, action, context)
 
@@ -300,6 +331,37 @@ def _extract_confirmation(message: str, context: Dict) -> Dict[str, Any]:
     )
 
     response = call_sonnet(prompt, max_tokens=50)
+    return _parse_json_response(response)
+
+
+def _extract_weather_location(message: str, context: Dict) -> Dict[str, Any]:
+    """Extract geographic location AND date for weather query from message or project context"""
+    from datetime import datetime
+
+    # Build context string with project info for Sonnet to reference
+    workflow_state = context.get('workflow_state', {})
+    workflow_context = workflow_state.get('context', {})
+    # Check both context-level AND top-level project_mapping (context switch preserves at top level)
+    project_mapping = workflow_context.get('project_mapping', {}) or workflow_state.get('project_mapping', {})
+
+    # Include project addresses in context
+    context_info = {
+        'current_project_id': workflow_context.get('project_id'),
+        'projects': {pid: {'address': info.get('address'), 'category': info.get('category')}
+                     for pid, info in project_mapping.items()} if project_mapping else {}
+    }
+    context_str = json.dumps(context_info, indent=2)[:1000]
+
+    # Get today's date for relative date calculations
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    prompt = PROMPTS['get_weather'].format(
+        message=message,
+        context=context_str,
+        today=today
+    )
+
+    response = call_sonnet(prompt, max_tokens=100)
     return _parse_json_response(response)
 
 

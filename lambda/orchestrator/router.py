@@ -986,6 +986,26 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     "precipitation": day.get('precipitation_probability', 0)
                 })
 
+            # Get target date info (for scheduled projects or +7 days)
+            target_date = response_body.get('target_date')
+            target_forecast = response_body.get('target_forecast')
+
+            # Format target forecast if available
+            formatted_target = None
+            if target_forecast:
+                try:
+                    date_obj = datetime.strptime(target_forecast.get('date', ''), "%Y-%m-%d")
+                    formatted_target = {
+                        "date": target_forecast.get('date'),
+                        "day": date_obj.strftime("%A, %B %d"),
+                        "condition": target_forecast.get('condition', 'Unknown'),
+                        "high": target_forecast.get('max_temp_f', 0),
+                        "low": target_forecast.get('min_temp_f', 0),
+                        "precipitation": target_forecast.get('precipitation_probability', 0)
+                    }
+                except:
+                    formatted_target = target_forecast
+
             # Prepare structured data for UI
             result = {
                 "location": location_str,
@@ -995,7 +1015,9 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     "humidity": current_data.get('humidity', 0),
                     "windSpeed": current_data.get('wind_mph', current_data.get('windspeedMiles', 0))
                 },
-                "forecast": formatted_forecast
+                "forecast": formatted_forecast,
+                "target_date": target_date,
+                "target_forecast": formatted_target
             }
 
             # Validate weather data - don't return zeros/Unknown
@@ -1713,6 +1735,65 @@ def route_request(
             if action in chitchat_actions:
                 lambda_params['message'] = message  # Pass original message
                 logger.info(f"[CHITCHAT] Passing message to chitchat Lambda: '{message[:50]}...'")
+
+            # WEATHER AUTO-FETCH: If no location provided, try to get it from conversation history
+            if action == 'get_weather' and not lambda_params.get('location'):
+                logger.info(f"[WEATHER] No location in params, checking conversation history for project")
+
+                # Try to find project in conversation history
+                project_id_from_history = None
+                if conversation_history:
+                    for entry in reversed(conversation_history):
+                        # Check assistant responses for project details
+                        if entry.get('role') == 'assistant':
+                            content = entry.get('content', '')
+                            if isinstance(content, str):
+                                # Look for project ID patterns in recent responses
+                                import re
+                                # Match patterns like "Project #9000407" or "project_id: 9000407"
+                                proj_match = re.search(r'Project\s*#?\s*(\d{7})', content, re.IGNORECASE)
+                                if proj_match:
+                                    project_id_from_history = proj_match.group(1)
+                                    logger.info(f"[WEATHER] Found project ID in history: {project_id_from_history}")
+                                    break
+
+                # If we found a project, fetch its location
+                if project_id_from_history:
+                    try:
+                        logger.info(f"[WEATHER] Auto-fetching location for project: {project_id_from_history}")
+                        project_response = call_lambda_directly('get_project_details', {
+                            'customer_id': customer_id,
+                            'client_id': client_id,
+                            'pf_bearer_token': pf_bearer_token,
+                            'project_id': project_id_from_history
+                        })
+
+                        # Extract project data
+                        proj_resp = project_response.get('response', {})
+                        proj_func = proj_resp.get('functionResponse', {})
+                        proj_body_wrapper = proj_func.get('responseBody', {})
+                        proj_text = proj_body_wrapper.get('TEXT', {})
+                        proj_body_str = proj_text.get('body', '{}')
+
+                        if isinstance(proj_body_str, str):
+                            proj_body = json.loads(proj_body_str)
+                        else:
+                            proj_body = proj_body_str
+
+                        # Extract location from project details
+                        project_data = proj_body.get('project', proj_body)
+                        city = project_data.get('city', '')
+                        state = project_data.get('state', '')
+
+                        if city and state:
+                            location = f"{city}, {state}"
+                            lambda_params['location'] = location
+                            logger.info(f"[WEATHER] Auto-fetched location: {location} for project #{project_id_from_history}")
+                        elif city:
+                            lambda_params['location'] = city
+                            logger.info(f"[WEATHER] Auto-fetched location (city only): {city}")
+                    except Exception as fetch_err:
+                        logger.warning(f"[WEATHER] Auto-fetch project location failed: {fetch_err}")
 
             # Call Lambda directly
             lambda_response = call_lambda_directly(action, lambda_params)

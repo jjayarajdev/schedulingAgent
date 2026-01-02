@@ -337,8 +337,9 @@ def handle_get_weather(params: Dict, config: Dict, auth_headers: Dict) -> Dict[s
     # Extract optional context parameters for logging
     project_id = params.get('project_id')
     address = params.get('address')
+    target_date = params.get('date')  # Target date for forecast (YYYY-MM-DD)
 
-    logger.info(f"Weather request - project_id: {project_id}, address: {address}")
+    logger.info(f"Weather request - project_id: {project_id}, address: {address}, target_date: {target_date}")
 
     # Determine coordinates
     location_info = {}
@@ -447,12 +448,23 @@ def handle_get_weather(params: Dict, config: Dict, auth_headers: Dict) -> Dict[s
             ],
             "context": {
                 "project_id": project_id,
-                "address": address
+                "address": address,
+                "target_date": target_date
             }
         }
 
+        # If target_date specified, find that day's forecast
+        target_forecast = None
+        if target_date:
+            for day in weather_info["forecast"]:
+                if day["date"] == target_date:
+                    target_forecast = day
+                    break
+
         return {
             "action": "get_weather",
+            "target_date": target_date,
+            "target_forecast": target_forecast,
             "location": location_info.get("name", location),
             "coordinates": {
                 "latitude": lat,
