@@ -2060,6 +2060,39 @@ def orchestrate_intelligent_workflow(
                 else:
                     response_body = response_body_str
 
+                # CHECK FOR ERRORS in Lambda response
+                if response_body.get('error'):
+                    error_msg = response_body.get('error', 'Unknown error')
+                    logger.error(f"[CONFIRM] Lambda returned error: {error_msg}")
+
+                    # Parse error message for user-friendly response
+                    if 'No technician found' in error_msg:
+                        user_error = "Sorry, no technician is available for that time slot. Please select a different time."
+                    elif 'already booked' in error_msg or 'conflict' in error_msg.lower():
+                        user_error = "That time slot was just booked. Please select a different time."
+                    elif 'SESSION_EXPIRED' in error_msg or '401' in error_msg or '403' in error_msg:
+                        user_error = "Your session has expired. Please log out and log back in."
+                    else:
+                        user_error = "Sorry, I couldn't confirm that appointment. Please try selecting a different time."
+
+                    # Clear pending action on error
+                    if 'context' in workflow_state:
+                        workflow_state['context'].pop('pending_action', None)
+                    state_manager.save_state(session_id, workflow_state)
+
+                    timing['total'] = time.time() - start_time
+                    pf_status = response_body.get('pf_http_status_code', 400)
+                    return {
+                        'response': user_error,
+                        'intent': 'scheduling',
+                        'action': 'confirm_appointment',
+                        'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                        'direct_call': True,
+                        'timing': timing,
+                        'pf_http_status_code': pf_status,
+                        'error': True
+                    }
+
                 # Clear pending action from context
                 if 'context' in workflow_state:
                     workflow_state['context'].pop('pending_action', None)
@@ -4655,6 +4688,35 @@ What would you like to do?"""
                     'direct_call': True,
                     'timing': timing,
                     'pf_http_status_code': 401  # Always return 401 for auth errors so frontend can redirect
+                }
+
+            # CHECK FOR LAMBDA ERRORS: If Lambda returned an error in response body
+            if response_body.get('error'):
+                error_msg = response_body.get('error', 'Unknown error')
+                logger.error(f"[LAMBDA_ERROR] Lambda {lambda_action} returned error: {error_msg}")
+
+                # Parse error message for user-friendly response
+                if 'No technician found' in error_msg:
+                    user_error = "Sorry, no technician is available for that time slot. Please select a different time."
+                elif 'already booked' in error_msg or 'conflict' in error_msg.lower():
+                    user_error = "That time slot was just booked. Please select a different time."
+                elif 'SESSION_EXPIRED' in error_msg or '401' in error_msg or '403' in error_msg:
+                    user_error = "Your session has expired. Please log out and log back in."
+                elif 'Invalid' in error_msg:
+                    user_error = "Sorry, there was an issue with that request. Please try again."
+                else:
+                    user_error = f"Sorry, I couldn't complete that action. Please try again."
+
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': user_error,
+                    'intent': classification.get('intent', 'unknown'),
+                    'action': lambda_action,
+                    'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                    'direct_call': True,
+                    'timing': timing,
+                    'pf_http_status_code': pf_http_status_code,
+                    'error': True
                 }
 
             # PROACTIVE WEATHER WARNINGS: Add weather indicators when showing available dates
