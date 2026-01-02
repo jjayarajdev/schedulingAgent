@@ -441,8 +441,11 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
         # 0. FIRST: Extract any project-ID-like pattern directly from message
         # This catches cases where user asks about a NEW project not in mapping yet
         # Patterns: "AI-PRO-100002", "21083_09PF05VD_...", "9000489", etc.
+        # EXCLUDE: Date patterns like "2026-01-06" which could be mistaken for project IDs
         id_patterns = re.findall(r'[A-Za-z0-9][\w-]*[A-Za-z0-9]|[A-Za-z0-9]+', message)
-        potential_refs = [t for t in id_patterns if len(t) >= 5 and any(c.isdigit() for c in t)]
+        # Filter: length >= 5, has digit, and NOT a date pattern (YYYY-MM-DD)
+        date_pattern = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+        potential_refs = [t for t in id_patterns if len(t) >= 5 and any(c.isdigit() for c in t) and not date_pattern.match(t)]
         if potential_refs:
             message_project_ref = potential_refs[0]  # Take first project-like reference
             logger.info(f"[CONTINUATION] Extracted potential project reference: '{message_project_ref}'")
