@@ -61,7 +61,21 @@ OUTDOOR_CATEGORIES = {
         "temp_min": 40,
         "temp_max": 95,
         "wind_max": 25,
-    }
+    },
+    "Windows": {  # Exterior window installation
+        "bad_conditions": ["rain", "snow", "thunderstorm"],
+        "rain_threshold": 40,
+        "temp_min": 35,
+        "temp_max": 95,
+        "wind_max": 25,
+    },
+    "Doors": {  # Exterior door installation
+        "bad_conditions": ["rain", "snow", "thunderstorm"],
+        "rain_threshold": 40,
+        "temp_min": 35,
+        "temp_max": 95,
+        "wind_max": 25,
+    },
 }
 
 

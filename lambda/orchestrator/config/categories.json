@@ -128,7 +128,7 @@
   },
 
   "outdoor_buckets": [
-    "decking", "roofing", "siding", "fencing", "windows_doors"
+    "decking", "roofing", "siding", "fencing", "windows", "doors", "exterior_painting", "concrete", "flooring"
   ],
 
   "aliases": {
