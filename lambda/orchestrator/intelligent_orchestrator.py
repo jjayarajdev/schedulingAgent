@@ -683,35 +683,51 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
 
     # Stage: Waiting for date selection
     if current_stage == 'awaiting_date_selection':
-        date = extract_date_from_message(message)
-        if date:
-            logger.info(f"[CONTINUATION] User provided date '{date}' at stage '{current_stage}' - bypassing classification")
-            return {
-                'continue_workflow': True,
-                'action': 'get_time_slots',
-                'params': {
-                    'project_id': context.get('project_id'),
-                    'date': date,
-                    'request_id': context.get('request_id')
-                },
-                'next_stage': 'awaiting_time_selection',
-                'preserve_context': {
-                    'project_id': context.get('project_id'),
-                    'date': date,
-                    'request_id': context.get('request_id'),
-                    'category': context.get('category'),
-                    'project_type': context.get('project_type'),
-                    'city': context.get('city'),
-                    'state': context.get('state'),
-                    # Preserve batch mode context if present
-                    'batch_mode': context.get('batch_mode'),
-                    'project_ids': context.get('project_ids'),
-                    'current_index': context.get('current_index'),
-                    'total_projects': context.get('total_projects'),
-                    'completed_projects': context.get('completed_projects')
-                },
-                'workflow_type': workflow_type
-            }
+        # IMPORTANT: Don't treat as date selection if user is asking for a DATE RANGE
+        # Patterns like "show me dates between X and Y", "dates from X to Y" are range requests
+        date_range_patterns = [
+            'show me dates', 'show dates', 'dates between', 'dates from',
+            'between .* and', 'between .* to', 'from .* to', 'different dates',
+            'other dates', 'more dates', 'next week', 'upcoming week'
+        ]
+        is_date_range_request = any(
+            (pattern in message_lower if '.*' not in pattern else re.search(pattern, message_lower))
+            for pattern in date_range_patterns
+        )
+
+        if is_date_range_request:
+            logger.info(f"[CONTINUATION] Date range request detected at stage '{current_stage}' - proceeding with classification")
+            # Fall through to classification to handle date range properly
+        else:
+            date = extract_date_from_message(message)
+            if date:
+                logger.info(f"[CONTINUATION] User provided date '{date}' at stage '{current_stage}' - bypassing classification")
+                return {
+                    'continue_workflow': True,
+                    'action': 'get_time_slots',
+                    'params': {
+                        'project_id': context.get('project_id'),
+                        'date': date,
+                        'request_id': context.get('request_id')
+                    },
+                    'next_stage': 'awaiting_time_selection',
+                    'preserve_context': {
+                        'project_id': context.get('project_id'),
+                        'date': date,
+                        'request_id': context.get('request_id'),
+                        'category': context.get('category'),
+                        'project_type': context.get('project_type'),
+                        'city': context.get('city'),
+                        'state': context.get('state'),
+                        # Preserve batch mode context if present
+                        'batch_mode': context.get('batch_mode'),
+                        'project_ids': context.get('project_ids'),
+                        'current_index': context.get('current_index'),
+                        'total_projects': context.get('total_projects'),
+                        'completed_projects': context.get('completed_projects')
+                    },
+                    'workflow_type': workflow_type
+                }
 
     # Stage: Waiting for time selection
     if current_stage == 'awaiting_time_selection':
