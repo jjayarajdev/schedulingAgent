@@ -739,31 +739,34 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
     # ========================================================================
     context_project_id = context.get('project_id')
     if context_project_id:
-        implicit_schedule_patterns = [
-            'schedule it', 'schedule this', 'book it', 'book this',
-            'schedule that', 'book that', "let's schedule", "lets schedule",
-            'want to schedule', 'like to schedule', 'schedule the project',
-            'schedule my', 'book my', 'i want to schedule', 'can you schedule'
-        ]
-        if any(pattern in message_lower for pattern in implicit_schedule_patterns):
-            logger.info(f"[CONTINUATION] IMPLICIT SCHEDULE: Detected scheduling request with context project {context_project_id}")
-            return {
-                'continue_workflow': True,
-                'action': 'get_available_dates',
-                'params': {
-                    'project_id': context_project_id
-                },
-                'next_stage': 'awaiting_date_selection',
-                'preserve_context': {
-                    'project_id': context_project_id,
-                    'category': context.get('category'),
-                    'project_type': context.get('project_type'),
-                    'city': context.get('city'),
-                    'state': context.get('state'),
-                    'address': context.get('address')
-                },
-                'workflow_type': 'schedule_appointment'
-            }
+        # IMPORTANT: Don't match implicit schedule if user says "reschedule"
+        # "reschedule this" contains "schedule this" but is a different intent
+        if 'reschedule' not in message_lower:
+            implicit_schedule_patterns = [
+                'schedule it', 'schedule this', 'book it', 'book this',
+                'schedule that', 'book that', "let's schedule", "lets schedule",
+                'want to schedule', 'like to schedule', 'schedule the project',
+                'schedule my', 'book my', 'i want to schedule', 'can you schedule'
+            ]
+            if any(pattern in message_lower for pattern in implicit_schedule_patterns):
+                logger.info(f"[CONTINUATION] IMPLICIT SCHEDULE: Detected scheduling request with context project {context_project_id}")
+                return {
+                    'continue_workflow': True,
+                    'action': 'get_available_dates',
+                    'params': {
+                        'project_id': context_project_id
+                    },
+                    'next_stage': 'awaiting_date_selection',
+                    'preserve_context': {
+                        'project_id': context_project_id,
+                        'category': context.get('category'),
+                        'project_type': context.get('project_type'),
+                        'city': context.get('city'),
+                        'state': context.get('state'),
+                        'address': context.get('address')
+                    },
+                    'workflow_type': 'schedule_appointment'
+                }
 
     # Not a continuation - proceed with normal classification
     logger.info(f"[CONTINUATION] No continuation match for stage '{current_stage}' - proceeding with classification")
