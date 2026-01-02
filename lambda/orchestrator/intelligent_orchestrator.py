@@ -4963,6 +4963,32 @@ What would you like to do?"""
 
             response_text = formatted_response
 
+            # HANDLE ALREADY-SCHEDULED RESCHEDULE OFFER: When get_available_dates returns already_scheduled, save state for confirmation
+            if lambda_action == 'get_available_dates' and response_body.get('already_scheduled'):
+                project_id = response_body.get('project_id') or lambda_params.get('project_id')
+                logger.info(f"[WORKFLOW] Project {project_id} already scheduled - saving state for reschedule offer confirmation")
+
+                # Save workflow state so we can handle "yes" confirmation
+                state_manager.save_state(session_id, {
+                    'workflow_type': 'reschedule_appointment',
+                    'current_stage': 'awaiting_reschedule_offer_confirmation',
+                    'context': {
+                        'project_id': project_id,
+                        'already_scheduled': True
+                    },
+                    'conversation_summary': f"Project #{project_id} already scheduled - offered reschedule, awaiting user confirmation"
+                })
+
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': response_text,
+                    'intent': 'scheduling',
+                    'action': 'get_available_dates',
+                    'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                    'direct_call': True,
+                    'timing': timing
+                }
+
             # HANDLE CANCEL/RESCHEDULE CONFIRMATION WORKFLOW: When cancel or reschedule returns awaiting_confirmation, set workflow state
             # For reschedule, we need to preserve the workflow_type so we can continue to date selection after cancel
             if (lambda_action in ['cancel_appointment', 'reschedule_appointment']) and response_body.get('status') == 'awaiting_confirmation':

@@ -210,13 +210,52 @@ def guard_reschedule_needs_scheduled(message: str, nlu_action: str, sonnet_actio
     return None, None
 
 
+def guard_reschedule_offer_confirmation(message: str, nlu_action: str, sonnet_action: str, context: Dict) -> Tuple[Optional[str], Optional[str]]:
+    """
+    GUARD: Handle "yes" confirmation after project-already-scheduled reschedule offer
+
+    Problem: User says "reschedule", system says "already scheduled, want to reschedule?",
+             user says "yes", but system doesn't recognize this as reschedule confirmation
+    Solution: When in awaiting_reschedule_offer_confirmation state and user confirms,
+              route to reschedule_appointment
+
+    Returns: (override_action, reason) or (None, None) if guard doesn't apply
+    """
+    workflow_state = context.get('workflow_state', {})
+    current_stage = workflow_state.get('current_stage', '')
+
+    # Only apply when waiting for reschedule offer confirmation
+    if current_stage != 'awaiting_reschedule_offer_confirmation':
+        return None, None
+
+    msg_lower = message.lower().strip()
+
+    # Confirmation patterns
+    confirmation_patterns = [
+        'yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'go ahead',
+        'please', 'do it', "let's do it", 'reschedule', 'reschedule it',
+        'yes please', 'absolutely', 'definitely', 'of course'
+    ]
+
+    if any(pattern in msg_lower for pattern in confirmation_patterns):
+        return 'reschedule_appointment', "GUARD: User confirmed reschedule offer"
+
+    # Decline patterns - clear the workflow
+    decline_patterns = ['no', 'nope', 'nah', 'cancel', 'never mind', "don't", 'stop']
+    if any(pattern in msg_lower for pattern in decline_patterns):
+        return 'clear_workflow', "GUARD: User declined reschedule offer"
+
+    return None, None
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # GUARD RUNNER
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # List of all guards in priority order
 ALL_GUARDS = [
-    guard_calendar_query,        # Highest priority - bypass workflow
+    guard_reschedule_offer_confirmation,  # Highest priority - handle reschedule confirmation
+    guard_calendar_query,        # Bypass workflow for calendar queries
     guard_no_auto_schedule,      # Prevent auto-escalation
     guard_filter_after_list,     # Keep filtering as list_projects
     guard_context_query_needs_context,
