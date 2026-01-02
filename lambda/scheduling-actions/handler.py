@@ -1135,8 +1135,27 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
     # Track PF API HTTP status code
     pf_http_status_code = 200  # Default for mock/success
 
-    if not all([project_id, selected_date, request_id]):
-        raise ValueError("Missing required parameters: project_id, date, request_id")
+    if not all([project_id, selected_date]):
+        raise ValueError("Missing required parameters: project_id, date")
+
+    # AUTO-FETCH request_id if not provided
+    # This allows users to directly ask for slots without first getting available dates
+    if not request_id and not USE_MOCK_API and client_id:
+        logger.info(f"[get_time_slots] No request_id provided, fetching fresh one via get_available_dates for {selected_date}")
+        try:
+            # Call slotsChatbot to get fresh request_id
+            prefetch_url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/startDate/{selected_date}/endDate/{selected_date}/slotsChatbot"
+            logger.info(f"[get_time_slots] Prefetch GET {prefetch_url}")
+            prefetch_res = make_api_request_with_retry("GET", prefetch_url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
+            prefetch_data = prefetch_res.json().get("data", {})
+            request_id = prefetch_data.get("request_id")
+            logger.info(f"[get_time_slots] Got fresh request_id: {request_id}")
+        except Exception as e:
+            logger.error(f"[get_time_slots] Failed to prefetch request_id: {e}")
+            raise ValueError("Unable to fetch scheduling data. Please try again.")
+
+    if not request_id:
+        raise ValueError("Missing required parameter: request_id")
 
     # If base_date not provided, fall back to selected_date (less accurate but maintains backward compat)
     if not base_date:

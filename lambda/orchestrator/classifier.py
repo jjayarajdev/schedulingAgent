@@ -606,15 +606,16 @@ For **Project_Information_Request** (specific project details): Use EXACT catego
 - Extract date mentions: "Nov 14", "tomorrow", "next Tuesday"
 - Convert SPECIFIC dates to YYYY-MM-DD format using TODAY'S DATE for year context
 - If a date is in the past this year, assume NEXT YEAR
-- KEEP these relative expressions AS-IS (do NOT convert to specific date):
+- CRITICAL: KEEP these relative expressions AS-IS (do NOT convert to specific date):
   - "next week" → date="next week"
   - "this week" → date="this week"
   - "this month" → date="this month"
   - "next month" → date="next month"
-  - "last week of February" → date="last week of February"
-  - "first week of March" → date="first week of March"
-  - "end of January" → date="end of January"
+  - "last week of [any month]" → date="last week of [month]" (e.g., "last week of Feb" → date="last week of feb")
+  - "first week of [any month]" → date="first week of [month]" (e.g., "first week of March" → date="first week of march")
+  - "end of [any month]" → date="end of [month]" (e.g., "end of Jan" → date="end of jan")
   - Month names alone (e.g., "January", "March") → date="2026-01" (YYYY-MM format)
+- NEVER convert "last week of", "first week of", "end of" to a specific YYYY-MM-DD date
 - Extract time mentions: "2pm", "morning", "afternoon"
 
 ## CRITICAL DISTINCTIONS
