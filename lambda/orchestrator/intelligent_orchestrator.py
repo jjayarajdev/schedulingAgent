@@ -1859,6 +1859,22 @@ User says "schedule this for next month":
     "workflow_complete": false
 }}
 
+User says "show me dates between 9th Jan and 18th Jan" (DATE RANGE):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "get_available_dates",
+    "lambda_params": {{
+        "project_id": "7751748",
+        "date": "between 9th Jan and 18th Jan"  // PASS AS-IS - Lambda extracts start/end dates
+    }},
+    "update_workflow_state": {{
+        "workflow_type": "schedule_appointment",
+        "current_stage": "awaiting_date_selection",
+        "context": {{"project_id": "7751748", "date_preference": "between 9th Jan and 18th Jan"}}
+    }},
+    "workflow_complete": false
+}}
+
 CRITICAL EXAMPLE FOR DATE SELECTION (after showing available dates):
 
 When user says "08th Dec", "December 8", "the 8th", "next Monday", etc. (AFTER seeing available dates for a project):

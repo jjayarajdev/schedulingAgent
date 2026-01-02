@@ -48,6 +48,92 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
+def extract_date_range(date_str: str) -> Optional[Dict[str, str]]:
+    """
+    Extract start and end dates from a date range expression.
+
+    Handles patterns like:
+    - "between 09th Jan to 18th Jan"
+    - "between Jan 9 and Jan 18"
+    - "from 9th to 18th January"
+    - "dates from Jan 9 to Jan 18"
+    - "9th Jan to 18th Jan"
+
+    Returns:
+        Dict with 'start_date' and 'end_date' in YYYY-MM-DD format, or None
+    """
+    import re
+
+    if not date_str:
+        return None
+
+    date_lower = date_str.lower().strip()
+    today = datetime.now()
+
+    # Month mapping
+    months = {
+        'jan': 1, 'january': 1, 'feb': 2, 'february': 2, 'mar': 3, 'march': 3,
+        'apr': 4, 'april': 4, 'may': 5, 'jun': 6, 'june': 6,
+        'jul': 7, 'july': 7, 'aug': 8, 'august': 8, 'sep': 9, 'september': 9,
+        'oct': 10, 'october': 10, 'nov': 11, 'november': 11, 'dec': 12, 'december': 12
+    }
+
+    # Pattern: "between X and/to Y" or "from X to Y" or "X to Y"
+    # Use explicit date patterns instead of lazy .+? which fails to capture properly
+    # Date patterns: "14th Jan", "Jan 14", "14 Jan", etc.
+    date_part = r'(\d{1,2}(?:st|nd|rd|th)?\s+\w+|\w+\s+\d{1,2}(?:st|nd|rd|th)?)'
+    range_patterns = [
+        rf'between\s+{date_part}\s+(?:and|to)\s+{date_part}',  # between 14th Jan and/to 18th Jan
+        rf'from\s+{date_part}\s+to\s+{date_part}',              # from 14th Jan to 18th Jan
+        rf'{date_part}\s+to\s+{date_part}',                     # 14th Jan to 18th Jan
+    ]
+
+    def parse_single_date(date_expr: str) -> Optional[str]:
+        """Parse a single date expression like '9th Jan' or 'Jan 18' to YYYY-MM-DD"""
+        date_expr = date_expr.strip().lower()
+
+        # Try to find day and month
+        day_match = re.search(r'(\d{1,2})(?:st|nd|rd|th)?', date_expr)
+        if not day_match:
+            return None
+
+        day = int(day_match.group(1))
+        day = max(1, min(day, 31))
+
+        # Find month
+        month_num = None
+        for month_name, num in months.items():
+            if month_name in date_expr:
+                month_num = num
+                break
+
+        if not month_num:
+            return None
+
+        # Determine year (if month is in the past, use next year)
+        year = today.year if month_num >= today.month else today.year + 1
+
+        return f"{year}-{month_num:02d}-{day:02d}"
+
+    for pattern in range_patterns:
+        match = re.search(pattern, date_lower)
+        if match:
+            start_expr = match.group(1)
+            end_expr = match.group(2)
+
+            start_date = parse_single_date(start_expr)
+            end_date = parse_single_date(end_expr)
+
+            if start_date and end_date:
+                logger.info(f"[DATE RANGE] Extracted range: '{date_str}' -> start={start_date}, end={end_date}")
+                return {
+                    'start_date': start_date,
+                    'end_date': end_date
+                }
+
+    return None
+
+
 def convert_natural_date(date_str: str, return_strategy: bool = False) -> Optional[str]:
     """
     Convert natural language date to YYYY-MM-DD format.
@@ -994,8 +1080,10 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
     # Strategy determines how many dates to return:
     # - 'specific_day': user asked for "Jan 10" -> return only that 1 day
     # - 'week': user asked for "January" or "next month" -> return 7 days
+    # - 'date_range': user asked for "between Jan 9 and Jan 18" -> use exact range
     # - None: default "schedule this" -> return 7 days
     start_date = params.get('start_date')
+    explicit_end_date = params.get('end_date')  # User-provided end date for range queries
     date_strategy = None
     days_to_fetch = 5  # Default: 5 days for performance
 
@@ -1003,8 +1091,17 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
         # Check if 'date' parameter has a natural language value (e.g., "next month")
         date_param = params.get('date')
         if date_param:
-            start_date, date_strategy, days_to_fetch = convert_natural_date(date_param, return_strategy=True)
-            logger.info(f"[DATE] Using date preference: '{date_param}' -> start_date={start_date}, strategy={date_strategy}, days={days_to_fetch}")
+            # First try to extract a date range (e.g., "between Jan 9 and Jan 18")
+            date_range = extract_date_range(date_param)
+            if date_range:
+                start_date = date_range['start_date']
+                explicit_end_date = date_range['end_date']
+                date_strategy = 'date_range'
+                logger.info(f"[DATE RANGE] Using explicit range: '{date_param}' -> start={start_date}, end={explicit_end_date}")
+            else:
+                # Fall back to single date conversion
+                start_date, date_strategy, days_to_fetch = convert_natural_date(date_param, return_strategy=True)
+                logger.info(f"[DATE] Using date preference: '{date_param}' -> start_date={start_date}, strategy={date_strategy}, days={days_to_fetch}")
 
     if not start_date:
         # Use tomorrow as default - today rarely has available slots
@@ -1024,11 +1121,18 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
 
         logger.info(f"[REAL] Fetching available dates for client {client_id}, project {project_id}")
 
-        # Calculate end_date based on days_to_fetch for API-level limiting
-        # New API uses startDate/endDate format for cleaner date range specification
+        # Calculate end_date based on strategy:
+        # - 'date_range': use explicit_end_date provided by user (e.g., "between Jan 9 and Jan 18")
+        # - 'specific_day': end = start (same day)
+        # - 'week'/default: end = start + days_to_fetch - 1
         from datetime import timedelta
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        if date_strategy == 'specific_day':
+
+        if explicit_end_date:
+            # User explicitly specified end date (date range query)
+            end_date = explicit_end_date
+            logger.info(f"[DATE RANGE] Using explicit end_date from user: {end_date}")
+        elif date_strategy == 'specific_day':
             # For specific day, end = start (same day)
             end_date = start_date
         else:
@@ -1038,7 +1142,7 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
         # Construct URL with new date range format: startDate/endDate/slotsChatbot
         url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/startDate/{start_date}/endDate/{end_date}/slotsChatbot"
 
-        logger.info(f"[DATE RANGE] startDate={start_date}, endDate={end_date}, days={days_to_fetch}")
+        logger.info(f"[DATE RANGE] startDate={start_date}, endDate={end_date}")
         logger.info(f"GET {url}")
 
         try:
@@ -1097,7 +1201,10 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
 
     # SMART DATE LIMITING: Filter dates based on user's request strategy
     # This reduces response payload and focuses on relevant dates
-    if days_to_fetch and days_to_fetch < len(raw_dates):
+    if date_strategy == 'date_range':
+        # User specified explicit date range (e.g., "between Jan 9 and Jan 18") - return ALL dates in range
+        logger.info(f"[DATE LIMIT] Date range: returning all {original_count} dates (user specified explicit range)")
+    elif days_to_fetch and days_to_fetch < len(raw_dates):
         if date_strategy == 'specific_day':
             # User asked for specific date (e.g., "Jan 10") - only return that day if available
             if start_date in raw_dates:
