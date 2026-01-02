@@ -1708,7 +1708,9 @@ Determine the next step:
 1. Do we have everything needed to call a Lambda function?
    - For get_project_details: need project_id - IF user refers to project by category (e.g., "kitchen sink project"), use project_mapping from workflow context to find the matching project_id
    - For get_available_dates: need project_id (returns dates + request_id) - IF user refers to project by category, use project_mapping to resolve to project_id
-     OPTIONAL: date - if user specifies a date preference ("next month", "January", "next week"), include it in lambda_params so dates start from that period
+     OPTIONAL: date - if user specifies a date preference, include it in lambda_params AS-IS (do NOT convert to YYYY-MM-DD):
+       Examples: "next month", "January", "next week", "3rd week of January", "last week of February", "end of March"
+       The Lambda function handles these expressions specially to calculate date ranges.
    - For get_time_slots: need project_id + date + request_id (request_id comes from get_available_dates)
    - For confirm_appointment: need project_id + date + time + request_id
    - For cancel_appointment: need project_id - extract from conversation context if user says "cancel this appointment" after viewing project details
@@ -1799,14 +1801,33 @@ OR if we need more info:
     "workflow_complete": false
 }}
 
-EXAMPLE FOR DATE PREFERENCE (schedule for next month/January):
-When user says "schedule this for next month" or "schedule for January":
+EXAMPLE FOR DATE PREFERENCE (schedule for next month/January/3rd week of January):
+When user says "schedule this for next month", "schedule for January", or "show me 3rd week of January":
+CRITICAL: Pass the date expression AS-IS - do NOT convert to YYYY-MM-DD!
+
+User says "show me 3rd week of January":
 {{
     "should_call_lambda": true,
     "lambda_action": "get_available_dates",
     "lambda_params": {{
         "project_id": "7751748",
-        "date": "next month"  // IMPORTANT: Include date preference from classification
+        "date": "3rd week of January"  // PASS AS-IS - Lambda calculates the date range
+    }},
+    "update_workflow_state": {{
+        "workflow_type": "schedule_appointment",
+        "current_stage": "awaiting_date_selection",
+        "context": {{"project_id": "7751748", "date_preference": "3rd week of January"}}
+    }},
+    "workflow_complete": false
+}}
+
+User says "schedule this for next month":
+{{
+    "should_call_lambda": true,
+    "lambda_action": "get_available_dates",
+    "lambda_params": {{
+        "project_id": "7751748",
+        "date": "next month"  // PASS AS-IS - Lambda calculates the date range
     }},
     "update_workflow_state": {{
         "workflow_type": "schedule_appointment",
@@ -1866,7 +1887,14 @@ User says "December 15th" or "15th" (after seeing available dates for project #7
 IMPORTANT DATE SELECTION RULES:
 1. When user provides JUST a date after available dates were shown, call get_time_slots (NOT get_available_dates)
 2. Use the project_id and request_id from the CURRENT workflow context (most recently shown project)
-3. Convert user's date format to YYYY-MM-DD (e.g., "08th Dec" -> "2025-12-08", "December 15" -> "2025-12-15")
+3. Convert SPECIFIC dates to YYYY-MM-DD (e.g., "08th Dec" -> "2025-12-08", "December 15" -> "2025-12-15")
+   CRITICAL EXCEPTION - Keep these expressions AS-IS (do NOT convert to YYYY-MM-DD):
+   - "next week", "this week", "next month", "this month" -> pass as-is
+   - "1st week of [month]", "2nd week of [month]", "3rd week of [month]", "4th week of [month]" -> pass as-is
+   - "first week of [month]", "second week of [month]", "third week of [month]", "fourth week of [month]" -> pass as-is
+   - "last week of [month]", "end of [month]" -> pass as-is
+   - Month names alone ("January", "February") -> pass as-is
+   These expressions are handled specially by the Lambda function.
 4. Do NOT start a new scheduling flow - CONTINUE the existing one!
 5. If "08" could be date or project, and user just saw available dates, it's a DATE selection
 6. The workflow context contains the project_id and request_id you need - use them!

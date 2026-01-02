@@ -19,6 +19,7 @@ import json
 import logging
 import requests
 import boto3
+import calendar
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from botocore.exceptions import ClientError
@@ -136,7 +137,7 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
             return (result, 'week', 5)  # "next week" = show 5 days
         return result
 
-    # "last week of [month]" - e.g., "last week of February" → Feb 22
+    # "last week of [month]" - dynamically calculate based on days in month
     last_week_match = re.search(r'last week of (\w+)', date_lower)
     if last_week_match:
         month_name = last_week_match.group(1)[:3].lower()
@@ -145,30 +146,61 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
         if month_name in months_map:
             month_num = months_map[month_name]
             year = today.year if month_num >= today.month else today.year + 1
-            # Last week starts around the 22nd-25th depending on month
-            # Use 22nd as a safe start for last week
-            result = f"{year}-{month_num:02d}-22"
-            logger.info(f"[DATE] Converted 'last week of {month_name}' -> {result}")
+            # Dynamic calculation: last 7 days of month
+            days_in_month = calendar.monthrange(year, month_num)[1]
+            start_day = days_in_month - 6  # Last 7 days
+            result = f"{year}-{month_num:02d}-{start_day:02d}"
+            logger.info(f"[DATE] Converted 'last week of {month_name}' -> {result} (month has {days_in_month} days)")
             if return_strategy:
                 return (result, 'week', 5)
             return result
 
-    # "first week of [month]" - e.g., "first week of March" → Mar 1
-    first_week_match = re.search(r'first week of (\w+)', date_lower)
-    if first_week_match:
-        month_name = first_week_match.group(1)[:3].lower()
+    # Ordinal week of month: "1st week of", "2nd week of", "3rd week of", "4th week of", "first week of", etc.
+    # Uses actual calendar weeks (Monday-based)
+    ordinal_week_match = re.search(r'(1st|2nd|3rd|4th|5th|first|second|third|fourth|fifth)\s+week\s+of\s+(\w+)', date_lower)
+    if ordinal_week_match:
+        week_ord = ordinal_week_match.group(1).lower()
+        month_name = ordinal_week_match.group(2)[:3].lower()
         months_map = {'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
                       'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12}
-        if month_name in months_map:
+        week_num_map = {'1st': 1, 'first': 1, '2nd': 2, 'second': 2, '3rd': 3, 'third': 3,
+                        '4th': 4, 'fourth': 4, '5th': 5, 'fifth': 5}
+        if month_name in months_map and week_ord in week_num_map:
             month_num = months_map[month_name]
+            week_num = week_num_map[week_ord]
             year = today.year if month_num >= today.month else today.year + 1
-            result = f"{year}-{month_num:02d}-01"
-            logger.info(f"[DATE] Converted 'first week of {month_name}' -> {result}")
+
+            # Calculate actual calendar week (Monday-based)
+            # Find the first day of the month and its weekday
+            first_day = datetime(year, month_num, 1)
+            first_weekday = first_day.weekday()  # 0=Monday, 6=Sunday
+
+            # Find the first Monday (start of week 1 or week 2)
+            if first_weekday == 0:  # Month starts on Monday
+                first_monday = 1
+            else:
+                # Days until next Monday
+                first_monday = 8 - first_weekday  # First Monday is in the first full week
+
+            # Calculate start of requested week
+            # Week 1 = first 7 days (even if partial)
+            # Week 2 = starts on first Monday (or day 8 if month starts on Monday)
+            if week_num == 1:
+                start_day = 1  # Week 1 always starts on day 1
+            else:
+                start_day = first_monday + (week_num - 2) * 7
+
+            # Clamp to valid days in month
+            days_in_month = calendar.monthrange(year, month_num)[1]
+            start_day = min(start_day, days_in_month)
+
+            result = f"{year}-{month_num:02d}-{start_day:02d}"
+            logger.info(f"[DATE] Converted '{week_ord} week of {month_name}' -> {result} (calendar week, first_monday={first_monday})")
             if return_strategy:
                 return (result, 'week', 5)
             return result
 
-    # "end of [month]" - e.g., "end of January" → Jan 25
+    # "end of [month]" - dynamically calculate last 5 days of month
     end_of_match = re.search(r'end of (\w+)', date_lower)
     if end_of_match:
         month_name = end_of_match.group(1)[:3].lower()
@@ -177,8 +209,11 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
         if month_name in months_map:
             month_num = months_map[month_name]
             year = today.year if month_num >= today.month else today.year + 1
-            result = f"{year}-{month_num:02d}-25"
-            logger.info(f"[DATE] Converted 'end of {month_name}' -> {result}")
+            # Dynamic calculation: last 5 days of month
+            days_in_month = calendar.monthrange(year, month_num)[1]
+            start_day = days_in_month - 4  # Last 5 days
+            result = f"{year}-{month_num:02d}-{start_day:02d}"
+            logger.info(f"[DATE] Converted 'end of {month_name}' -> {result} (month has {days_in_month} days)")
             if return_strategy:
                 return (result, 'week', 5)
             return result
@@ -1138,10 +1173,11 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
     if not all([project_id, selected_date]):
         raise ValueError("Missing required parameters: project_id, date")
 
-    # AUTO-FETCH request_id if not provided
-    # This allows users to directly ask for slots without first getting available dates
-    if not request_id and not USE_MOCK_API and client_id:
-        logger.info(f"[get_time_slots] No request_id provided, fetching fresh one via get_available_dates for {selected_date}")
+    # ALWAYS fetch fresh request_id to avoid stale request_id issues
+    # This ensures direct slot queries work reliably
+    if not USE_MOCK_API and client_id:
+        old_request_id = request_id
+        logger.info(f"[get_time_slots] Fetching fresh request_id for {selected_date} (old: {old_request_id})")
         try:
             # Call slotsChatbot to get fresh request_id
             prefetch_url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/startDate/{selected_date}/endDate/{selected_date}/slotsChatbot"

@@ -611,11 +611,14 @@ For **Project_Information_Request** (specific project details): Use EXACT catego
   - "this week" → date="this week"
   - "this month" → date="this month"
   - "next month" → date="next month"
-  - "last week of [any month]" → date="last week of [month]" (e.g., "last week of Feb" → date="last week of feb")
-  - "first week of [any month]" → date="first week of [month]" (e.g., "first week of March" → date="first week of march")
-  - "end of [any month]" → date="end of [month]" (e.g., "end of Jan" → date="end of jan")
+  - "1st/first week of [month]" → date="first week of [month]"
+  - "2nd/second week of [month]" → date="2nd week of [month]"
+  - "3rd/third week of [month]" → date="3rd week of [month]"
+  - "4th/fourth week of [month]" → date="4th week of [month]"
+  - "last week of [month]" → date="last week of [month]"
+  - "end of [month]" → date="end of [month]"
   - Month names alone (e.g., "January", "March") → date="2026-01" (YYYY-MM format)
-- NEVER convert "last week of", "first week of", "end of" to a specific YYYY-MM-DD date
+- NEVER convert week expressions like "2nd week of Feb", "3rd week of Jan" to a specific YYYY-MM-DD date
 - Extract time mentions: "2pm", "morning", "afternoon"
 
 ## CRITICAL DISTINCTIONS
