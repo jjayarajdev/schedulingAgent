@@ -1524,16 +1524,14 @@ def handle_reschedule_appointment(params: Dict, config: Dict, auth_headers: Dict
     # Use regular get_available_dates which is faster than get-rescheduler-slots
     if fetch_dates and not new_date:
         logger.info(f"[RESCHEDULE STEP 2] Fetching available dates for project {project_id}")
-        from datetime import datetime
-        today = datetime.now().strftime('%Y-%m-%d')
 
         try:
             # Use regular get_available_dates - it's faster and project is now in "Ready To Schedule" status
+            # Don't pass a date - let it use default behavior (tomorrow + 5 days)
             dates_result = handle_get_available_dates(
                 {
                     'project_id': project_id,
-                    'client_id': client_id,
-                    'date': today
+                    'client_id': client_id
                 },
                 config,
                 auth_headers
