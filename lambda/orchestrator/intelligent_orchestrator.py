@@ -2236,10 +2236,10 @@ def orchestrate_intelligent_workflow(
             # Determine if this is a reschedule workflow
             is_reschedule = cont_workflow_type == 'reschedule_appointment'
 
-            # Convert action to reschedule-specific if needed
-            if is_reschedule and action in ['get_time_slots']:
-                action = 'get_rescheduler_slots'
-                logger.info(f"[CONTINUATION] Converting {continuation['action']} to {action} for reschedule workflow")
+            # NOTE: We no longer convert get_time_slots to get_rescheduler_slots
+            # The new slotsChatbot API works for both schedule and reschedule flows
+            if is_reschedule and action == 'get_time_slots':
+                logger.info(f"[CONTINUATION] Reschedule workflow - using get_time_slots (slotsChatbot API)")
 
             # Add common params
             params.update({

@@ -832,17 +832,8 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 available_dates = response_body.get('available_dates', [])
                 project_id = response_body.get('project_id', '')
 
-                # Add weather indicators to dates if we have project location info
-                if available_dates:
-                    try:
-                        available_dates = add_weather_indicators_to_dates(
-                            available_dates,
-                            response_body.get('project_category'),
-                            response_body.get('project_city'),
-                            response_body.get('project_state')
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to add weather indicators to reschedule dates: {e}")
+                # NOTE: Weather enrichment is handled in intelligent_orchestrator.py
+                # which has access to weather data. We just pass through the dates here.
 
                 result = {
                     "message": f"I've initiated the rescheduling process for project #{project_id}. Here are the available dates:",
