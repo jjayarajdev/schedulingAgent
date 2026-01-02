@@ -4209,14 +4209,10 @@ What would you like to do?"""
                 lambda_action = 'reschedule_appointment'
                 decision['lambda_action'] = 'reschedule_appointment'
             else:
-                # For CONTINUATION (user selecting date/time): use get_rescheduler_slots
-                logger.info(f"[RESCHEDULE] Continuing reschedule workflow - converting {lambda_action} to get_rescheduler_slots")
-                lambda_action = 'get_rescheduler_slots'
-                decision['lambda_action'] = 'get_rescheduler_slots'
-                # Use the selected date if provided, otherwise use today's date
-                from datetime import datetime
-                if 'date' not in lambda_params:
-                    lambda_params['date'] = datetime.now().strftime("%Y-%m-%d")
+                # For CONTINUATION (user selecting date/time): use get_time_slots with new slotsChatbot API
+                # NOTE: We no longer use get_rescheduler_slots - the new slotsChatbot API works for reschedule too
+                logger.info(f"[RESCHEDULE] Continuing reschedule workflow - using {lambda_action} (slotsChatbot API)")
+                # Keep the action as-is (get_time_slots) - it will use the new slotsChatbot API
 
         # RESOLVE project_index to project_id for ALL channels
         # This handles ordinal references like "last project", "first project", "3rd project"
