@@ -3740,9 +3740,10 @@ What would you like to do?"""
                     logger.warning(f"[WEATHER] Failed to parse scheduled date: {scheduled_date}, error: {date_err}")
                     target_date = scheduled_date
             else:
-                # Priority 4: Use current date + 7 days for unscheduled projects
-                target_date = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
-                logger.info(f"[WEATHER] No date found, using current+7 days: {target_date}")
+                # Priority 4: No target date - show 5-day forecast from today (like chatSlots)
+                # Don't set target_date so we get the full forecast
+                target_date = None
+                logger.info(f"[WEATHER] No date found, will show 5-day forecast from today")
 
             logger.info(f"[WEATHER] Fetching weather for location: {location}, date: {target_date}")
 

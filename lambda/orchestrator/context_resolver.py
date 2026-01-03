@@ -1,6 +1,8 @@
 """
 Context Resolver for Multi-Turn Conversations
 Resolves references like "the second one", "that project", "that day" from conversation history
+
+Enhanced with DSPy-learned examples for better resolution accuracy.
 """
 import json
 import re
@@ -8,6 +10,15 @@ import logging
 from typing import Dict, List, Optional, Any
 
 logger = logging.getLogger()
+
+# DSPy integration for enhanced context resolution
+try:
+    from dspy_integration import get_context_resolver_few_shots, enhance_context_prompt
+    DSPY_CONTEXT_AVAILABLE = True
+except ImportError:
+    DSPY_CONTEXT_AVAILABLE = False
+    def get_context_resolver_few_shots(): return ""
+    def enhance_context_prompt(p): return p
 
 
 def resolve_context_references(

@@ -151,6 +151,44 @@ EOF
 
     put_role_policy "$role_name" "OrchestratorPermissions" "$orchestrator_policy"
 
+    # DSPy integration permissions (S3 for models and training logs)
+    local dspy_policy
+    dspy_policy=$(cat <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "DSPyModelRead",
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::${RESOURCE_PREFIX}-dspy-models-${ENVIRONMENT}",
+                "arn:aws:s3:::${RESOURCE_PREFIX}-dspy-models-${ENVIRONMENT}/*"
+            ]
+        },
+        {
+            "Sid": "TrainingLogWrite",
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::${RESOURCE_PREFIX}-training-logs-${ENVIRONMENT}",
+                "arn:aws:s3:::${RESOURCE_PREFIX}-training-logs-${ENVIRONMENT}/*"
+            ]
+        }
+    ]
+}
+EOF
+)
+
+    put_role_policy "$role_name" "DSPyTrainingLogAccess" "$dspy_policy"
+
     # Attach DynamoDB full access
     aws iam attach-role-policy \
         --role-name "$role_name" \

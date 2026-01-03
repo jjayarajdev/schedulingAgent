@@ -26,6 +26,16 @@ from config_loader import (
     find_category_bucket_for_keyword,
 )
 
+# DSPy integration for optimized prompts and continuous learning
+try:
+    from dspy_integration import enhance_nlu_prompt, get_classifier_few_shots, load_optimized_models
+    from training_logger import log_classification
+    DSPY_INTEGRATION_AVAILABLE = True
+except ImportError:
+    DSPY_INTEGRATION_AVAILABLE = False
+    def enhance_nlu_prompt(p): return p
+    def log_classification(*args, **kwargs): return None
+
 logger = logging.getLogger()
 _bedrock_runtime_client = None
 
@@ -681,7 +691,11 @@ def classify_intent_and_action(message: str, conversation_history: Optional[List
         today_date=datetime.now().strftime("%Y-%m-%d")
     )
 
+    # DSPy Enhancement: Add learned few-shot examples to prompt
+    prompt = enhance_nlu_prompt(prompt)
+
     classification_text = ""
+    start_time = datetime.now()
     try:
         bedrock = get_bedrock_client()
         response = bedrock.invoke_model(
@@ -721,6 +735,19 @@ def classify_intent_and_action(message: str, conversation_history: Optional[List
             _normalize_params(result["params"])
 
         logger.info(f"[OK] NLU: {intent} → {result['action']} for: '{message[:60]}...'")
+
+        # Log for continuous learning (non-blocking)
+        try:
+            response_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+            log_classification(
+                message=message,
+                classification_result=result,
+                conversation_context=context_str,
+                response_time_ms=response_time_ms
+            )
+        except Exception as log_err:
+            logger.debug(f"Training log failed (non-critical): {log_err}")
+
         return result
 
     except json.JSONDecodeError as e:

@@ -10,6 +10,12 @@ This keeps Sonnet focused on what it's good at:
 - Understanding slot selections ("the first one", "slot 3")
 - Detecting confirmations ("yes", "sounds good", "let's do it")
 - Extracting complex references ("the project at North Loop")
+
+Enhanced with DSPy-learned examples for:
+- Date interpretation (natural language to YYYY-MM-DD)
+- Context resolution (pronouns, references)
+- Response styling (voice/sms/chat adaptation)
+- Slot ranking (preference + weather aware)
 """
 
 import json
@@ -19,6 +25,22 @@ from typing import Dict, Any, Optional, List
 from botocore.config import Config as BotoConfig
 
 logger = logging.getLogger()
+
+# DSPy integration for enhanced prompts
+try:
+    from dspy_integration import (
+        get_date_interpreter_few_shots,
+        get_context_resolver_few_shots,
+        get_slot_ranker_few_shots,
+        get_response_style_few_shots
+    )
+    DSPY_ENRICHER_AVAILABLE = True
+except ImportError:
+    DSPY_ENRICHER_AVAILABLE = False
+    def get_date_interpreter_few_shots(): return ""
+    def get_context_resolver_few_shots(): return ""
+    def get_slot_ranker_few_shots(): return ""
+    def get_response_style_few_shots(channel="chat"): return ""
 
 # Bedrock client (lazy init)
 _bedrock_client = None
@@ -254,7 +276,7 @@ def enrich_entities(
 
 
 def _extract_date_selection(message: str, context: Dict) -> Dict[str, Any]:
-    """Extract date from user's selection"""
+    """Extract date from user's selection - enhanced with DSPy few-shots"""
     from datetime import datetime, timedelta
 
     # Get available dates from context
@@ -271,6 +293,12 @@ def _extract_date_selection(message: str, context: Dict) -> Dict[str, Any]:
         tomorrow=tomorrow,
         first_available=first_available
     )
+
+    # Enhance with DSPy-learned date interpretation examples
+    if DSPY_ENRICHER_AVAILABLE:
+        dspy_examples = get_date_interpreter_few_shots()
+        if dspy_examples:
+            prompt = dspy_examples + "\n\n" + prompt
 
     response = call_sonnet(prompt, max_tokens=100)
     return _parse_json_response(response)
@@ -291,7 +319,7 @@ def _extract_slot_selection(message: str, context: Dict) -> Dict[str, Any]:
 
 
 def _extract_project_reference(message: str, context: Dict) -> Dict[str, Any]:
-    """Extract project reference (ID, category, location, ordinal)"""
+    """Extract project reference (ID, category, location, ordinal) - enhanced with DSPy"""
     workflow_state = context.get('workflow_state', {})
     project_mapping = workflow_state.get('context', {}).get('project_mapping', {})
 
@@ -309,6 +337,12 @@ def _extract_project_reference(message: str, context: Dict) -> Dict[str, Any]:
         message=message,
         project_list=project_list
     )
+
+    # Enhance with DSPy-learned context resolution examples
+    if DSPY_ENRICHER_AVAILABLE:
+        dspy_examples = get_context_resolver_few_shots()
+        if dspy_examples:
+            prompt = dspy_examples + "\n\n" + prompt
 
     response = call_sonnet(prompt, max_tokens=150)
     return _parse_json_response(response)
@@ -426,3 +460,115 @@ def needs_enrichment(action: str, existing_entities: Dict) -> bool:
 
     # Default: enrich to be safe
     return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RESPONSE STYLING - Adapt responses for voice/sms/chat channels
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def style_response_for_channel(
+    raw_response: str,
+    channel: str,
+    action_context: str = ""
+) -> str:
+    """
+    Style a response for the appropriate channel using DSPy-learned patterns.
+
+    Args:
+        raw_response: The raw response content to style
+        channel: "voice", "sms", or "chat"
+        action_context: What action was being performed
+
+    Returns:
+        Styled response appropriate for the channel
+    """
+    if not raw_response:
+        return raw_response
+
+    # Get DSPy-learned styling examples for this channel
+    dspy_examples = ""
+    if DSPY_ENRICHER_AVAILABLE:
+        dspy_examples = get_response_style_few_shots(channel)
+
+    prompt = f"""Adapt this response for {channel.upper()} channel.
+
+{dspy_examples}
+
+Raw response: "{raw_response}"
+Context: {action_context}
+Channel: {channel}
+
+Guidelines:
+- voice: Conversational, natural flow, no markdown, under 200 chars
+- sms: Ultra-concise, abbreviations OK, under 160 chars
+- chat: Balanced, markdown formatting OK, bullet points for lists
+
+Return ONLY the styled response, nothing else."""
+
+    styled = call_sonnet(prompt, max_tokens=300)
+
+    # Fallback to raw if styling fails
+    if not styled or len(styled) < 5:
+        return raw_response
+
+    return styled.strip()
+
+
+def rank_time_slots(
+    available_slots: List[str],
+    user_preference: str = "",
+    weather_info: str = "",
+    project_type: str = ""
+) -> Dict[str, Any]:
+    """
+    Rank time slots based on user preferences, weather, and project type.
+
+    Uses DSPy-learned ranking patterns for intelligent recommendations.
+
+    Args:
+        available_slots: List of available time slots
+        user_preference: User's preference (morning, afternoon, earliest, latest)
+        weather_info: Weather conditions for the date
+        project_type: Indoor or outdoor project type
+
+    Returns:
+        Dict with ranked_slots list and recommendation
+    """
+    if not available_slots:
+        return {"ranked_slots": [], "recommendation": None, "reason": "No slots available"}
+
+    # Get DSPy-learned slot ranking examples
+    dspy_examples = ""
+    if DSPY_ENRICHER_AVAILABLE:
+        dspy_examples = get_slot_ranker_few_shots()
+
+    slots_json = json.dumps(available_slots)
+
+    prompt = f"""Rank these time slots for optimal scheduling.
+
+{dspy_examples}
+
+Available slots: {slots_json}
+User preference: {user_preference or "none specified"}
+Weather: {weather_info or "not available"}
+Project type: {project_type or "unknown"}
+
+Return JSON with:
+- ranked_slots: Array of slots in recommended order
+- recommendation: Best slot
+- reason: Brief explanation
+
+Return ONLY valid JSON."""
+
+    response = call_sonnet(prompt, max_tokens=200)
+    result = _parse_json_response(response)
+
+    # Fallback if parsing fails
+    if not result.get('ranked_slots'):
+        return {
+            "ranked_slots": available_slots,
+            "recommendation": available_slots[0] if available_slots else None,
+            "reason": "Default ordering"
+        }
+
+    return result

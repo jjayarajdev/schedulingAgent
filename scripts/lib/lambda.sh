@@ -61,6 +61,12 @@ get_lambda_env_vars() {
             env_vars="${env_vars},ALLOW_DIRECT_LAMBDA=true"
             env_vars="${env_vars},USE_SUPERVISOR=false"
             env_vars="${env_vars},ENABLE_MULTI_AGENT_ORCHESTRATION=false"
+            # DSPy integration for continuous learning
+            env_vars="${env_vars},TRAINING_LOG_ENABLED=true"
+            env_vars="${env_vars},TRAINING_LOG_BUCKET=${RESOURCE_PREFIX}-training-logs-${ENVIRONMENT}"
+            env_vars="${env_vars},TRAINING_LOG_TABLE=$(table_name 'training-logs')"
+            env_vars="${env_vars},DSPY_MODEL_BUCKET=${RESOURCE_PREFIX}-dspy-models-${ENVIRONMENT}"
+            env_vars="${env_vars},DSPY_MODEL_PREFIX=optimized/"
             ;;
         "scheduling-actions"|"information-actions"|"chitchat-actions")
             # Core region Lambdas

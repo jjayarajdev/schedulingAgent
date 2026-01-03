@@ -387,20 +387,60 @@ def handle_get_weather(params: Dict, config: Dict, auth_headers: Dict) -> Dict[s
         logger.info(f"[MOCK] Fetching weather for {location_info['name']}")
         response = get_mock_weather(location_info['name'])
     else:
-        logger.info(f"[REAL] Fetching weather from Open-Meteo for lat={lat}, lon={lon}")
+        logger.info(f"[REAL] Fetching weather from Open-Meteo for lat={lat}, lon={lon}, target_date={target_date}")
 
         # Open-Meteo API endpoint
-        url = (
-            f"https://api.open-meteo.com/v1/forecast"
-            f"?latitude={lat}&longitude={lon}"
-            f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m"
-            f"&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code"
-            f"&temperature_unit=fahrenheit"
-            f"&wind_speed_unit=mph"
-            f"&precipitation_unit=inch"
-            f"&timezone=auto"
-            f"&forecast_days=7"
-        )
+        # If target_date is specified and in the future, use start_date/end_date to get that specific forecast
+        from datetime import datetime, timedelta
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        if target_date and target_date > today:
+            # Target date is in the future - request specific date range
+            # Get 1 day before to 5 days after target for context
+            try:
+                target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+                start_dt = target_dt - timedelta(days=1)
+                end_dt = target_dt + timedelta(days=5)
+
+                url = (
+                    f"https://api.open-meteo.com/v1/forecast"
+                    f"?latitude={lat}&longitude={lon}"
+                    f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m"
+                    f"&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code"
+                    f"&temperature_unit=fahrenheit"
+                    f"&wind_speed_unit=mph"
+                    f"&precipitation_unit=inch"
+                    f"&timezone=auto"
+                    f"&start_date={start_dt.strftime('%Y-%m-%d')}"
+                    f"&end_date={end_dt.strftime('%Y-%m-%d')}"
+                )
+                logger.info(f"[WEATHER] Using date range: {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}")
+            except Exception as e:
+                logger.warning(f"Failed to parse target_date, using default 7-day: {e}")
+                url = (
+                    f"https://api.open-meteo.com/v1/forecast"
+                    f"?latitude={lat}&longitude={lon}"
+                    f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m"
+                    f"&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code"
+                    f"&temperature_unit=fahrenheit"
+                    f"&wind_speed_unit=mph"
+                    f"&precipitation_unit=inch"
+                    f"&timezone=auto"
+                    f"&forecast_days=7"
+                )
+        else:
+            # No target date or today - use standard 7-day forecast
+            url = (
+                f"https://api.open-meteo.com/v1/forecast"
+                f"?latitude={lat}&longitude={lon}"
+                f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m"
+                f"&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code"
+                f"&temperature_unit=fahrenheit"
+                f"&wind_speed_unit=mph"
+                f"&precipitation_unit=inch"
+                f"&timezone=auto"
+                f"&forecast_days=7"
+            )
 
         try:
             res = requests.get(url, timeout=10)
