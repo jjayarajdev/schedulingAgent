@@ -1,0 +1,96 @@
+{
+  "resolver.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "message": "what's the weather like",
+        "workflow_context": "{\"project_id\": \"9000489\", \"city\": \"Minneapolis\", \"state\": \"MN\", \"date\": \"2026-01-06\", \"category\": \"Decking\"}",
+        "conversation_summary": "User viewing time slots for Decking project on Jan 6",
+        "reasoning": "General weather query - using workflow context location and date",
+        "location": "Minneapolis, MN",
+        "target_date": "2026-01-06"
+      },
+      {
+        "augmented": true,
+        "message": "how is the weather for the day",
+        "workflow_context": "{\"project_id\": \"9000407\", \"city\": \"Chicago\", \"state\": \"IL\", \"date\": \"2026-01-10\"}",
+        "conversation_summary": "",
+        "reasoning": "Using location and date from current workflow context",
+        "location": "Chicago, IL",
+        "target_date": "2026-01-10"
+      },
+      {
+        "augmented": true,
+        "message": "how is the weather for given date",
+        "workflow_context": "{\"project_id\": \"9000489\", \"city\": \"Minneapolis\", \"state\": \"MN\", \"date\": \"2026-01-05\"}",
+        "conversation_summary": "User viewing time slots for Jan 5",
+        "reasoning": "Using location and date from workflow context for the specified date",
+        "location": "Minneapolis, MN",
+        "target_date": "2026-01-05"
+      },
+      {
+        "message": "weather for my decking project",
+        "workflow_context": "{\"project_mapping\": {\"9000489\": {\"city\": \"Minneapolis\", \"state\": \"MN\", \"category\": \"Decking\"}}}",
+        "conversation_summary": "User has decking project #9000489",
+        "location": "Minneapolis, MN",
+        "target_date": "",
+        "reasoning": "Found decking project in mapping, extracted location"
+      },
+      {
+        "message": "if there rain / summer / winter",
+        "workflow_context": "{\"project_id\": \"9000489\", \"city\": \"Minneapolis\", \"state\": \"MN\", \"date\": \"2026-01-06\", \"category\": \"Decking\"}",
+        "conversation_summary": "Scheduling outdoor decking project",
+        "location": "Minneapolis, MN",
+        "target_date": "2026-01-06",
+        "reasoning": "Weather conditions query for outdoor project"
+      },
+      {
+        "message": "how is the weather",
+        "workflow_context": "{\"project_id\": \"9000489\", \"city\": \"Minneapolis\", \"state\": \"MN\", \"category\": \"Decking\"}",
+        "conversation_summary": "User scheduling outdoor decking project",
+        "location": "Minneapolis, MN",
+        "target_date": "",
+        "reasoning": "General weather query - using project location"
+      }
+    ],
+    "signature": {
+      "instructions": "Resolve location and date for weather queries from conversation context.\n\nWhen user asks about weather without specifying location/date,\ninfer from the current scheduling workflow context.",
+      "fields": [
+        {
+          "prefix": "Message:",
+          "description": "User's weather query"
+        },
+        {
+          "prefix": "Workflow Context:",
+          "description": "JSON with project_id, city, state, date, category from current workflow"
+        },
+        {
+          "prefix": "Conversation Summary:",
+          "description": "Recent conversation context"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "How location and date were determined"
+        },
+        {
+          "prefix": "Location:",
+          "description": "City, State format (e.g., 'Minneapolis, MN')"
+        },
+        {
+          "prefix": "Target Date:",
+          "description": "Date for weather forecast in YYYY-MM-DD format"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.11",
+      "dspy": "3.0.4",
+      "cloudpickle": "3.1"
+    }
+  }
+}

@@ -1,0 +1,165 @@
+{
+  "interpreter.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "phrase": "this week",
+        "current_date": "2026-01-03",
+        "reasoning": "The current date is Saturday, January 3, 2026. \"This week\" refers to the current week containing this date. I need to determine the start and end of the week. Assuming a standard Monday-to-Sunday week format, the current week would start on Monday, December 29, 2025 and end on Sunday, January 5, 2026.",
+        "start_date": "2025-12-29",
+        "end_date": "2026-01-05",
+        "interpretation": "Current week from Monday December 29 to Sunday January 5"
+      },
+      {
+        "augmented": true,
+        "phrase": "next month",
+        "current_date": "2026-01-15",
+        "reasoning": "The current date is 2026-01-15, which is in January. \"Next month\" refers to the month immediately following the current month, which would be February 2026. Since no specific dates within the month are specified, this should encompass the entire month of February.",
+        "start_date": "2026-02-01",
+        "end_date": "2026-02-28",
+        "interpretation": "The entire month of February 2026"
+      },
+      {
+        "augmented": true,
+        "phrase": "end of January",
+        "current_date": "2026-01-10",
+        "reasoning": "The phrase \"end of January\" refers to the final days of January. Given the current date is January 10, 2026, this would encompass the last week or so of the month. Typically \"end of\" a month refers to roughly the last 7-10 days, so I'll interpret this as January 25th through January 31st (the actual end of the month).",
+        "start_date": "2026-01-25",
+        "end_date": "2026-01-31",
+        "interpretation": "Final week of January"
+      },
+      {
+        "augmented": true,
+        "phrase": "beginning of February",
+        "current_date": "2026-01-15",
+        "reasoning": "The phrase \"beginning of February\" refers to the early part of February. Since the current date is January 15, 2026, we're looking at February 2026. \"Beginning\" typically means the first several days or first week of the month. I'll interpret this as the first 7-10 days of February.",
+        "start_date": "2026-02-01",
+        "end_date": "2026-02-07",
+        "interpretation": "First week of February"
+      },
+      {
+        "phrase": "next Monday",
+        "current_date": "2026-01-03",
+        "start_date": "2026-01-05",
+        "end_date": "2026-01-05",
+        "interpretation": "Monday of the coming week"
+      },
+      {
+        "phrase": "2nd week of March",
+        "current_date": "2026-02-15",
+        "start_date": "2026-03-09",
+        "end_date": "2026-03-15",
+        "interpretation": "Second full week of March"
+      },
+      {
+        "phrase": "first week of February",
+        "current_date": "2026-01-20",
+        "start_date": "2026-02-02",
+        "end_date": "2026-02-08",
+        "interpretation": "First full week of February (Mon-Sun)"
+      },
+      {
+        "phrase": "sometime in February",
+        "current_date": "2026-01-15",
+        "start_date": "2026-02-01",
+        "end_date": "2026-02-28",
+        "interpretation": "Any date in February - show full month"
+      },
+      {
+        "phrase": "late March",
+        "current_date": "2026-02-01",
+        "start_date": "2026-03-20",
+        "end_date": "2026-03-31",
+        "interpretation": "Last 10-12 days of March"
+      },
+      {
+        "phrase": "tomorrow",
+        "current_date": "2026-01-03",
+        "start_date": "2026-01-04",
+        "end_date": "2026-01-04",
+        "interpretation": "Saturday January 4"
+      },
+      {
+        "phrase": "next Tuesday",
+        "current_date": "2026-01-03",
+        "start_date": "2026-01-07",
+        "end_date": "2026-01-07",
+        "interpretation": "Tuesday January 7"
+      },
+      {
+        "phrase": "mid February",
+        "current_date": "2026-01-20",
+        "start_date": "2026-02-10",
+        "end_date": "2026-02-20",
+        "interpretation": "Middle of February"
+      },
+      {
+        "phrase": "this Friday",
+        "current_date": "2026-01-06",
+        "start_date": "2026-01-10",
+        "end_date": "2026-01-10",
+        "interpretation": "Friday of current week"
+      },
+      {
+        "phrase": "the week after the current week",
+        "current_date": "2026-01-03",
+        "start_date": "2026-01-05",
+        "end_date": "2026-01-11",
+        "interpretation": "Same as next week - the following week"
+      },
+      {
+        "phrase": "the 25th",
+        "current_date": "2026-01-10",
+        "start_date": "2026-01-25",
+        "end_date": "2026-01-25",
+        "interpretation": "25th of current month (January)"
+      },
+      {
+        "phrase": "January 15th",
+        "current_date": "2026-01-03",
+        "start_date": "2026-01-15",
+        "end_date": "2026-01-15",
+        "interpretation": "Specific date: January 15, 2026"
+      }
+    ],
+    "signature": {
+      "instructions": "Convert natural language date expressions to specific date ranges.\n\nHandles relative expressions like 'next week', 'end of January',\n'day after tomorrow', etc.",
+      "fields": [
+        {
+          "prefix": "Phrase:",
+          "description": "Natural language date expression"
+        },
+        {
+          "prefix": "Current Date:",
+          "description": "Today's date in YYYY-MM-DD format"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Start Date:",
+          "description": "Start date of range in YYYY-MM-DD format"
+        },
+        {
+          "prefix": "End Date:",
+          "description": "End date of range in YYYY-MM-DD format"
+        },
+        {
+          "prefix": "Interpretation:",
+          "description": "Human-readable explanation of the date range"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.11",
+      "dspy": "3.0.4",
+      "cloudpickle": "3.1"
+    }
+  }
+}

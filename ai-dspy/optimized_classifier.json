@@ -1,0 +1,81 @@
+{
+  "classifier.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "message": "Show me all ready-to-schedule projects with project number",
+        "conversation_summary": "",
+        "reasoning": "User wants to see projects that are ready to schedule, with their project numbers displayed",
+        "intent": "scheduling",
+        "action": "list_projects",
+        "confidence": "high"
+      },
+      {
+        "augmented": true,
+        "message": "Show me all the projects that are scheduled for january",
+        "conversation_summary": "",
+        "reasoning": "User wants to view projects filtered by January timeframe",
+        "intent": "scheduling",
+        "action": "list_projects",
+        "confidence": "high"
+      },
+      {
+        "augmented": true,
+        "message": "Show me the status of project 675656565",
+        "conversation_summary": "",
+        "reasoning": "User wants to check the status of a specific project by ID",
+        "intent": "information",
+        "action": "get_project_details",
+        "confidence": "high"
+      },
+      {
+        "augmented": true,
+        "message": "Show me the details for project AI-PRO-1000010",
+        "conversation_summary": "",
+        "reasoning": "User is requesting specific details for a particular project by its ID number",
+        "intent": "information",
+        "action": "get_project_details",
+        "confidence": "high"
+      }
+    ],
+    "signature": {
+      "instructions": "Classify user intent for a home improvement scheduling assistant.\n\nThe assistant helps homeowners manage projects like kitchen remodels,\ndecking, roofing, appliance installations, etc.",
+      "fields": [
+        {
+          "prefix": "Message:",
+          "description": "User's message"
+        },
+        {
+          "prefix": "Conversation Summary:",
+          "description": "Summary of recent conversation context"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "Brief explanation of why this classification was chosen"
+        },
+        {
+          "prefix": "Intent:",
+          "description": "High-level intent category"
+        },
+        {
+          "prefix": "Action:",
+          "description": "Specific action: list_projects, get_project_details, get_available_dates, get_time_slots, confirm_appointment, reschedule_appointment, cancel_appointment, get_weather, greet, help, general"
+        },
+        {
+          "prefix": "Confidence:",
+          "description": "Classification confidence"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.11",
+      "dspy": "3.0.4",
+      "cloudpickle": "3.1"
+    }
+  }
+}

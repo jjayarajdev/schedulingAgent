@@ -1,0 +1,143 @@
+{
+  "styler": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "raw_response": "Available dates: January 6, January 7, January 8, January 9. Which date works for you?",
+        "channel": "voice",
+        "context": "Scheduling Decking project",
+        "styled_response": "I have availability on January 6th, 7th, 8th, or 9th. Which of those days works best for you?",
+        "style_notes": "Natural conversational flow, uses ordinal numbers for dates"
+      },
+      {
+        "augmented": true,
+        "raw_response": "Project #9000489: Decking. Status: Ready To Schedule. Address: 123 Main St, Minneapolis, MN. Category: Decking.",
+        "channel": "voice",
+        "context": "User asked for project details",
+        "styled_response": "Here are your project details: It's project number 9000489 for decking work at 123 Main Street in Minneapolis. The status shows it's ready to schedule.",
+        "style_notes": "Natural conversational flow, no lists or formatting"
+      },
+      {
+        "augmented": true,
+        "raw_response": "Appointment confirmed: Project 9000489, January 6, 2026 at 8:00 AM.",
+        "channel": "voice",
+        "context": "User just confirmed appointment",
+        "styled_response": "Perfect! Your appointment is confirmed for January 6th at 8 AM. You should receive a confirmation email shortly with all the details.",
+        "style_notes": "Conversational confirmation, natural flow, no project number"
+      },
+      {
+        "augmented": true,
+        "raw_response": "Time slots for January 6: 8:00 AM, 8:30 AM, 9:00 AM, 10:00 AM, 1:00 PM, 2:00 PM",
+        "channel": "voice",
+        "context": "User viewing available time slots",
+        "styled_response": "For January 6th, I have morning slots at 8, 8:30, 9, and 10 AM, plus afternoon appointments at 1 and 2 PM. Which time would work best for you?",
+        "style_notes": "Natural speech flow, grouped by time periods"
+      },
+      {
+        "raw_response": "Appointment confirmed: Project 9000489, January 6, 2026 at 8:00 AM.",
+        "channel": "sms",
+        "context": "User just confirmed appointment",
+        "styled_response": "Confirmed! Jan 6 @ 8AM. Reply HELP for assistance.",
+        "style_notes": "Short confirmation with help option"
+      },
+      {
+        "raw_response": "Appointment confirmed: Project 9000489, January 6, 2026 at 8:00 AM.",
+        "channel": "chat",
+        "context": "User just confirmed appointment",
+        "styled_response": "✅ **Appointment Confirmed!**\n\n• **Project:** Decking (#9000489)\n• **Date:** January 6, 2026\n• **Time:** 8:00 AM\n\nYou'll receive a confirmation email shortly.",
+        "style_notes": "Emoji for visual feedback, structured confirmation"
+      },
+      {
+        "raw_response": "Error: No available slots found for the requested date.",
+        "channel": "voice",
+        "context": "User trying to schedule",
+        "styled_response": "I'm sorry, but there aren't any available slots on that date. Would you like me to check a different day?",
+        "style_notes": "Apologetic, offers alternative"
+      },
+      {
+        "raw_response": "Project #9000489: Decking. Status: Ready To Schedule. Address: 123 Main St, Minneapolis, MN.",
+        "channel": "sms",
+        "context": "User asked for project details",
+        "styled_response": "Decking #9000489\nStatus: Ready\n123 Main St, Minneapolis",
+        "style_notes": "Minimal, structured, no fluff"
+      },
+      {
+        "raw_response": "Time slots for January 6: 8:00 AM, 8:30 AM, 9:00 AM, 10:00 AM, 1:00 PM, 2:00 PM",
+        "channel": "sms",
+        "context": "User viewing available time slots",
+        "styled_response": "Jan 6 slots: 8/8:30/9/10AM, 1/2PM. Reply w/ time.",
+        "style_notes": "Compact time list"
+      },
+      {
+        "raw_response": "Project #9000489: Decking. Status: Ready To Schedule. Address: 123 Main St, Minneapolis, MN. Category: Decking.",
+        "channel": "chat",
+        "context": "User asked for project details",
+        "styled_response": "**Project Details**\n\n| Field | Value |\n|-------|-------|\n| Project # | 9000489 |\n| Type | Decking |\n| Status | Ready To Schedule |\n| Address | 123 Main St, Minneapolis, MN |",
+        "style_notes": "Markdown table for structured data"
+      },
+      {
+        "raw_response": "Available dates: January 6, January 7, January 8, January 9. Which date works for you?",
+        "channel": "chat",
+        "context": "Scheduling Decking project",
+        "styled_response": "Here are the available dates for your Decking project:\n\n• **Jan 6** (Monday)\n• **Jan 7** (Tuesday)\n• **Jan 8** (Wednesday)\n• **Jan 9** (Thursday)\n\nWhich date works best for you?",
+        "style_notes": "Markdown formatting, structured list, includes day names"
+      },
+      {
+        "raw_response": "Error: No available slots found for the requested date.",
+        "channel": "sms",
+        "context": "User trying to schedule",
+        "styled_response": "No slots on that date. Try diff date?",
+        "style_notes": "Brief, actionable"
+      },
+      {
+        "raw_response": "Error: No available slots found for the requested date.",
+        "channel": "chat",
+        "context": "User trying to schedule",
+        "styled_response": "⚠️ No available slots found for that date.\n\nWould you like to:\n• Try a different date\n• See the next available opening",
+        "style_notes": "Clear options with emoji indicator"
+      },
+      {
+        "raw_response": "Available dates: January 6, January 7, January 8, January 9. Which date works for you?",
+        "channel": "sms",
+        "context": "Scheduling Decking project",
+        "styled_response": "Dates avail: Jan 6-9. Reply w/ date choice.",
+        "style_notes": "Maximum brevity, abbreviations OK"
+      }
+    ],
+    "signature": {
+      "instructions": "Adapt response tone and format based on channel (voice/sms/chat).\n\nVoice: conversational, natural flow, no markdown\nSMS: ultra-concise, abbreviations OK\nChat: balanced, markdown formatting",
+      "fields": [
+        {
+          "prefix": "Raw Response:",
+          "description": "Raw response content to style"
+        },
+        {
+          "prefix": "Channel:",
+          "description": "Output channel"
+        },
+        {
+          "prefix": "Context:",
+          "description": "What action was being performed"
+        },
+        {
+          "prefix": "Styled Response:",
+          "description": "Response adapted for the channel"
+        },
+        {
+          "prefix": "Style Notes:",
+          "description": "Notes on styling decisions made"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.11",
+      "dspy": "3.0.4",
+      "cloudpickle": "3.1"
+    }
+  }
+}

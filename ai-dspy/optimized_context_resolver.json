@@ -1,0 +1,177 @@
+{
+  "resolver.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "message": "reschedule it",
+        "conversation_history": "User discussed project 9000489 (Decking). Assistant showed details.",
+        "reasoning": "The pronoun \"it\" refers to the most recently discussed project in the conversation context, which is project 9000489 (Decking). The user wants to reschedule this specific project. The reference is clear and unambiguous since only one project was actively discussed.",
+        "resolved_message": "reschedule project 9000489",
+        "resolved_entities": "{\"project_id\": \"9000489\", \"category\": \"Decking\", \"action\": \"reschedule\"}",
+        "resolution_type": "pronoun",
+        "confidence": "high"
+      },
+      {
+        "augmented": true,
+        "message": "schedule it for next week",
+        "conversation_history": "User has Kitchen project #9000407. Just viewed details.",
+        "reasoning": "The pronoun \"it\" refers to the Kitchen project #9000407 that was just viewed in the conversation history. The user wants to schedule this specific project for \"next week\" which is a relative time reference that needs to be resolved.",
+        "resolved_message": "schedule project 9000407 for next week",
+        "resolved_entities": "{\"project_id\": \"9000407\", \"category\": \"Kitchen\", \"time_preference\": \"next week\"}",
+        "resolution_type": "pronoun",
+        "confidence": "high"
+      },
+      {
+        "augmented": true,
+        "message": "cancel it",
+        "conversation_history": "User scheduled Roofing project #9000500 for Jan 10.",
+        "reasoning": "The pronoun \"it\" clearly refers to the Roofing project #9000500 that was just scheduled for Jan 10. This is a straightforward pronoun resolution with high confidence since there's only one project mentioned in the immediate context.",
+        "resolved_message": "cancel project 9000500",
+        "resolved_entities": "{\"project_id\": \"9000500\", \"category\": \"Roofing\", \"date\": \"2026-01-10\"}",
+        "resolution_type": "pronoun",
+        "confidence": "high"
+      },
+      {
+        "augmented": true,
+        "message": "schedule that one",
+        "conversation_history": "Assistant listed 3 projects: Decking #9000489, Kitchen #9000407, Flooring #9000510. User asked about the Decking project.",
+        "reasoning": "The user said \"schedule that one\" after asking about the Decking project. The demonstrative \"that one\" refers back to the most recently mentioned project in the conversation, which is the Decking project #9000489. This is a clear demonstrative reference with good contextual grounding.",
+        "resolved_message": "schedule project 9000489",
+        "resolved_entities": "{\"project_id\": \"9000489\", \"category\": \"Decking\"}",
+        "resolution_type": "demonstrative",
+        "confidence": "high"
+      },
+      {
+        "message": "schedule it",
+        "conversation_history": "User has 3 projects: Decking, Kitchen, Flooring. No specific project discussed.",
+        "resolved_message": "schedule it",
+        "resolved_entities": "{\"ambiguous\": true, \"candidates\": [\"9000489\", \"9000407\", \"9000510\"]}",
+        "resolution_type": "ambiguous",
+        "confidence": "low"
+      },
+      {
+        "message": "different date please",
+        "conversation_history": "User scheduling project #9000489, was viewing slots for Jan 6",
+        "resolved_message": "show available dates for project 9000489",
+        "resolved_entities": "{\"project_id\": \"9000489\"}",
+        "resolution_type": "implicit",
+        "confidence": "high"
+      },
+      {
+        "message": "that one",
+        "conversation_history": "Assistant listed 5 projects. No specific one mentioned.",
+        "resolved_message": "that one",
+        "resolved_entities": "{\"ambiguous\": true, \"needs_clarification\": true}",
+        "resolution_type": "ambiguous",
+        "confidence": "low"
+      },
+      {
+        "message": "show me morning slots",
+        "conversation_history": "User viewing time slots for project #9000489 on Jan 6",
+        "resolved_message": "show morning slots for project 9000489 on January 6",
+        "resolved_entities": "{\"project_id\": \"9000489\", \"date\": \"2026-01-06\", \"time_preference\": \"morning\"}",
+        "resolution_type": "implicit",
+        "confidence": "high"
+      },
+      {
+        "message": "what's the status of my kitchen project",
+        "conversation_history": "User has Kitchen project #9000407",
+        "resolved_message": "show status of project 9000407",
+        "resolved_entities": "{\"project_id\": \"9000407\", \"category\": \"Kitchen\"}",
+        "resolution_type": "category",
+        "confidence": "high"
+      },
+      {
+        "message": "what about the other one",
+        "conversation_history": "User has 2 projects: Decking #9000489 and Kitchen #9000407. Just viewed Decking details.",
+        "resolved_message": "show details for project 9000407",
+        "resolved_entities": "{\"project_id\": \"9000407\", \"category\": \"Kitchen\"}",
+        "resolution_type": "contrast",
+        "confidence": "high"
+      },
+      {
+        "message": "schedule the decking",
+        "conversation_history": "User has Decking project #9000489 in Minneapolis",
+        "resolved_message": "schedule project 9000489",
+        "resolved_entities": "{\"project_id\": \"9000489\", \"category\": \"Decking\", \"city\": \"Minneapolis\"}",
+        "resolution_type": "category",
+        "confidence": "high"
+      },
+      {
+        "message": "the second option",
+        "conversation_history": "Available dates: Jan 6, Jan 7, Jan 8",
+        "resolved_message": "January 7",
+        "resolved_entities": "{\"date\": \"2026-01-07\"}",
+        "resolution_type": "ordinal",
+        "confidence": "high"
+      },
+      {
+        "message": "how's the weather",
+        "conversation_history": "Scheduling project #9000489 in Minneapolis for Jan 6",
+        "resolved_message": "weather for Minneapolis on January 6",
+        "resolved_entities": "{\"city\": \"Minneapolis\", \"state\": \"MN\", \"date\": \"2026-01-06\"}",
+        "resolution_type": "implicit",
+        "confidence": "high"
+      },
+      {
+        "message": "same project different date",
+        "conversation_history": "User just scheduled project #9000489 for Jan 6 at 8 AM",
+        "resolved_message": "reschedule project 9000489 to different date",
+        "resolved_entities": "{\"project_id\": \"9000489\", \"action\": \"reschedule\"}",
+        "resolution_type": "coreference",
+        "confidence": "high"
+      },
+      {
+        "message": "the first one",
+        "conversation_history": "Assistant showed 3 time slots: 8 AM, 10 AM, 1 PM",
+        "resolved_message": "8 AM",
+        "resolved_entities": "{\"time\": \"8:00 AM\"}",
+        "resolution_type": "ordinal",
+        "confidence": "high"
+      }
+    ],
+    "signature": {
+      "instructions": "Resolve pronouns, references, and ambiguous entities from conversation context.\n\nHandles 'it', 'that one', 'the first one', 'my kitchen project', etc.",
+      "fields": [
+        {
+          "prefix": "Message:",
+          "description": "User's message with potential references"
+        },
+        {
+          "prefix": "Conversation History:",
+          "description": "Recent conversation context including projects discussed"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Resolved Message:",
+          "description": "Message with resolved entities (e.g., 'reschedule it' -> 'reschedule project 9000489')"
+        },
+        {
+          "prefix": "Resolved Entities:",
+          "description": "JSON dict of resolved entities like {project_id, category, date, time}"
+        },
+        {
+          "prefix": "Resolution Type:",
+          "description": "Type of resolution: pronoun, demonstrative, ordinal, category, implicit, ambiguous"
+        },
+        {
+          "prefix": "Confidence:",
+          "description": "Confidence in resolution"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.11",
+      "dspy": "3.0.4",
+      "cloudpickle": "3.1"
+    }
+  }
+}

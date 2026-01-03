@@ -1,0 +1,151 @@
+{
+  "ranker.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "available_slots": "[\"8:00 AM\", \"8:30 AM\", \"10:00 AM\", \"1:00 PM\", \"2:00 PM\", \"3:00 PM\"]",
+        "user_preference": "morning",
+        "weather_info": "",
+        "project_type": "Indoor - Kitchen",
+        "reasoning": "The user has explicitly requested morning scheduling, and this is an indoor kitchen project so weather conditions are not a factor. I should prioritize all morning slots (8:00 AM, 8:30 AM, 10:00 AM) over afternoon slots (1:00 PM, 2:00 PM, 3:00 PM). Within the morning slots, I'll order them chronologically starting with the earliest.",
+        "ranked_slots": "[\"8:00 AM\", \"8:30 AM\", \"10:00 AM\", \"1:00 PM\", \"2:00 PM\", \"3:00 PM\"]",
+        "recommendation": "8:00 AM",
+        "ranking_reason": "User prefers morning - earliest morning slot recommended"
+      },
+      {
+        "augmented": true,
+        "available_slots": "[\"8:00 AM\", \"9:00 AM\", \"1:00 PM\", \"2:00 PM\", \"3:30 PM\"]",
+        "user_preference": "afternoon",
+        "weather_info": "",
+        "project_type": "Flooring",
+        "reasoning": "The user has specified a preference for afternoon appointments. Since this is a flooring project, it's typically an indoor project that won't be affected by weather conditions. With no weather constraints to consider, I should prioritize the user's afternoon preference by ranking the afternoon slots first, followed by the morning slots.",
+        "ranked_slots": "[\"1:00 PM\", \"2:00 PM\", \"3:30 PM\", \"8:00 AM\", \"9:00 AM\"]",
+        "recommendation": "1:00 PM",
+        "ranking_reason": "User prefers afternoon - earliest afternoon slot recommended"
+      },
+      {
+        "augmented": true,
+        "available_slots": "[\"8:00 AM\", \"10:00 AM\", \"1:00 PM\", \"3:00 PM\"]",
+        "user_preference": "",
+        "weather_info": "Rain expected in afternoon, clear morning",
+        "project_type": "Outdoor - Decking",
+        "reasoning": "For outdoor decking work, weather conditions are crucial. With rain expected in the afternoon and clear conditions in the morning, the morning slots are strongly preferred. Since no user preference is specified, I'll prioritize the weather-appropriate times, ranking morning slots first followed by afternoon slots that may be affected by rain.",
+        "ranked_slots": "[\"8:00 AM\", \"10:00 AM\", \"1:00 PM\", \"3:00 PM\"]",
+        "recommendation": "8:00 AM",
+        "ranking_reason": "Outdoor decking best done in clear morning before afternoon rain"
+      },
+      {
+        "augmented": true,
+        "available_slots": "[\"9:00 AM\", \"11:00 AM\", \"2:00 PM\", \"4:00 PM\"]",
+        "user_preference": "",
+        "weather_info": "Morning fog, clearing by noon, sunny afternoon",
+        "project_type": "Outdoor - Roofing",
+        "reasoning": "For this outdoor roofing project, safety and visibility are paramount concerns. Morning fog creates hazardous working conditions for roofing work due to reduced visibility and potential slippery surfaces. Since the weather clears by noon with sunny afternoon conditions, the afternoon slots (2:00 PM and 4:00 PM) would provide optimal working conditions. Between the afternoon options, 2:00 PM is preferable as it allows for maximum daylight hours to complete the work safely.",
+        "ranked_slots": "[\"2:00 PM\", \"4:00 PM\", \"11:00 AM\", \"9:00 AM\"]",
+        "recommendation": "2:00 PM",
+        "ranking_reason": "Morning fog unsafe for roofing - afternoon slots after fog clears preferred"
+      },
+      {
+        "available_slots": "[\"10:00 AM\", \"11:30 AM\", \"2:00 PM\"]",
+        "user_preference": "earliest",
+        "weather_info": "",
+        "project_type": "Appliance Installation",
+        "ranked_slots": "[\"10:00 AM\", \"11:30 AM\", \"2:00 PM\"]",
+        "recommendation": "10:00 AM",
+        "ranking_reason": "User wants earliest - first available slot"
+      },
+      {
+        "available_slots": "[\"8:00 AM\", \"10:00 AM\", \"1:00 PM\", \"3:00 PM\"]",
+        "user_preference": "",
+        "weather_info": "Low of 20°F in morning, warming to 35°F by afternoon",
+        "project_type": "Outdoor - Roofing",
+        "ranked_slots": "[\"1:00 PM\", \"3:00 PM\", \"10:00 AM\", \"8:00 AM\"]",
+        "recommendation": "1:00 PM",
+        "ranking_reason": "Cold morning - afternoon better for outdoor roofing when warmer"
+      },
+      {
+        "available_slots": "[\"9:00 AM\", \"11:00 AM\", \"2:00 PM\"]",
+        "user_preference": "",
+        "weather_info": "Thunderstorms all day",
+        "project_type": "Indoor - Kitchen Remodel",
+        "ranked_slots": "[\"9:00 AM\", \"11:00 AM\", \"2:00 PM\"]",
+        "recommendation": "9:00 AM",
+        "ranking_reason": "Indoor project - weather doesn't affect work, earliest slot recommended"
+      },
+      {
+        "available_slots": "[\"8:00 AM\", \"10:00 AM\", \"12:00 PM\", \"2:00 PM\", \"4:00 PM\"]",
+        "user_preference": "",
+        "weather_info": "High of 95°F, hottest 12-3 PM",
+        "project_type": "Outdoor - Decking",
+        "ranked_slots": "[\"8:00 AM\", \"10:00 AM\", \"4:00 PM\", \"12:00 PM\", \"2:00 PM\"]",
+        "recommendation": "8:00 AM",
+        "ranking_reason": "Hot day - early morning best for outdoor work, avoid peak heat"
+      },
+      {
+        "available_slots": "[\"8:00 AM\", \"10:00 AM\", \"3:00 PM\", \"4:30 PM\"]",
+        "user_preference": "latest",
+        "weather_info": "",
+        "project_type": "Window Installation",
+        "ranked_slots": "[\"4:30 PM\", \"3:00 PM\", \"10:00 AM\", \"8:00 AM\"]",
+        "recommendation": "4:30 PM",
+        "ranking_reason": "User wants latest - last available slot"
+      },
+      {
+        "available_slots": "[\"8:00 AM\", \"10:00 AM\", \"1:00 PM\", \"3:00 PM\"]",
+        "user_preference": "afternoon",
+        "weather_info": "Rain clearing by 2 PM",
+        "project_type": "Outdoor - Fence Installation",
+        "ranked_slots": "[\"3:00 PM\", \"1:00 PM\", \"10:00 AM\", \"8:00 AM\"]",
+        "recommendation": "3:00 PM",
+        "ranking_reason": "User prefers afternoon + rain clears by 2 PM - 3 PM is optimal"
+      }
+    ],
+    "signature": {
+      "instructions": "Rank time slots based on user preferences, weather, and project type.\n\nConsider:\n- User's time preference (morning, afternoon, earliest, latest)\n- Weather conditions for outdoor projects\n- Project type (indoor vs outdoor)",
+      "fields": [
+        {
+          "prefix": "Available Slots:",
+          "description": "JSON list of available time slots"
+        },
+        {
+          "prefix": "User Preference:",
+          "description": "User's time preference: morning, afternoon, earliest, latest, or empty"
+        },
+        {
+          "prefix": "Weather Info:",
+          "description": "Weather conditions for the date"
+        },
+        {
+          "prefix": "Project Type:",
+          "description": "Project type like 'Indoor - Kitchen' or 'Outdoor - Decking'"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Ranked Slots:",
+          "description": "JSON list of slots in recommended order"
+        },
+        {
+          "prefix": "Recommendation:",
+          "description": "Top recommended time slot"
+        },
+        {
+          "prefix": "Ranking Reason:",
+          "description": "Explanation of ranking logic"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.11",
+      "dspy": "3.0.4",
+      "cloudpickle": "3.1"
+    }
+  }
+}

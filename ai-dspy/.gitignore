@@ -1,0 +1,8 @@
+.env
+venv/
+__pycache__/
+*.pyc
+
+# Ignore temp JSON but keep optimized models
+*.json
+!optimized_*.json

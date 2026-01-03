@@ -1,0 +1,263 @@
+{
+  "extractor.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "message": "schedule project 9000489",
+        "action": "get_available_dates",
+        "available_projects": "[{\"id\": \"9000489\", \"category\": \"Decking\", \"status\": \"Ready To Schedule\"}]",
+        "workflow_context": "{}",
+        "reasoning": "The user wants to schedule project 9000489. The action is get_available_dates, which means they want to see available dates for scheduling this project. The project ID is explicitly mentioned in the message. From the available_projects, I can see this is a Decking project with \"Ready To Schedule\" status.",
+        "project_id": "9000489",
+        "category": "Decking",
+        "date": "",
+        "time": "",
+        "location": "",
+        "status_filter": ""
+      },
+      {
+        "augmented": true,
+        "message": "Show me the details for project AI-PRO-1000010",
+        "action": "get_project_details",
+        "available_projects": "[]",
+        "workflow_context": "{}",
+        "reasoning": "The user is requesting project details for a specific project with ID \"AI-PRO-1000010\". The action is \"get_project_details\" which requires the project_id parameter. The project ID is clearly specified in the message.",
+        "project_id": "AI-PRO-1000010",
+        "category": "",
+        "date": "",
+        "time": "",
+        "location": "",
+        "status_filter": ""
+      },
+      {
+        "augmented": true,
+        "message": "Show me the available time slots on 31st December for project number 12125_09PF05VD_1765791831881",
+        "action": "get_time_slots",
+        "available_projects": "[]",
+        "workflow_context": "{}",
+        "reasoning": "The user is requesting available time slots for a specific date (31st December) and a specific project number (12125_09PF05VD_1765791831881). The action is get_time_slots, so I need to extract the project_id and date from the message. The project number is clearly specified, and the date \"31st December\" needs to be captured for the API call.",
+        "project_id": "12125_09PF05VD_1765791831881",
+        "category": "",
+        "date": "2024-12-31",
+        "time": "",
+        "location": "",
+        "status_filter": ""
+      },
+      {
+        "message": "what's the weather in Chicago",
+        "action": "get_weather",
+        "available_projects": "[]",
+        "workflow_context": "{}",
+        "project_id": "",
+        "category": "",
+        "date": "",
+        "time": "",
+        "location": "Chicago, IL",
+        "status_filter": ""
+      },
+      {
+        "message": "January 6th",
+        "action": "get_time_slots",
+        "available_projects": "[]",
+        "workflow_context": "{\"project_id\": \"9000489\", \"city\": \"Minneapolis\", \"state\": \"MN\"}",
+        "project_id": "9000489",
+        "category": "",
+        "date": "2026-01-06",
+        "time": "",
+        "location": "",
+        "status_filter": ""
+      },
+      {
+        "message": "schedule project 21083_09PF05VD",
+        "action": "get_available_dates",
+        "available_projects": "[]",
+        "workflow_context": "{}",
+        "project_id": "21083_09PF05VD",
+        "category": "",
+        "date": "",
+        "time": "",
+        "location": "",
+        "status_filter": ""
+      },
+      {
+        "message": "Show me all ready-to-schedule projects with project number",
+        "action": "list_projects",
+        "available_projects": "[]",
+        "workflow_context": "{}",
+        "project_id": "",
+        "category": "",
+        "date": "",
+        "time": "",
+        "location": "",
+        "status_filter": "ready to schedule"
+      },
+      {
+        "message": "morning appointment",
+        "action": "get_time_slots",
+        "available_projects": "[]",
+        "workflow_context": "{\"project_id\": \"9000489\", \"date\": \"2026-01-06\"}",
+        "project_id": "9000489",
+        "category": "",
+        "date": "2026-01-06",
+        "time": "morning",
+        "location": "",
+        "status_filter": ""
+      },
+      {
+        "message": "afternoon slot",
+        "action": "get_time_slots",
+        "available_projects": "[]",
+        "workflow_context": "{\"project_id\": \"9000489\", \"date\": \"2026-01-06\"}",
+        "project_id": "9000489",
+        "category": "",
+        "date": "2026-01-06",
+        "time": "afternoon",
+        "location": "",
+        "status_filter": ""
+      },
+      {
+        "message": "pending installations",
+        "action": "list_projects",
+        "available_projects": "[]",
+        "workflow_context": "{}",
+        "project_id": "",
+        "category": "",
+        "date": "",
+        "time": "",
+        "location": "",
+        "status_filter": "pending"
+      },
+      {
+        "message": "10:30 AM",
+        "action": "confirm_appointment",
+        "available_projects": "[]",
+        "workflow_context": "{\"project_id\": \"9000489\", \"date\": \"2026-01-06\"}",
+        "project_id": "9000489",
+        "category": "",
+        "date": "2026-01-06",
+        "time": "10:30 AM",
+        "location": "",
+        "status_filter": ""
+      },
+      {
+        "message": "what's the status of 9000407_1",
+        "action": "get_project_details",
+        "available_projects": "[]",
+        "workflow_context": "{}",
+        "project_id": "9000407_1",
+        "category": "",
+        "date": "",
+        "time": "",
+        "location": "",
+        "status_filter": ""
+      },
+      {
+        "message": "slots for February 14",
+        "action": "get_time_slots",
+        "available_projects": "[]",
+        "workflow_context": "{\"project_id\": \"9000489\"}",
+        "project_id": "9000489",
+        "category": "",
+        "date": "2026-02-14",
+        "time": "",
+        "location": "",
+        "status_filter": ""
+      },
+      {
+        "message": "show me next week dates",
+        "action": "get_available_dates",
+        "available_projects": "[]",
+        "workflow_context": "{\"project_id\": \"9000489\"}",
+        "project_id": "9000489",
+        "category": "",
+        "date": "next week",
+        "time": "",
+        "location": "",
+        "status_filter": ""
+      },
+      {
+        "message": "first week of February",
+        "action": "get_available_dates",
+        "available_projects": "[]",
+        "workflow_context": "{\"project_id\": \"9000489\"}",
+        "project_id": "9000489",
+        "category": "",
+        "date": "first week of February",
+        "time": "",
+        "location": "",
+        "status_filter": ""
+      },
+      {
+        "message": "details for PF-2024-001234",
+        "action": "get_project_details",
+        "available_projects": "[]",
+        "workflow_context": "{}",
+        "project_id": "PF-2024-001234",
+        "category": "",
+        "date": "",
+        "time": "",
+        "location": "",
+        "status_filter": ""
+      }
+    ],
+    "signature": {
+      "instructions": "Extract structured entities from user message for API calls.\n\nEntities are parameters needed to execute the classified action.",
+      "fields": [
+        {
+          "prefix": "Message:",
+          "description": "User's message"
+        },
+        {
+          "prefix": "Action:",
+          "description": "Classified action to execute"
+        },
+        {
+          "prefix": "Available Projects:",
+          "description": "JSON list of user's projects with id, category, status"
+        },
+        {
+          "prefix": "Workflow Context:",
+          "description": "Current workflow state including project_id, date, city, state"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Project Id:",
+          "description": "Project ID if mentioned or inferable. Use exact ID from available_projects."
+        },
+        {
+          "prefix": "Category:",
+          "description": "Project category like 'Decking', 'Kitchen Sink', 'Roofing'"
+        },
+        {
+          "prefix": "Date:",
+          "description": "Date in YYYY-MM-DD format or relative like 'next week', 'tomorrow'"
+        },
+        {
+          "prefix": "Time:",
+          "description": "Time slot like '8:00 AM', '1:00 PM'"
+        },
+        {
+          "prefix": "Location:",
+          "description": "City, State format for weather queries"
+        },
+        {
+          "prefix": "Status Filter:",
+          "description": "Status filter: 'scheduled', 'ready to schedule', 'all'"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.11",
+      "dspy": "3.0.4",
+      "cloudpickle": "3.1"
+    }
+  }
+}
