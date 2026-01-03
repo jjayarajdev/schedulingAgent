@@ -3509,40 +3509,66 @@ What would you like to do?"""
         project_id = entities.get('project_id')
         location = entities.get('location')  # May already be extracted by Sonnet enricher
 
-        # If no location, try to get it from workflow_state's project_mapping
-        # This handles "what's the weather" after user viewed a project
+        # If no location, try to get it from workflow_state context or project_mapping
+        # This handles "what's the weather" after user viewed a project or is in scheduling flow
         logger.info(f"[WEATHER] location={location}, workflow_state exists={workflow_state is not None}")
         if not location and workflow_state:
             context = workflow_state.get('context', {})
             # Check both context-level AND top-level project_mapping (context switch preserves at top level)
             project_mapping = context.get('project_mapping', {}) or workflow_state.get('project_mapping', {})
-            logger.info(f"[WEATHER] Fallback: current_project_id={context.get('project_id')}, project_mapping keys={list(project_mapping.keys())[:3]}")
+            logger.info(f"[WEATHER] Fallback: current_project_id={context.get('project_id')}, city={context.get('city')}, state={context.get('state')}, project_mapping keys={list(project_mapping.keys())[:3]}")
 
-            # If user just viewed a project, get its location
-            current_project_id = context.get('project_id')
-            if current_project_id and current_project_id in project_mapping:
-                proj_info = project_mapping[current_project_id]
-                address = proj_info.get('address', '')
-                if address:
-                    # Parse city, state from address
-                    addr_match = re.search(r',\s*([A-Za-z\s]+),\s*([A-Z]{2})\s*\d*', address)
-                    if addr_match:
-                        location = f"{addr_match.group(1).strip()}, {addr_match.group(2)}"
-                        project_id = current_project_id
-                        logger.info(f"[WEATHER] Got location from current project #{current_project_id}: {location}")
+            # FIRST: Check if city/state are directly in context (saved during scheduling workflow)
+            context_city = context.get('city')
+            context_state = context.get('state')
+            if context_city and context_state:
+                location = f"{context_city}, {context_state}"
+                project_id = context.get('project_id')
+                logger.info(f"[WEATHER] Got location from context city/state: {location}")
 
-            # If still no location, try the most recently listed project
+            # SECOND: Try project_mapping if still no location
+            if not location:
+                current_project_id = context.get('project_id')
+                if current_project_id and current_project_id in project_mapping:
+                    proj_info = project_mapping[current_project_id]
+                    address = proj_info.get('address', '')
+                    if address:
+                        # Handle dict-format address
+                        if isinstance(address, dict):
+                            city = address.get('city', '')
+                            state = address.get('state', '')
+                            if city and state:
+                                location = f"{city}, {state}"
+                                project_id = current_project_id
+                                logger.info(f"[WEATHER] Got location from project_mapping dict: {location}")
+                        else:
+                            # Parse city, state from string address
+                            addr_match = re.search(r',\s*([A-Za-z\s]+),\s*([A-Z]{2})\s*\d*', address)
+                            if addr_match:
+                                location = f"{addr_match.group(1).strip()}, {addr_match.group(2)}"
+                                project_id = current_project_id
+                                logger.info(f"[WEATHER] Got location from current project #{current_project_id}: {location}")
+
+            # THIRD: Try the most recently listed project as fallback
             if not location and project_mapping:
-                # Get first project in mapping as fallback
                 first_pid = list(project_mapping.keys())[0]
                 proj_info = project_mapping[first_pid]
                 address = proj_info.get('address', '')
                 if address:
-                    addr_match = re.search(r',\s*([A-Za-z\s]+),\s*([A-Z]{2})\s*\d*', address)
-                    if addr_match:
-                        location = f"{addr_match.group(1).strip()}, {addr_match.group(2)}"
-                        project_id = first_pid
-                        logger.info(f"[WEATHER] Got location from first project #{first_pid}: {location}")
+                    # Handle dict-format address
+                    if isinstance(address, dict):
+                        city = address.get('city', '')
+                        state = address.get('state', '')
+                        if city and state:
+                            location = f"{city}, {state}"
+                            project_id = first_pid
+                            logger.info(f"[WEATHER] Got location from first project dict: {location}")
+                    else:
+                        addr_match = re.search(r',\s*([A-Za-z\s]+),\s*([A-Z]{2})\s*\d*', address)
+                        if addr_match:
+                            location = f"{addr_match.group(1).strip()}, {addr_match.group(2)}"
+                            project_id = first_pid
+                            logger.info(f"[WEATHER] Got location from first project #{first_pid}: {location}")
 
         # AUTO-FETCH: If project ID mentioned in message, fetch THAT project's details
         # This takes priority over enricher location (which may be from previous context)
@@ -3664,19 +3690,31 @@ What would you like to do?"""
 
         if location:
             # Determine target date for weather forecast
-            # Priority: user-specified date > scheduled date > current date + 7 days
+            # Priority: user-specified date > workflow context date > scheduled date > current date + 7 days
             from datetime import datetime, timedelta
             target_date = None
             entities = classification.get('entities', {})
             user_date = entities.get('date')  # Date extracted from user message by Sonnet
             scheduled_date = entities.get('scheduled_date', '')
 
+            # Get date from workflow context (e.g., when viewing time slots for a specific date)
+            context_date = None
+            if workflow_state:
+                context = workflow_state.get('context', {})
+                context_date = context.get('date')
+                if context_date:
+                    logger.info(f"[WEATHER] Found date in workflow context: {context_date}")
+
             if user_date:
                 # Priority 1: User specified a date in their message
                 target_date = user_date
                 logger.info(f"[WEATHER] Using user-specified date: {target_date}")
+            elif context_date:
+                # Priority 2: Use date from workflow context (viewing time slots for this date)
+                target_date = context_date
+                logger.info(f"[WEATHER] Using workflow context date: {target_date}")
             elif scheduled_date:
-                # Priority 2: Use project's scheduled date
+                # Priority 3: Use project's scheduled date
                 # Parse various date formats to YYYY-MM-DD
                 try:
                     # Try MM-DD-YYYY HH:MM AM/PM format (e.g., "01-07-2026 08:00 AM")
@@ -3702,9 +3740,9 @@ What would you like to do?"""
                     logger.warning(f"[WEATHER] Failed to parse scheduled date: {scheduled_date}, error: {date_err}")
                     target_date = scheduled_date
             else:
-                # Priority 3: Use current date + 7 days for unscheduled projects
+                # Priority 4: Use current date + 7 days for unscheduled projects
                 target_date = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
-                logger.info(f"[WEATHER] No scheduled date, using current+7 days: {target_date}")
+                logger.info(f"[WEATHER] No date found, using current+7 days: {target_date}")
 
             logger.info(f"[WEATHER] Fetching weather for location: {location}, date: {target_date}")
 

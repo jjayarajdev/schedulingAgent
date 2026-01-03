@@ -461,6 +461,19 @@ def handle_get_weather(params: Dict, config: Dict, auth_headers: Dict) -> Dict[s
                     target_forecast = day
                     break
 
+        # If target_date is specified and found, return only target forecast (no full 7-day forecast)
+        if target_date and target_forecast:
+            return {
+                "action": "get_weather",
+                "target_date": target_date,
+                "target_forecast": target_forecast,
+                "location": location_info.get("name", location),
+                "current": weather_info.get("current"),
+                "mock_mode": False,
+                "api_provider": "open-meteo"
+            }
+
+        # Otherwise return full weather info with forecast
         return {
             "action": "get_weather",
             "target_date": target_date,

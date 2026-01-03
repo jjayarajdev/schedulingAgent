@@ -1706,10 +1706,10 @@ def route_request(
                 **merged_params  # Add merged params (extracted + resolved entities)
             }
 
-            # STATIC GREETING: Return consistent Riley greeting for SMS/Chat (skip chitchat Lambda)
+            # STATIC GREETING: Return consistent J greeting for SMS/Chat (skip chitchat Lambda)
             if action == 'greet':
-                static_greeting = "Hi, this is Riley from ProjectForce! I can help you view your projects, check available dates, or schedule appointments. What would you like to do today?"
-                logger.info(f"[GREET] Returning static Riley greeting for channel={channel}")
+                static_greeting = "I'm J, your AI assistant from ProjectForce! I can help you view your projects, check available dates, or schedule appointments. What would you like to do today?"
+                logger.info(f"[GREET] Returning static J greeting for channel={channel}")
                 timing['total'] = time.time() - start_time
                 return {
                     'response': static_greeting,
