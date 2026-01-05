@@ -241,9 +241,10 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
                 return (result, 'week', 5)
             return result
 
-    # Ordinal week of month: "1st week of", "2nd week of", "3rd week of", "4th week of", "first week of", etc.
-    # Uses actual calendar weeks (Monday-based)
-    ordinal_week_match = re.search(r'(1st|2nd|3rd|4th|5th|first|second|third|fourth|fifth)\s+week\s+of\s+(\w+)', date_lower)
+    # Ordinal week of month: "1st week of/for", "2nd week of/for", "3rd week of/for", etc.
+    # Also handles "3rd week feb" without of/for
+    # Uses actual calendar weeks (Monday-based, first FULL week = week 1)
+    ordinal_week_match = re.search(r'(1st|2nd|3rd|4th|5th|first|second|third|fourth|fifth)\s+week\s+(?:of|for)?\s*(\w+)', date_lower)
     if ordinal_week_match:
         week_ord = ordinal_week_match.group(1).lower()
         month_name = ordinal_week_match.group(2)[:3].lower()
@@ -257,23 +258,25 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
             year = today.year if month_num >= today.month else today.year + 1
 
             # Calculate actual calendar week (Monday-based)
-            # Find the first day of the month and its weekday
+            # Week 1 = first FULL week starting on Monday
             first_day = datetime(year, month_num, 1)
             first_weekday = first_day.weekday()  # 0=Monday, 6=Sunday
 
-            # Find the first Monday (start of week 1 or week 2)
+            # Find the first Monday of the month
             if first_weekday == 0:  # Month starts on Monday
                 first_monday = 1
             else:
                 # Days until next Monday
-                first_monday = 8 - first_weekday  # First Monday is in the first full week
+                first_monday = 8 - first_weekday
 
             # Calculate start of requested week
-            # Week 1 = first 7 days (even if partial)
-            # Week 2 = starts on first Monday (or day 8 if month starts on Monday)
+            # Week 1 = partial week if month doesn't start on Monday (calendar weeks)
+            # Week 2+ = subsequent Monday-Sunday weeks
+            # Example: Jan 2026 starts Thu, so Week 1 = Jan 1-4, Week 2 = Jan 5-11, Week 3 = Jan 12-18
             if week_num == 1:
                 start_day = 1  # Week 1 always starts on day 1
             else:
+                # Week 2+ starts from first Monday, then subsequent Mondays
                 start_day = first_monday + (week_num - 2) * 7
 
             # Clamp to valid days in month
@@ -281,9 +284,9 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
             start_day = min(start_day, days_in_month)
 
             result = f"{year}-{month_num:02d}-{start_day:02d}"
-            logger.info(f"[DATE] Converted '{week_ord} week of {month_name}' -> {result} (calendar week, first_monday={first_monday})")
+            logger.info(f"[DATE] Converted '{week_ord} week of {month_name}' -> {result} (week {week_num}, first_monday={first_monday})")
             if return_strategy:
-                return (result, 'week', 5)
+                return (result, 'week', 7)  # Return full week (7 days)
             return result
 
     # "end of [month]" - dynamically calculate last 5 days of month
@@ -707,6 +710,7 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
     filter_status = params.get('status')
     filter_category = params.get('category')
     filter_project_type = params.get('projectType')
+    filter_scheduled_month = params.get('scheduled_month')  # e.g., "January", "February"
 
     if not customer_id:
         raise ValueError("Missing required parameter: customer_id")
@@ -772,8 +776,17 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
     projects = [extract_project_minimal(item) for item in raw_data]
 
     # Apply filters if provided (case-insensitive matching)
-    if filter_status or filter_category or filter_project_type:
-        logger.info(f"Applying filters: status={filter_status}, category={filter_category}, projectType={filter_project_type}")
+    if filter_status or filter_category or filter_project_type or filter_scheduled_month:
+        logger.info(f"Applying filters: status={filter_status}, category={filter_category}, projectType={filter_project_type}, scheduled_month={filter_scheduled_month}")
+
+        # Month name mapping for scheduled_month filter
+        month_names = {
+            'january': '01', 'february': '02', 'march': '03', 'april': '04',
+            'may': '05', 'june': '06', 'july': '07', 'august': '08',
+            'september': '09', 'october': '10', 'november': '11', 'december': '12',
+            'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
+            'jun': '06', 'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'
+        }
 
         filtered_projects = []
         for project in projects:
@@ -799,6 +812,29 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
             if filter_project_type:
                 project_type = project.get('projectType', '').lower()
                 if filter_project_type.lower() not in project_type:
+                    continue
+
+            # Check scheduled_month filter (filter by appointment month)
+            if filter_scheduled_month:
+                scheduled_date = project.get('scheduledDate', '')
+                if not scheduled_date:
+                    # No scheduled date - doesn't match month filter
+                    continue
+
+                # Try to match month from scheduled date
+                # Format is like "Jan 5, 2026 5:00 PM" or "2026-01-05"
+                filter_month_lower = filter_scheduled_month.lower()
+                month_num = month_names.get(filter_month_lower, '')
+
+                # Check if month name appears in date string (e.g., "Jan" in "Jan 5, 2026")
+                month_matched = False
+                if filter_month_lower[:3] in scheduled_date.lower():
+                    month_matched = True
+                elif month_num and f"-{month_num}-" in scheduled_date:
+                    # ISO format like "2026-01-05"
+                    month_matched = True
+
+                if not month_matched:
                     continue
 
             # All filters passed, include this project
@@ -1649,12 +1685,20 @@ def handle_reschedule_appointment(params: Dict, config: Dict, auth_headers: Dict
             available_dates = dates_result.get('available_dates', [])
             available_dates_sorted = sorted(available_dates)
 
+            # Get formatted dates for UI (with dayName, dayShort, monthDay)
+            formatted_dates = dates_result.get('dates', [])
+            # Sort formatted dates to match available_dates_sorted order
+            formatted_dates_sorted = sorted(formatted_dates, key=lambda x: x.get('date', ''))
+
             return {
                 "action": "reschedule_appointment",
                 "project_id": project_id,
                 "status": "awaiting_date_selection",
                 "available_dates": available_dates_sorted,
+                "dates": formatted_dates_sorted,  # Include formatted dates for UI
+                "dateCount": len(available_dates_sorted),
                 "request_id": dates_result.get('request_id'),
+                "start_date": dates_result.get('start_date'),  # Needed for get_time_slots
                 "message": "Here are the available dates for your rescheduled appointment. Please select a date.",
                 "mock_mode": USE_MOCK_API
             }

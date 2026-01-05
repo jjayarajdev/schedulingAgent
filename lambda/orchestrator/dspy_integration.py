@@ -260,7 +260,7 @@ def get_date_interpreter_few_shots() -> str:
     if not _dspy_date_interpreter:
         return ""
 
-    demos = _dspy_date_interpreter.get('date_interpreter.predict', {}).get('demos', [])
+    demos = _dspy_date_interpreter.get('interpreter', {}).get('demos', [])
 
     if not demos:
         return ""
@@ -288,7 +288,7 @@ def get_context_resolver_few_shots() -> str:
     if not _dspy_context_resolver:
         return ""
 
-    demos = _dspy_context_resolver.get('context_resolver.predict', {}).get('demos', [])
+    demos = _dspy_context_resolver.get('resolver.predict', {}).get('demos', [])
 
     if not demos:
         return ""
@@ -317,7 +317,7 @@ def get_response_style_few_shots(channel: str = "chat") -> str:
     if not _dspy_response_styler:
         return ""
 
-    demos = _dspy_response_styler.get('response_styler.predict', {}).get('demos', [])
+    demos = _dspy_response_styler.get('styler', {}).get('demos', [])
 
     if not demos:
         return ""
@@ -350,7 +350,7 @@ def get_slot_ranker_few_shots() -> str:
     if not _dspy_slot_ranker:
         return ""
 
-    demos = _dspy_slot_ranker.get('slot_ranker.predict', {}).get('demos', [])
+    demos = _dspy_slot_ranker.get('ranker.predict', {}).get('demos', [])
 
     if not demos:
         return ""

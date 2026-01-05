@@ -2628,6 +2628,219 @@ def orchestrate_intelligent_workflow(
                 # Fall through to normal classification
 
     # ========================================================================
+    # STEP 0.4a: VAGUE CHATBOT ACTION PROMPTS - Provide guided responses
+    # When user clicks action buttons like "Schedule appointments" without context,
+    # guide them with a helpful response showing available options
+    # ========================================================================
+    msg_lower = message.lower().strip()
+
+    # Define vague prompts that need guided responses
+    vague_prompts = {
+        # Exact matches for chatbot action button text
+        "schedule appointments": {
+            "needs": "project",
+            "response_intro": "I'd be happy to help you schedule an appointment!",
+            "filter_status": "schedulable"
+        },
+        "check available dates": {
+            "needs": "project",
+            "response_intro": "I can check available dates for you!",
+            "filter_status": "schedulable"
+        },
+        "view available time slots": {
+            "needs": "project_and_date",
+            "response_intro": "I can show you available time slots!",
+            "filter_status": "schedulable"
+        },
+        "retrieve project details": {
+            "needs": "project",
+            "response_intro": "I can show you project details!",
+            "filter_status": None  # Show all projects
+        },
+        # Also handle variations
+        "i want to schedule an appointment": {
+            "needs": "project",
+            "response_intro": "I'd be happy to help you schedule an appointment!",
+            "filter_status": "schedulable"
+        },
+        "schedule an appointment": {
+            "needs": "project",
+            "response_intro": "I'd be happy to help you schedule an appointment!",
+            "filter_status": "schedulable"
+        },
+        "book an appointment": {
+            "needs": "project",
+            "response_intro": "I'd be happy to help you book an appointment!",
+            "filter_status": "schedulable"
+        },
+        "get available dates": {
+            "needs": "project",
+            "response_intro": "I can check available dates for you!",
+            "filter_status": "schedulable"
+        },
+        "show project details": {
+            "needs": "project",
+            "response_intro": "I can show you project details!",
+            "filter_status": None
+        }
+    }
+
+    # Check if message matches a vague prompt
+    vague_match = vague_prompts.get(msg_lower)
+
+    if vague_match and channel != 'voice':  # Only for chat, voice has different UX
+        logger.info(f"[VAGUE-PROMPT] Detected vague chatbot action: '{message}' - providing guided response")
+
+        try:
+            # Fetch projects to show options
+            list_response = call_lambda_directly('list_projects', {
+                'customer_id': customer_id,
+                'client_id': client_id,
+                'pf_bearer_token': pf_bearer_token
+            })
+
+            # Parse response
+            list_data = list_response.get('response', {})
+            list_func = list_data.get('functionResponse', {})
+            list_body_wrapper = list_func.get('responseBody', {})
+            list_text = list_body_wrapper.get('TEXT', {})
+            list_body_str = list_text.get('body', '{}')
+
+            if isinstance(list_body_str, str):
+                response_body = json.loads(list_body_str)
+            else:
+                response_body = list_body_str
+
+            # Get HTTP status
+            pf_http_status_code = response_body.get('pf_http_status_code', 200)
+
+            # Check for session errors
+            if pf_http_status_code in [401, 403]:
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': "Your session has expired. Please log out and log back in to continue.",
+                    'intent': 'scheduling',
+                    'action': 'session_expired',
+                    'agent_name': 'Intelligent Orchestrator (Vague Prompt Handler)',
+                    'direct_call': True,
+                    'timing': timing,
+                    'pf_http_status_code': pf_http_status_code
+                }
+
+            projects = response_body.get('projects', [])
+
+            # Apply status filter if specified
+            filter_status = vague_match.get('filter_status')
+            if filter_status and projects:
+                if filter_status == 'schedulable':
+                    projects = [p for p in projects if p.get('status') in ['New', 'Ready To Schedule']]
+                elif filter_status == 'scheduled':
+                    projects = [p for p in projects if p.get('status') in ['Scheduled', 'Tentatively Scheduled']]
+
+            # Build guided response
+            intro = vague_match['response_intro']
+
+            if not projects:
+                if filter_status == 'schedulable':
+                    response_text = f"{intro}\n\nHowever, you don't have any projects ready to schedule at the moment. Would you like to see all your projects instead?"
+                else:
+                    response_text = f"{intro}\n\nHowever, I couldn't find any projects. Please try again later."
+            else:
+                # Build project list for user to choose from
+                project_lines = []
+                for i, p in enumerate(projects[:10], 1):  # Limit to 10 for readability
+                    category = p.get('category', 'Unknown')
+                    status = p.get('status', 'Unknown')
+                    order_num = p.get('projectNumber', p.get('id', ''))
+                    # Truncate long order numbers for display
+                    if len(str(order_num)) > 20:
+                        display_id = f"...{str(order_num)[-15:]}"
+                    else:
+                        display_id = order_num
+                    project_lines.append(f"{i}. **{category}** (Order: {display_id}) - {status}")
+
+                projects_display = "\n".join(project_lines)
+
+                if vague_match['needs'] == 'project':
+                    response_text = f"""{intro}
+
+Here are your {'projects ready to schedule' if filter_status == 'schedulable' else 'projects'}:
+
+{projects_display}
+
+Which project would you like to {'schedule' if 'schedule' in msg_lower else 'view'}? You can say things like:
+- "Schedule the **first** project"
+- "Show details for the **Decking** project"
+- "Schedule **Kitchen Sink**\""""
+                elif vague_match['needs'] == 'project_and_date':
+                    response_text = f"""{intro}
+
+First, let me know which project and date you're interested in. Here are your projects ready to schedule:
+
+{projects_display}
+
+You can say something like:
+- "Show time slots for **Kitchen Sink** on **January 10th**"
+- "Available times for the **first project** next **Monday**\""""
+
+            # Save projects to state for follow-up
+            if projects:
+                project_ids = [str(p.get('id', '')) for p in projects if p.get('id')]
+                project_mapping = {}
+                for p in projects:
+                    pid = str(p.get('id', ''))
+                    if pid:
+                        exact_category = p.get('category', '')
+                        project_number = p.get('projectNumber', '')
+                        project_mapping[pid] = {
+                            'category': exact_category,
+                            'category_bucket': get_category_bucket(exact_category),
+                            'address': p.get('address', ''),
+                            'status': p.get('status', ''),
+                            'projectNumber': project_number
+                        }
+                        if project_number:
+                            project_mapping[project_number] = {
+                                'category': exact_category,
+                                'category_bucket': get_category_bucket(exact_category),
+                                'address': p.get('address', ''),
+                                'status': p.get('status', ''),
+                                'project_id': pid
+                            }
+
+                existing_state = state_manager.get_state(session_id) or {}
+                viewed_projects = existing_state.get('viewed_projects', [])
+
+                state_manager.save_state(session_id, {
+                    'workflow_type': 'guided_selection',
+                    'current_stage': 'awaiting_project_selection',
+                    'context': {
+                        'project_ids': project_ids,
+                        'project_mapping': project_mapping,
+                        'customer_id': customer_id,
+                        'pending_action': msg_lower  # Remember what user wanted to do
+                    },
+                    'viewed_projects': viewed_projects,
+                    'project_mapping': project_mapping
+                })
+                logger.info(f"[VAGUE-PROMPT] Saved {len(project_ids)} projects to state for guided selection")
+
+            timing['total'] = time.time() - start_time
+            return {
+                'response': response_text,
+                'intent': 'scheduling',
+                'action': 'guided_prompt',
+                'agent_name': 'Intelligent Orchestrator (Vague Prompt Handler)',
+                'direct_call': True,
+                'timing': timing,
+                'pf_http_status_code': pf_http_status_code
+            }
+
+        except Exception as vague_err:
+            logger.warning(f"[VAGUE-PROMPT] Error handling vague prompt: {vague_err}, falling through to normal flow")
+            # Fall through to normal classification
+
+    # ========================================================================
     # STEP 0.4b: CALENDAR/SCHEDULED QUERIES - Bypass workflow context
     # These are NEW queries about scheduled appointments, not continuations
     # "What's on my calendar?", "What's scheduled?", "Show my appointments"
@@ -5309,16 +5522,35 @@ What would you like to do?"""
                     logger.info(f"[PROJECT] User viewed project #{viewed_project_id}, saving to workflow state (channel={channel})")
 
                     # Build project info for this single project
+                    address_data = single_project.get('address', {})
                     viewed_project_info = {
                         'category': single_project.get('category', ''),
-                        'address': single_project.get('address', ''),
+                        'address': address_data,
                         'status': single_project.get('status', '')
                     }
+                    # Extract city/state for weather queries
+                    if isinstance(address_data, dict):
+                        project_city = address_data.get('city', '')
+                        project_state = address_data.get('state', '')
+                    else:
+                        # Parse from string address (e.g., "..., Fort White, FL 32038")
+                        addr_match = re.search(r',\s*([A-Za-z\s]+),\s*([A-Z]{2})\s*\d*', str(address_data))
+                        if addr_match:
+                            project_city = addr_match.group(1).strip()
+                            project_state = addr_match.group(2)
+                        else:
+                            project_city = ''
+                            project_state = ''
 
                     if decision.get('update_workflow_state'):
                         if 'context' not in decision['update_workflow_state']:
                             decision['update_workflow_state']['context'] = {}
                         decision['update_workflow_state']['context']['project_id'] = viewed_project_id
+                        # Save city/state for weather queries ("what's the weather" after viewing project)
+                        if project_city:
+                            decision['update_workflow_state']['context']['city'] = project_city
+                        if project_state:
+                            decision['update_workflow_state']['context']['state'] = project_state
                         # Also update project_mapping with this project's info
                         existing_mapping = decision['update_workflow_state']['context'].get('project_mapping', {})
                         existing_mapping[viewed_project_id] = viewed_project_info
@@ -5330,10 +5562,12 @@ What would you like to do?"""
                             'current_stage': 'viewing_project',
                             'context': {
                                 'project_id': viewed_project_id,
-                                'project_mapping': {viewed_project_id: viewed_project_info}
+                                'project_mapping': {viewed_project_id: viewed_project_info},
+                                'city': project_city,
+                                'state': project_state
                             }
                         }
-                        logger.info(f"[PROJECT] Created workflow state with project_id={viewed_project_id}")
+                        logger.info(f"[PROJECT] Created workflow state with project_id={viewed_project_id}, city={project_city}, state={project_state}")
 
                     # TRACK VIEWED PROJECT: Add to viewed_projects history for ordinal references
                     # This enables "2nd project" after user has viewed multiple projects

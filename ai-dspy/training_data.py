@@ -2701,6 +2701,165 @@ DATE_INTERPRETER_EXAMPLES = [
         end_date="2026-02-14",
         interpretation="Valentine's Day - February 14"
     ).with_inputs("phrase", "current_date"),
+
+    # ==========================================================================
+    # DATE RANGE EXPRESSIONS - Shared month format
+    # ==========================================================================
+    dspy.Example(
+        phrase="between 12 and 20 January",
+        current_date="2026-01-05",
+        start_date="2026-01-12",
+        end_date="2026-01-20",
+        interpretation="Date range within January: 12th to 20th"
+    ).with_inputs("phrase", "current_date"),
+
+    dspy.Example(
+        phrase="between 12th and 20th January",
+        current_date="2026-01-05",
+        start_date="2026-01-12",
+        end_date="2026-01-20",
+        interpretation="Date range within January with ordinals"
+    ).with_inputs("phrase", "current_date"),
+
+    dspy.Example(
+        phrase="from 5th to 15th February",
+        current_date="2026-01-15",
+        start_date="2026-02-05",
+        end_date="2026-02-15",
+        interpretation="Date range within February: 5th to 15th"
+    ).with_inputs("phrase", "current_date"),
+
+    dspy.Example(
+        phrase="between 1st and 10th March",
+        current_date="2026-02-01",
+        start_date="2026-03-01",
+        end_date="2026-03-10",
+        interpretation="First 10 days of March"
+    ).with_inputs("phrase", "current_date"),
+
+    # ==========================================================================
+    # DATE RANGE EXPRESSIONS - Cross-month ranges
+    # ==========================================================================
+    dspy.Example(
+        phrase="between 20 January and 8 March",
+        current_date="2026-01-05",
+        start_date="2026-01-20",
+        end_date="2026-03-08",
+        interpretation="Cross-month range from late January to early March"
+    ).with_inputs("phrase", "current_date"),
+
+    dspy.Example(
+        phrase="from January 25 to February 10",
+        current_date="2026-01-10",
+        start_date="2026-01-25",
+        end_date="2026-02-10",
+        interpretation="Cross-month range spanning January and February"
+    ).with_inputs("phrase", "current_date"),
+
+    dspy.Example(
+        phrase="between Feb 15 and March 20",
+        current_date="2026-01-20",
+        start_date="2026-02-15",
+        end_date="2026-03-20",
+        interpretation="Cross-month range from mid-February to mid-March"
+    ).with_inputs("phrase", "current_date"),
+
+    # ==========================================================================
+    # WEEK EXPRESSIONS - "for" instead of "of"
+    # ==========================================================================
+    dspy.Example(
+        phrase="3rd week for feb",
+        current_date="2026-01-15",
+        start_date="2026-02-16",
+        end_date="2026-02-22",
+        interpretation="Third week of February (for = of)"
+    ).with_inputs("phrase", "current_date"),
+
+    dspy.Example(
+        phrase="2nd week for January",
+        current_date="2025-12-20",
+        start_date="2026-01-06",
+        end_date="2026-01-12",
+        interpretation="Second week of January (for = of)"
+    ).with_inputs("phrase", "current_date"),
+
+    dspy.Example(
+        phrase="4th week for march",
+        current_date="2026-02-15",
+        start_date="2026-03-23",
+        end_date="2026-03-29",
+        interpretation="Fourth week of March (for = of)"
+    ).with_inputs("phrase", "current_date"),
+
+    dspy.Example(
+        phrase="1st week for April",
+        current_date="2026-03-01",
+        start_date="2026-04-06",
+        end_date="2026-04-12",
+        interpretation="First full week of April (for = of)"
+    ).with_inputs("phrase", "current_date"),
+
+    # ==========================================================================
+    # ALTERNATIVE WEEK PHRASINGS
+    # ==========================================================================
+    dspy.Example(
+        phrase="week after current week",
+        current_date="2026-01-05",
+        start_date="2026-01-12",
+        end_date="2026-01-18",
+        interpretation="Same as next week - the week after this one"
+    ).with_inputs("phrase", "current_date"),
+
+    dspy.Example(
+        phrase="week after this week",
+        current_date="2026-01-07",
+        start_date="2026-01-12",
+        end_date="2026-01-18",
+        interpretation="Next week starting Monday"
+    ).with_inputs("phrase", "current_date"),
+
+    dspy.Example(
+        phrase="the following week",
+        current_date="2026-01-03",
+        start_date="2026-01-05",
+        end_date="2026-01-11",
+        interpretation="Next week - the week that follows"
+    ).with_inputs("phrase", "current_date"),
+
+    dspy.Example(
+        phrase="coming week",
+        current_date="2026-01-03",
+        start_date="2026-01-05",
+        end_date="2026-01-11",
+        interpretation="The upcoming week"
+    ).with_inputs("phrase", "current_date"),
+
+    # ==========================================================================
+    # ORDINAL WEEK IN MONTH - Alternative phrasings
+    # ==========================================================================
+    dspy.Example(
+        phrase="3rd week available dates for feb",
+        current_date="2026-01-15",
+        start_date="2026-02-16",
+        end_date="2026-02-22",
+        interpretation="Third week of February"
+    ).with_inputs("phrase", "current_date"),
+
+    dspy.Example(
+        phrase="show me 2nd week in January",
+        current_date="2025-12-20",
+        start_date="2026-01-06",
+        end_date="2026-01-12",
+        interpretation="Second week of January"
+    ).with_inputs("phrase", "current_date"),
+
+    dspy.Example(
+        phrase="4th week dates for February",
+        current_date="2026-01-20",
+        start_date="2026-02-23",
+        end_date="2026-02-28",
+        interpretation="Fourth week of February (last week)"
+    ).with_inputs("phrase", "current_date"),
 ]
 
 

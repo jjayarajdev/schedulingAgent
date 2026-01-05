@@ -228,26 +228,76 @@ def geocode_location(location: str) -> Dict[str, Any]:
     """
     logger.info(f"Geocoding location: {location}")
 
-    # Smart extraction of city name AND state from various formats:
-    # - "Canterbury Park, Minneapolis, MN 55379" → city="Minneapolis", state="Minnesota"
-    # - "401 Chicago Avenue, Minneapolis, MN 55415" → city="Minneapolis", state="Minnesota"
-    # - "Minneapolis, MN" → city="Minneapolis", state="Minnesota"
-    # - "Springfield, IL" → city="Springfield", state="Illinois"
-    # - "Minneapolis" → city="Minneapolis", state=None
+    # STRATEGY 1: Extract ZIP code from anywhere in the string (most reliable)
+    # Handles: "Fort White-32038", "MN 55411", "32038", etc.
+    zip_match = re.search(r'\b(\d{5})(?:-\d{4})?\b', location)
+    if zip_match:
+        zip_code = zip_match.group(1)
+        logger.info(f"Found ZIP code: {zip_code}, using for geocoding")
+        # Geocode by ZIP code directly
+        encoded_zip = quote(zip_code)
+        url = f"https://geocoding-api.open-meteo.com/v1/search?name={encoded_zip}&count=5&language=en&format=json"
+        try:
+            res = requests.get(url, timeout=10)
+            res.raise_for_status()
+            data = res.json()
+            if data.get("results"):
+                # Find US result
+                for r in data["results"]:
+                    if r.get("country") == "United States":
+                        logger.info(f"Geocoded by ZIP: {r['name']}, {r.get('admin1')}")
+                        return {
+                            "latitude": r["latitude"],
+                            "longitude": r["longitude"],
+                            "name": r["name"],
+                            "admin1": r.get("admin1", ""),
+                            "country": r.get("country", ""),
+                            "timezone": r.get("timezone", "UTC")
+                        }
+        except Exception as e:
+            logger.warning(f"ZIP geocoding failed: {e}, falling back to city parsing")
 
+    # STRATEGY 2: Extract state abbreviation from anywhere in the string
+    # Find 2-letter state abbreviation (surrounded by word boundaries or punctuation)
+    state_name = None
+    state_abbr = None
+    for abbr in US_STATES.keys():
+        # Look for state abbr with word boundaries (not part of another word)
+        if re.search(rf'(?:^|[,\s])({abbr})(?:[,\s\-]|$)', location, re.IGNORECASE):
+            state_abbr = abbr
+            state_name = US_STATES[abbr]
+            logger.info(f"Found state: {state_abbr} -> {state_name}")
+            break
+
+    # STRATEGY 3: Smart extraction of city name from various formats
+    # Clean up the location string
     parts = [p.strip() for p in location.split(',')]
-    city_name = location  # Default
-    state_name = None  # State to filter results by
+    city_name = location  # Default fallback
 
+    # Try to find a reasonable city name
     if len(parts) >= 3:
-        # Format: "Street/Neighborhood, City, State ZIP"
-        city_name = parts[-2].strip()
-        state_part = parts[-1].strip()
-        # Extract state abbreviation (e.g., "MN 55379" → "MN")
-        state_match = re.match(r'^([A-Z]{2})\s*\d*', state_part)
-        if state_match:
-            state_abbr = state_match.group(1)
-            state_name = US_STATES.get(state_abbr)
+        # Format: "Street, City, State ZIP" or weird formats
+        # Look for city in parts (skip street addresses and state/zip)
+        for part in reversed(parts):
+            part_clean = part.strip()
+            # Skip if it's just a state abbreviation
+            if re.match(r'^[A-Z]{2}$', part_clean):
+                continue
+            # Skip if it starts with numbers (likely street address)
+            if re.match(r'^\d', part_clean):
+                continue
+            # Skip if it's a state with ZIP like "MN 55411"
+            if re.match(r'^[A-Z]{2}\s+\d{5}', part_clean):
+                continue
+            # Extract city from "City-ZIP" format (e.g., "Fort White-32038")
+            city_zip_match = re.match(r'^([A-Za-z\s]+?)\s*[-]?\s*\d{5}', part_clean)
+            if city_zip_match:
+                city_name = city_zip_match.group(1).strip()
+                break
+            # Use this part as city if it looks like a name
+            if re.match(r'^[A-Za-z\s]+$', part_clean) and len(part_clean) > 2:
+                city_name = part_clean
+                break
     elif len(parts) == 2:
         # Format: "City, State" or "City, State ZIP"
         city_name = parts[0].strip()
@@ -256,7 +306,19 @@ def geocode_location(location: str) -> Dict[str, Any]:
         if state_match:
             state_abbr = state_match.group(1)
             state_name = US_STATES.get(state_abbr)
-    # else: single part, use as-is
+
+    # Clean up city name - remove redundant repeated text
+    if city_name:
+        # Split and dedupe words that appear multiple times
+        words = city_name.split()
+        seen = set()
+        clean_words = []
+        for word in words:
+            word_lower = word.lower()
+            if word_lower not in seen or word_lower in ['the', 'of', 'and']:
+                clean_words.append(word)
+                seen.add(word_lower)
+        city_name = ' '.join(clean_words)
 
     logger.info(f"Geocoding: city='{city_name}', state='{state_name}'")
 

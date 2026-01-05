@@ -176,6 +176,7 @@ Extract any of:
 - category: Kitchen, Decking, Windows, Flooring, Doors, etc.
 - location: Any address or area mentioned
 - technician_name: Name of assigned technician/installer
+- scheduled_month: Month name if user asks for appointments in a specific month (e.g., "January", "February")
 
 Examples:
 - "show scheduled projects" → {{"status": "scheduled"}}
@@ -185,6 +186,9 @@ Examples:
 - "projects at North Loop" → {{"location": "North Loop"}}
 - "projects assigned to John" → {{"technician_name": "John"}}
 - "Mildred's projects" → {{"technician_name": "Mildred"}}
+- "scheduled for January" → {{"status": "scheduled", "scheduled_month": "January"}}
+- "appointments in February" → {{"status": "scheduled", "scheduled_month": "February"}}
+- "what's coming up in March" → {{"status": "scheduled", "scheduled_month": "March"}}
 
 Return ONLY valid JSON. Only include fields that are explicitly mentioned.""",
 

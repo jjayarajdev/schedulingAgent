@@ -48,6 +48,13 @@ OUTDOOR_CATEGORIES = {
         "temp_max": 100,
         "wind_max": 30,
     },
+    "Fence": {  # Alias for "Fence Installation" projects
+        "bad_conditions": ["rain", "snow", "thunderstorm"],
+        "rain_threshold": 50,
+        "temp_min": 32,
+        "temp_max": 100,
+        "wind_max": 30,
+    },
     "Concrete": {
         "bad_conditions": ["rain", "snow", "thunderstorm", "ice"],
         "rain_threshold": 30,
