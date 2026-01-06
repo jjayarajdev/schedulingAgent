@@ -417,6 +417,53 @@ def extract_time_from_message(message: str) -> Optional[str]:
     return None
 
 
+def format_time_12hr(time_str: str) -> str:
+    """
+    Convert 24-hour time format (HH:MM) to 12-hour format with AM/PM.
+    E.g., "13:00" -> "1:00 PM", "08:30" -> "8:30 AM"
+
+    If time_str is already in 12-hour format or invalid, returns as-is.
+    """
+    if not time_str:
+        return time_str
+
+    # Check if already has AM/PM
+    if 'am' in time_str.lower() or 'pm' in time_str.lower():
+        return time_str
+
+    try:
+        # Parse HH:MM format
+        parts = time_str.split(':')
+        if len(parts) != 2:
+            return time_str
+
+        hour = int(parts[0])
+        minute = int(parts[1])
+
+        # Determine AM/PM
+        if hour == 0:
+            display_hour = 12
+            period = 'AM'
+        elif hour < 12:
+            display_hour = hour
+            period = 'AM'
+        elif hour == 12:
+            display_hour = 12
+            period = 'PM'
+        else:
+            display_hour = hour - 12
+            period = 'PM'
+
+        # Format with minutes
+        if minute == 0:
+            return f"{display_hour}:00 {period}"
+        else:
+            return f"{display_hour}:{minute:02d} {period}"
+
+    except (ValueError, IndexError):
+        return time_str
+
+
 def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[Dict]:
     """
     Check if user is providing what we're waiting for (date or time selection).
@@ -2377,7 +2424,7 @@ def orchestrate_intelligent_workflow(
                 if project_type:
                     preview_text += f"**Type:** {project_type}\n"
                 preview_text += f"**Date:** {date_str}\n"
-                preview_text += f"**Time:** {time_str}\n"
+                preview_text += f"**Time:** {format_time_12hr(time_str)}\n"
                 if address:
                     preview_text += f"**Location:** {address}\n"
                 preview_text += f"\nWould you like to confirm this appointment?"
@@ -4951,7 +4998,7 @@ What would you like to do?"""
             if project_type:
                 preview_text += f"**Type:** {project_type}\n"
             preview_text += f"**Date:** {date_str}\n"
-            preview_text += f"**Time:** {time_str}\n"
+            preview_text += f"**Time:** {format_time_12hr(time_str)}\n"
             if address:
                 preview_text += f"**Location:** {address}\n"
             preview_text += f"\nWould you like to confirm this appointment?"

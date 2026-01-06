@@ -755,6 +755,7 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
     filter_category = params.get('category')
     filter_project_type = params.get('projectType')
     filter_scheduled_month = params.get('scheduled_month')  # e.g., "January", "February"
+    filter_scheduled_date = params.get('scheduled_date')  # e.g., "2026-01-13" (exact date)
 
     if not customer_id:
         raise ValueError("Missing required parameter: customer_id")
@@ -820,8 +821,8 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
     projects = [extract_project_minimal(item) for item in raw_data]
 
     # Apply filters if provided (case-insensitive matching)
-    if filter_status or filter_category or filter_project_type or filter_scheduled_month:
-        logger.info(f"Applying filters: status={filter_status}, category={filter_category}, projectType={filter_project_type}, scheduled_month={filter_scheduled_month}")
+    if filter_status or filter_category or filter_project_type or filter_scheduled_month or filter_scheduled_date:
+        logger.info(f"Applying filters: status={filter_status}, category={filter_category}, projectType={filter_project_type}, scheduled_month={filter_scheduled_month}, scheduled_date={filter_scheduled_date}")
 
         # Month name mapping for scheduled_month filter
         month_names = {
@@ -889,6 +890,52 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
 
                 if not month_matched:
                     continue
+
+            # Check scheduled_date filter (filter by exact date)
+            if filter_scheduled_date:
+                scheduled_date = project.get('scheduledDate', '')
+                if not scheduled_date:
+                    # No scheduled date - doesn't match date filter
+                    continue
+
+                # Parse the filter date (expected format: YYYY-MM-DD)
+                try:
+                    from datetime import datetime
+                    filter_date = datetime.strptime(filter_scheduled_date, "%Y-%m-%d")
+                    filter_day = filter_date.day
+                    filter_month = filter_date.month
+                    filter_year = filter_date.year
+
+                    # Try to match date in various formats
+                    date_matched = False
+
+                    # Format 1: "Jan 13, 2026 1:00 PM" - Month Day, Year
+                    import re
+                    match = re.search(r'(\w{3})\s+(\d{1,2}),?\s+(\d{4})', scheduled_date)
+                    if match:
+                        month_abbr = match.group(1).lower()
+                        day = int(match.group(2))
+                        year = int(match.group(3))
+                        month_map = {'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                                     'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12}
+                        if month_map.get(month_abbr) == filter_month and day == filter_day and year == filter_year:
+                            date_matched = True
+
+                    # Format 2: ISO format "2026-01-13" or "2026-01-13T..."
+                    if not date_matched and filter_scheduled_date in scheduled_date:
+                        date_matched = True
+
+                    # Format 3: MM-DD-YYYY or MM/DD/YYYY at start
+                    if not date_matched:
+                        mm_dd_pattern = f"{filter_month:02d}[-/]{filter_day:02d}[-/]{filter_year}"
+                        if re.match(mm_dd_pattern, scheduled_date):
+                            date_matched = True
+
+                    if not date_matched:
+                        continue
+                except (ValueError, AttributeError):
+                    # Invalid date format - skip filter
+                    pass
 
             # All filters passed, include this project
             filtered_projects.append(project)
