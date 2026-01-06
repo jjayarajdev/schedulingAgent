@@ -43,6 +43,17 @@ from mock_data import (
     get_mock_business_hours
 )
 
+# DSPy LLM-based date interpreter (optional - falls back to regex if unavailable)
+import os
+USE_LLM_DATE_INTERPRETER = os.environ.get('USE_LLM_DATE_INTERPRETER', 'false').lower() == 'true'
+LLM_DATE_AVAILABLE = False
+try:
+    from dspy_date_interpreter import interpret_date, convert_to_legacy_format
+    LLM_DATE_AVAILABLE = True
+    print(f"[DATE-LLM] Module loaded successfully, USE_LLM_DATE_INTERPRETER={USE_LLM_DATE_INTERPRETER}")
+except Exception as e:
+    print(f"[DATE-LLM] Failed to load module: {type(e).__name__}: {e}")
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -284,9 +295,42 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
             start_day = min(start_day, days_in_month)
 
             result = f"{year}-{month_num:02d}-{start_day:02d}"
-            logger.info(f"[DATE] Converted '{week_ord} week of {month_name}' -> {result} (week {week_num}, first_monday={first_monday})")
+            result_date = datetime.strptime(result, "%Y-%m-%d")
+
+            # Calculate the week's end date (Saturday = 6 days after Monday start)
+            # For week 1 (partial), end on the first Saturday
+            if week_num == 1:
+                # Week 1 ends on the first Saturday (or last day before first Monday)
+                week_end_day = first_monday - 1 if first_monday > 1 else min(6, days_in_month)
+            else:
+                # Full week ends 6 days after start (Saturday)
+                week_end_day = min(start_day + 5, days_in_month)  # Mon + 5 = Sat
+            week_end_date = datetime(year, month_num, week_end_day)
+
+            # If calculated start date is in the past, use tomorrow instead
+            tomorrow = today + timedelta(days=1)
+            if result_date.date() < tomorrow.date():
+                # Calculate remaining days in the week from tomorrow
+                days_remaining = (week_end_date.date() - tomorrow.date()).days + 1
+
+                # If entire week is in the past, return None (no dates available for this week)
+                if days_remaining <= 0:
+                    logger.info(f"[DATE] '{week_ord} week of {month_name}' is entirely in the past (week ended {week_end_day}, today is {today.day})")
+                    if return_strategy:
+                        return (None, 'week_past', 0)
+                    return None
+
+                result = tomorrow.strftime("%Y-%m-%d")
+                logger.info(f"[DATE] Converted '{week_ord} week of {month_name}' -> {result} (adjusted to tomorrow, {days_remaining} days left in week ending {week_end_day})")
+                if return_strategy:
+                    return (result, 'week', days_remaining, week_end_date.strftime("%Y-%m-%d"))
+                return result
+            else:
+                logger.info(f"[DATE] Converted '{week_ord} week of {month_name}' -> {result} (week {week_num}, first_monday={first_monday}, ends {week_end_day})")
             if return_strategy:
-                return (result, 'week', 7)  # Return full week (7 days)
+                # Calculate actual days in this week
+                days_in_week = week_end_day - start_day + 1
+                return (result, 'week', days_in_week, week_end_date.strftime("%Y-%m-%d"))
             return result
 
     # "end of [month]" - dynamically calculate last 5 days of month
@@ -822,17 +866,26 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
                     continue
 
                 # Try to match month from scheduled date
-                # Format is like "Jan 5, 2026 5:00 PM" or "2026-01-05"
+                # Formats: "Jan 5, 2026 5:00 PM", "2026-01-05", "01-05-2026 08:00 AM"
                 filter_month_lower = filter_scheduled_month.lower()
                 month_num = month_names.get(filter_month_lower, '')
 
-                # Check if month name appears in date string (e.g., "Jan" in "Jan 5, 2026")
+                # Check if month matches in various date formats
                 month_matched = False
+
+                # Format 1: Month name in string (e.g., "Jan" in "Jan 5, 2026")
                 if filter_month_lower[:3] in scheduled_date.lower():
                     month_matched = True
-                elif month_num and f"-{month_num}-" in scheduled_date:
-                    # ISO format like "2026-01-05"
-                    month_matched = True
+                elif month_num:
+                    # Format 2: ISO format "2026-01-05" (month in middle with dashes)
+                    if f"-{month_num}-" in scheduled_date:
+                        month_matched = True
+                    # Format 3: MM-DD-YYYY format "01-05-2026" (month at start)
+                    elif scheduled_date.startswith(f"{month_num}-"):
+                        month_matched = True
+                    # Format 4: MM/DD/YYYY format "01/05/2026"
+                    elif scheduled_date.startswith(f"{month_num}/"):
+                        month_matched = True
 
                 if not month_matched:
                     continue
@@ -1135,9 +1188,54 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
                 date_strategy = 'date_range'
                 logger.info(f"[DATE RANGE] Using explicit range: '{date_param}' -> start={start_date}, end={explicit_end_date}")
             else:
-                # Fall back to single date conversion
-                start_date, date_strategy, days_to_fetch = convert_natural_date(date_param, return_strategy=True)
-                logger.info(f"[DATE] Using date preference: '{date_param}' -> start_date={start_date}, strategy={date_strategy}, days={days_to_fetch}")
+                use_regex_fallback = True  # Default to regex
+
+                # Try LLM-based date interpreter first (if enabled and available)
+                if USE_LLM_DATE_INTERPRETER and LLM_DATE_AVAILABLE:
+                    try:
+                        logger.info(f"[DATE-LLM] Interpreting '{date_param}' with LLM")
+                        llm_result = interpret_date(date_param)
+                        llm_tuple = convert_to_legacy_format(llm_result)
+                        start_date = llm_tuple[0]
+                        date_strategy = llm_tuple[1]
+                        days_to_fetch = llm_tuple[2]
+                        explicit_end_date = llm_tuple[3] if len(llm_tuple) > 3 else None
+                        logger.info(f"[DATE-LLM] Result: start={start_date}, strategy={date_strategy}, days={days_to_fetch}, end={explicit_end_date}")
+                        logger.info(f"[DATE-LLM] Interpretation: {llm_result.get('interpretation', 'N/A')}")
+                        use_regex_fallback = False  # LLM succeeded
+                    except Exception as e:
+                        logger.warning(f"[DATE-LLM] Failed: {e}, falling back to regex")
+
+                # Fall back to regex-based conversion
+                if use_regex_fallback:
+                    result = convert_natural_date(date_param, return_strategy=True)
+                    # Unpack result - may have 3 or 4 elements (week queries include week_end_date)
+                    if result and len(result) >= 3:
+                        start_date = result[0]
+                        date_strategy = result[1]
+                        days_to_fetch = result[2]
+                        # Week queries may include explicit week_end_date
+                        if len(result) == 4:
+                            explicit_end_date = result[3]
+                            logger.info(f"[DATE] Using date preference: '{date_param}' -> start_date={start_date}, strategy={date_strategy}, days={days_to_fetch}, week_end={explicit_end_date}")
+                        else:
+                            logger.info(f"[DATE] Using date preference: '{date_param}' -> start_date={start_date}, strategy={date_strategy}, days={days_to_fetch}")
+                    else:
+                        start_date = None
+                        date_strategy = None
+                        days_to_fetch = 5
+
+    # Handle week_past strategy - the entire requested week is in the past
+    if date_strategy == 'week_past':
+        logger.info(f"[DATE] Requested week is entirely in the past - returning no dates")
+        return {
+            "action": "get_available_dates",
+            "project_id": project_id,
+            "available_dates": [],
+            "message": "The requested week has already passed. No dates are available for that time period.",
+            "week_in_past": True,
+            "pf_http_status_code": 200
+        }
 
     if not start_date:
         # Use tomorrow as default - today rarely has available slots
@@ -1264,10 +1362,11 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
             date_obj = datetime.strptime(date_str, "%Y-%m-%d")
             formatted_dates.append({
                 "date": date_str,
+                "displayDate": date_obj.strftime("%m/%d/%Y"),  # 01/15/2026 - standard display format
                 "dayName": date_obj.strftime("%A"),  # Monday, Tuesday, etc.
                 "dayShort": date_obj.strftime("%a"),  # Mon, Tue, etc.
-                "monthDay": date_obj.strftime("%b %d"),  # Jan 15
-                "formatted": date_obj.strftime("%A, %B %d, %Y")  # Monday, January 15, 2024
+                "monthDay": date_obj.strftime("%m/%d"),  # 01/15
+                "formatted": date_obj.strftime("%a %m/%d/%Y")  # Mon 01/15/2026
             })
         except:
             # Fallback if date parsing fails
@@ -1541,7 +1640,7 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
             time = f"{time}:00"  # Add seconds if missing
 
         payload = {
-            "created_at": datetime.now().strftime("%m-%d-%Y %H:%M:%S"),
+            "created_at": datetime.now().strftime("%m/%d/%Y %H:%M:%S"),
             "date": date,
             "time": time,
             "request_id": int(request_id),  # Ensure request_id is integer
@@ -1578,7 +1677,7 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
     # Format date and time for better UI display
     try:
         date_obj = datetime.strptime(date, "%Y-%m-%d")
-        formatted_date = date_obj.strftime("%A, %B %d, %Y")  # Monday, January 15, 2024
+        formatted_date = date_obj.strftime("%a %m/%d/%Y")  # Mon 01/15/2026
         day_of_week = date_obj.strftime("%A")
     except:
         formatted_date = date
@@ -2175,7 +2274,7 @@ def store_note_in_dynamodb(table_name: str, project_id: str, note_text: str, aut
         'timestamp': datetime.now().isoformat(),
         'note_text': note_text,
         'author': author,
-        'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        'created_at': datetime.now().strftime("%m/%d/%Y %H:%M:%S")
     }
 
     table.put_item(Item=note)

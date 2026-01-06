@@ -266,6 +266,24 @@ def extract_date_from_message(message: str) -> Optional[str]:
         month, day, year = pattern4.groups()
         return f"{year}-{int(month):02d}-{int(day):02d}"
 
+    # Pattern 5: MM/DD or MM-DD (without year) - assume current/next year
+    # Match MM/DD but NOT MM/DD/YYYY (already handled above)
+    pattern5 = re.search(r'(?<!\d)(\d{1,2})[/-](\d{1,2})(?![/-]\d)', msg)
+    if pattern5:
+        month, day = pattern5.groups()
+        month_int = int(month)
+        day_int = int(day)
+        # Validate month/day
+        if 1 <= month_int <= 12 and 1 <= day_int <= 31:
+            year = datetime.now().year
+            try:
+                proposed_date = datetime(year, month_int, day_int)
+                if proposed_date < datetime.now():
+                    year += 1
+                return f"{year}-{month_int:02d}-{day_int:02d}"
+            except ValueError:
+                pass  # Invalid date (e.g., Feb 30)
+
     return None
 
 
@@ -1961,6 +1979,26 @@ User says "how many orders at 401 Chicago Avenue" (WITH address filter):
     "lambda_action": "list_projects",
     "lambda_params": {{
         "address": "401 Chicago Avenue"  // Filter by address when user specifies location
+    }}
+}}
+
+User says "show me projects scheduled for January" (WITH scheduled_month filter):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "list_projects",
+    "lambda_params": {{
+        "status": "Scheduled",
+        "scheduled_month": "January"  // Filter by appointment month
+    }}
+}}
+
+User says "what appointments do I have in February" (WITH scheduled_month filter):
+{{
+    "should_call_lambda": true,
+    "lambda_action": "list_projects",
+    "lambda_params": {{
+        "status": "Scheduled",
+        "scheduled_month": "February"  // Filter by appointment month
     }}
 }}
 

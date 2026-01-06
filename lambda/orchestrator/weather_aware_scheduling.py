@@ -337,13 +337,16 @@ def find_better_weather_dates(
                     from datetime import datetime
                     date_obj = datetime.strptime(date_str, "%Y-%m-%d")
                     day_name = date_obj.strftime("%A")
-                    month_day = date_obj.strftime("%b %d")
+                    month_day = date_obj.strftime("%m/%d")
+                    display_date = date_obj.strftime("%m/%d/%Y")
                 except:
                     day_name = date_str
                     month_day = date_str
+                    display_date = date_str
 
                 better_dates.append({
                     "date": date_str,
+                    "display_date": display_date,
                     "day_name": day_name,
                     "month_day": month_day,
                     "condition": forecast.get('condition', 'Unknown'),
@@ -418,13 +421,16 @@ def add_weather_indicators_to_dates(
             try:
                 date_obj = datetime.strptime(date_str, "%Y-%m-%d")
                 day_name = date_obj.strftime("%A")
-                month_day = date_obj.strftime("%b %d")
+                month_day = date_obj.strftime("%m/%d")
+                display_date = date_obj.strftime("%m/%d/%Y")
             except:
                 day_name = date_str
                 month_day = date_str
+                display_date = date_str
 
             date_info = {
                 "date": date_str,
+                "display_date": display_date,
                 "day_name": day_name,
                 "month_day": month_day,
                 "suitable": True,

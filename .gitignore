@@ -165,6 +165,7 @@ testing/update_token_everywhere.py
 testing/test_voice_orchestrator_routing.py
 testing/run_voice_tests.sh
 lambda/lex-fulfillment/create_zip.py
+lambda/scheduling-actions/test_date_interpreter.py
 
 # Session context files (personal)
 shraman_context.sh

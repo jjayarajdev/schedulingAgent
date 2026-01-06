@@ -396,16 +396,18 @@ def _resolve_position_references(message: str, context: Dict) -> tuple:
         return resolved_message, references
 
     # Pattern: "the second one", "2nd one", "second project", "the last", "first"
+    # IMPORTANT: Use negative lookahead to exclude temporal contexts like "first week", "second day"
+    # This prevents "first week of Jan" from being interpreted as a project reference
     patterns = [
-        (r'\b(?:the\s+)?first(?:\s+one| project| item)?\b', 0),
-        (r'\b(?:the\s+)?second(?:\s+one| project| item)?\b', 1),
-        (r'\b(?:the\s+)?third(?:\s+one| project| item)?\b', 2),
-        (r'\b(?:the\s+)?fourth(?:\s+one| project| item)?\b', 3),
-        (r'\b(?:the\s+)?fifth(?:\s+one| project| item)?\b', 4),
+        (r'\b(?:the\s+)?first(?!\s+(?:week|day|month|year|quarter))(?:\s+one| project| item)?\b', 0),
+        (r'\b(?:the\s+)?second(?!\s+(?:week|day|month|year|quarter))(?:\s+one| project| item)?\b', 1),
+        (r'\b(?:the\s+)?third(?!\s+(?:week|day|month|year|quarter))(?:\s+one| project| item)?\b', 2),
+        (r'\b(?:the\s+)?fourth(?!\s+(?:week|day|month|year|quarter))(?:\s+one| project| item)?\b', 3),
+        (r'\b(?:the\s+)?fifth(?!\s+(?:week|day|month|year|quarter))(?:\s+one| project| item)?\b', 4),
         # IMPORTANT: Only match numeric ordinals when followed by "one", "project", or "item"
         # This prevents "5th Dec" (date) from being interpreted as "5th project"
         (r'\b(?:the\s+)?(\d+)(?:st|nd|rd|th)\s+(?:one|project|item)\b', None),  # "3rd one", "3rd project"
-        (r'\b(?:the\s+)?last(?:\s+one| project| item)?\b', -1)
+        (r'\b(?:the\s+)?last(?!\s+(?:week|day|month|year|quarter))(?:\s+one| project| item)?\b', -1)
     ]
 
     for pattern, index in patterns:

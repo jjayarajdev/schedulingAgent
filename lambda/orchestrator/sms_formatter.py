@@ -127,6 +127,54 @@ UNICODE_ASCII_MAP = {
 }
 
 
+# Placeholder for protected project numbers (no underscores to avoid markdown issues)
+_PROJECT_NUMBER_PLACEHOLDER = "[[PROJNUM{}]]"
+_protected_project_numbers = {}
+
+
+def _protect_project_numbers(text: str) -> str:
+    """
+    Detect and protect project numbers before markdown removal.
+
+    Project numbers have patterns like:
+    - 21083_09PF05VD_1762166550719
+    - 21083_09PF05VD_1762166550719_1_1_1
+    - Alphanumeric segments separated by underscores
+    """
+    global _protected_project_numbers
+    _protected_project_numbers = {}
+
+    # Pattern: 2+ segments of alphanumeric separated by underscores
+    # Must have at least one underscore and contain both letters and numbers
+    project_pattern = re.compile(
+        r'\b([A-Za-z0-9]+(?:_[A-Za-z0-9]+){2,})\b'  # At least 3 segments with underscores
+    )
+
+    def replace_with_placeholder(match):
+        project_num = match.group(1)
+        # Only protect if it looks like a project number (has both letters and digits)
+        has_letters = any(c.isalpha() for c in project_num)
+        has_digits = any(c.isdigit() for c in project_num)
+        if has_letters and has_digits:
+            idx = len(_protected_project_numbers)
+            placeholder = _PROJECT_NUMBER_PLACEHOLDER.format(idx)
+            _protected_project_numbers[placeholder] = project_num
+            logger.debug(f"[SMS] Protected project number: {project_num} -> {placeholder}")
+            return placeholder
+        return project_num
+
+    return project_pattern.sub(replace_with_placeholder, text)
+
+
+def _restore_project_numbers(text: str) -> str:
+    """Restore protected project numbers after markdown removal."""
+    global _protected_project_numbers
+    for placeholder, project_num in _protected_project_numbers.items():
+        text = text.replace(placeholder, project_num)
+    _protected_project_numbers = {}
+    return text
+
+
 def format_for_sms(response_text: str, max_length: int = 1500) -> str:
     """
     Format response for SMS delivery - plain ASCII, no emojis.
@@ -144,6 +192,9 @@ def format_for_sms(response_text: str, max_length: int = 1500) -> str:
     try:
         text = response_text
 
+        # Step 0: Protect project numbers before any processing
+        text = _protect_project_numbers(text)
+
         # Step 1: Replace known emojis with text equivalents
         text = _replace_emojis_with_text(text)
 
@@ -153,16 +204,19 @@ def format_for_sms(response_text: str, max_length: int = 1500) -> str:
         # Step 3: Remove markdown formatting
         text = _remove_markdown(text)
 
-        # Step 4: Replace special unicode with ASCII
+        # Step 4: Restore protected project numbers
+        text = _restore_project_numbers(text)
+
+        # Step 5: Replace special unicode with ASCII
         text = _normalize_unicode(text)
 
-        # Step 5: Clean up whitespace
+        # Step 6: Clean up whitespace
         text = _compact_whitespace(text)
 
-        # Step 6: Truncate if too long
+        # Step 7: Truncate if too long
         text = _truncate_message(text, max_length)
 
-        # Step 7: Final ASCII-only cleanup
+        # Step 8: Final ASCII-only cleanup
         text = _ensure_ascii_safe(text)
 
         logger.info(f"[SMS] Formatted response: {len(response_text)} -> {len(text)} chars")

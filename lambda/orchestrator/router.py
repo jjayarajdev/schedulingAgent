@@ -454,9 +454,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                         date_obj = datetime.strptime(date_str, "%Y-%m-%d")
                         formatted_dates.append({
                             "date": date_str,
+                            "displayDate": date_obj.strftime("%m/%d/%Y"),
                             "dayShort": date_obj.strftime("%a"),
-                            "monthDay": date_obj.strftime("%b %d"),
+                            "monthDay": date_obj.strftime("%m/%d"),
                             "dayName": date_obj.strftime("%A"),
+                            "formatted": date_obj.strftime("%a %m/%d/%Y"),
                             # Weather info
                             "weatherIndicator": enriched_date.get('indicator', ''),
                             "weatherSuitable": enriched_date.get('suitable', True),
@@ -482,9 +484,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                         date_obj = datetime.strptime(date_str, "%Y-%m-%d")
                         formatted_dates.append({
                             "date": date_str,
+                            "displayDate": date_obj.strftime("%m/%d/%Y"),
                             "dayShort": date_obj.strftime("%a"),
-                            "monthDay": date_obj.strftime("%b %d"),
-                            "dayName": date_obj.strftime("%A")
+                            "monthDay": date_obj.strftime("%m/%d"),
+                            "dayName": date_obj.strftime("%A"),
+                            "formatted": date_obj.strftime("%a %m/%d/%Y")
                         })
                     except:
                         formatted_dates.append({"date": date_str, "monthDay": date_str})
@@ -584,10 +588,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                         date_obj = datetime.strptime(date_str, "%Y-%m-%d")
                         formatted_dates.append({
                             "date": date_str,
+                            "displayDate": date_obj.strftime("%m/%d/%Y"),
                             "dayShort": date_obj.strftime("%a"),
-                            "monthDay": date_obj.strftime("%b %d"),
+                            "monthDay": date_obj.strftime("%m/%d"),
                             "dayName": date_obj.strftime("%A"),
-                            "formatted": date_obj.strftime("%A, %B %d, %Y"),
+                            "formatted": date_obj.strftime("%a %m/%d/%Y"),
                             # Weather info
                             "weatherIndicator": enriched_date.get('indicator', ''),
                             "weatherSuitable": enriched_date.get('suitable', True),
@@ -613,10 +618,11 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                         date_obj = datetime.strptime(date_str, "%Y-%m-%d")
                         formatted_dates.append({
                             "date": date_str,
+                            "displayDate": date_obj.strftime("%m/%d/%Y"),
                             "dayShort": date_obj.strftime("%a"),
-                            "monthDay": date_obj.strftime("%b %d"),
+                            "monthDay": date_obj.strftime("%m/%d"),
                             "dayName": date_obj.strftime("%A"),
-                            "formatted": date_obj.strftime("%A, %B %d, %Y")
+                            "formatted": date_obj.strftime("%a %m/%d/%Y")
                         })
                     except:
                         formatted_dates.append({"date": date_str, "monthDay": date_str})
@@ -988,7 +994,8 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     date_obj = datetime.strptime(target_forecast.get('date', ''), "%Y-%m-%d")
                     formatted_target = {
                         "date": target_forecast.get('date'),
-                        "day": date_obj.strftime("%A, %B %d"),
+                        "displayDate": date_obj.strftime("%m/%d/%Y"),
+                        "day": date_obj.strftime("%A %m/%d"),
                         "condition": target_forecast.get('condition', 'Unknown'),
                         "high": target_forecast.get('max_temp_f', 0),
                         "low": target_forecast.get('min_temp_f', 0),
