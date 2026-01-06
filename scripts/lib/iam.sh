@@ -94,7 +94,10 @@ ensure_role_policies() {
         "voice-bedrock-bridge")
             configure_voice_bedrock_bridge_role "$full_role_name"
             ;;
-        "scheduling-actions"|"information-actions"|"chitchat-actions"|"notes-actions")
+        "scheduling-actions")
+            configure_scheduling_actions_role "$full_role_name"
+            ;;
+        "information-actions"|"chitchat-actions"|"notes-actions")
             configure_actions_role "$full_role_name"
             ;;
         "customer-lookup")
@@ -364,6 +367,67 @@ EOF
         2>/dev/null
 
     log_info "Actions role configured"
+}
+
+# Configure scheduling-actions role policies (includes Bedrock for LLM date interpreter)
+configure_scheduling_actions_role() {
+    local role_name="$1"
+
+    log_info "Configuring scheduling-actions role: $role_name"
+
+    # Scheduling actions permissions (includes Bedrock for LLM date interpreter)
+    local scheduling_policy
+    scheduling_policy=$(cat <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "DynamoDBAccess",
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:Query",
+                "dynamodb:Scan"
+            ],
+            "Resource": "arn:aws:dynamodb:${AWS_REGION}:${EXPECTED_ACCOUNT}:table/${RESOURCE_PREFIX}-*-${ENVIRONMENT}"
+        },
+        {
+            "Sid": "SecretsAccess",
+            "Effect": "Allow",
+            "Action": [
+                "secretsmanager:GetSecretValue"
+            ],
+            "Resource": "arn:aws:secretsmanager:${AWS_REGION}:${EXPECTED_ACCOUNT}:secret:projectforce/*"
+        },
+        {
+            "Sid": "BedrockAccess",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:InvokeModel"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "StringLike": {
+                    "bedrock:ModelId": "*anthropic.claude*"
+                }
+            }
+        }
+    ]
+}
+EOF
+)
+
+    put_role_policy "$role_name" "SchedulingActionsPolicy" "$scheduling_policy"
+
+    # Attach DynamoDB full access as backup
+    aws iam attach-role-policy \
+        --role-name "$role_name" \
+        --policy-arn "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess" \
+        2>/dev/null
+
+    log_info "Scheduling actions role configured (with Bedrock access for LLM date interpreter)"
 }
 
 # Configure customer-lookup role policies

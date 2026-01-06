@@ -68,7 +68,19 @@ get_lambda_env_vars() {
             env_vars="${env_vars},DSPY_MODEL_BUCKET=${RESOURCE_PREFIX}-dspy-models-${ENVIRONMENT}"
             env_vars="${env_vars},DSPY_MODEL_PREFIX=optimized/"
             ;;
-        "scheduling-actions"|"information-actions"|"chitchat-actions")
+        "scheduling-actions")
+            # Core region Lambda - with LLM date interpreter
+            env_vars="ENVIRONMENT=${ENVIRONMENT}"
+            env_vars="${env_vars},USE_MOCK_API=false"
+            env_vars="${env_vars},DEFAULT_CLIENT_ID=09PF05VD"
+            env_vars="${env_vars},DYNAMODB_TABLE=$(table_name 'sessions')"
+            env_vars="${env_vars},SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
+            env_vars="${env_vars},SECRETS_REGION=${SECRETS_REGION:-us-east-2}"
+            env_vars="${env_vars},REGION=${CORE_REGION}"
+            # LLM-powered date interpreter (uses Bedrock Claude Haiku)
+            env_vars="${env_vars},USE_LLM_DATE_INTERPRETER=true"
+            ;;
+        "information-actions"|"chitchat-actions")
             # Core region Lambdas
             env_vars="ENVIRONMENT=${ENVIRONMENT}"
             env_vars="${env_vars},USE_MOCK_API=false"
