@@ -53,12 +53,113 @@ AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
 ORCHESTRATOR_REGION = os.environ.get('ORCHESTRATOR_REGION', AWS_REGION)  # Region where orchestrator runs
 ORCHESTRATOR_LAMBDA = os.environ.get('ORCHESTRATOR_LAMBDA', f'pf-syn-orchestrator-{ENVIRONMENT}')
 TWILIO_NUMBER = os.environ.get('TWILIO_NUMBER', '')  # Set in Lambda env vars
+VAPI_API_KEY = os.environ.get('VAPI_API_KEY', '')  # For dynamic phone number lookup
+
+# Static fallback map for known VAPI phoneNumberIds
+# Used when API lookup fails or is unavailable
+VAPI_PHONE_NUMBER_MAP = {
+    '04839e46-2cbc-467e-8e01-638900654c36': '+12038946599',  # WTU Tenant
+    '1c99c266-9778-4809-bf5e-dba30326a0ae': '+18624200502',  # PF-Agent-Dev
+    '6b7ac954-1f6e-460d-962a-48883d31c1f0': '+12185516488',  # PF-Agent
+}
+
+# In-memory cache for VAPI phoneNumberId -> phone number mappings
+# Populated dynamically via VAPI API calls
+_phone_number_cache = {}
 
 # AWS clients - use ORCHESTRATOR_REGION for Lambda calls
 lambda_client = boto3.client('lambda', region_name=ORCHESTRATOR_REGION)
 
 # Session cache (in-memory for Lambda warm starts)
 _session_cache = {}
+
+
+def mask_phone(phone: str) -> str:
+    """Mask phone for logging."""
+    if not phone:
+        return 'unknown'
+    if len(phone) > 4:
+        return '*' * (len(phone) - 4) + phone[-4:]
+    return '****'
+
+
+def lookup_vapi_phone_number(phone_number_id: str) -> Optional[str]:
+    """
+    Look up phone number by phoneNumberId.
+    Order: cache -> VAPI API (dynamic) -> static map (fallback)
+    """
+    # Check cache first
+    if phone_number_id in _phone_number_cache:
+        return _phone_number_cache[phone_number_id]
+
+    # Try VAPI API first (dynamic lookup)
+    if VAPI_API_KEY:
+        try:
+            import urllib.request
+            import urllib.error
+
+            url = f"https://api.vapi.ai/phone-number/{phone_number_id}"
+            req = urllib.request.Request(url, headers={
+                'Authorization': f'Bearer {VAPI_API_KEY}',
+                'Content-Type': 'application/json',
+                'User-Agent': 'ProjectForce-Lambda/1.0'
+            })
+
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                phone_number = data.get('number', '')
+
+                if phone_number:
+                    _phone_number_cache[phone_number_id] = phone_number
+                    logger.info(f"[VAPI] Fetched phone from API: {phone_number_id[:8]}... -> {mask_phone(phone_number)}")
+                    return phone_number
+
+        except urllib.error.HTTPError as e:
+            logger.warning(f"[VAPI] API lookup failed (HTTP {e.code}), trying static map")
+        except urllib.error.URLError as e:
+            logger.warning(f"[VAPI] API lookup failed ({e.reason}), trying static map")
+        except Exception as e:
+            logger.warning(f"[VAPI] API lookup failed ({e}), trying static map")
+    else:
+        logger.warning("[VAPI] VAPI_API_KEY not set, trying static map")
+
+    # Fallback to static map
+    if phone_number_id in VAPI_PHONE_NUMBER_MAP:
+        phone = VAPI_PHONE_NUMBER_MAP[phone_number_id]
+        _phone_number_cache[phone_number_id] = phone
+        logger.info(f"[VAPI] Resolved phone from static map: {phone_number_id[:8]}... -> {mask_phone(phone)}")
+        return phone
+
+    return None
+
+
+def resolve_to_phone(call: Dict) -> str:
+    """
+    Resolve the 'to' phone number from VAPI call data.
+
+    VAPI sends phoneNumberId but not always phoneNumber.number.
+    This function tries multiple sources:
+    1. phoneNumber.number (if VAPI sends it)
+    2. Dynamic VAPI API lookup by phoneNumberId (cached)
+    3. TWILIO_NUMBER env var as fallback
+    """
+    phone_number = call.get('phoneNumber', {})
+
+    # First try: direct phoneNumber.number field
+    to_phone = phone_number.get('number', '')
+    if to_phone:
+        return to_phone
+
+    # Second try: lookup by phoneNumberId via VAPI API
+    phone_number_id = call.get('phoneNumberId', '')
+    if phone_number_id:
+        to_phone = lookup_vapi_phone_number(phone_number_id)
+        if to_phone:
+            return to_phone
+
+    # Final fallback: TWILIO_NUMBER env var
+    logger.warning(f"[VAPI] Could not resolve to_phone for phoneNumberId={phone_number_id}, using TWILIO_NUMBER fallback")
+    return TWILIO_NUMBER
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -130,10 +231,8 @@ def handle_assistant_request(message: Dict) -> Dict:
 
         # Extract phone numbers
         customer = call.get('customer', {})
-        phone_number = call.get('phoneNumber', {})
-
         from_phone = customer.get('number', '')
-        to_phone = phone_number.get('number', '') or TWILIO_NUMBER
+        to_phone = resolve_to_phone(call)
 
         logger.info(f"[VAPI] Call {call_id}: from={mask_phone(from_phone)}, to={mask_phone(to_phone)}")
 
@@ -206,12 +305,11 @@ def handle_function_call(message: Dict) -> Dict:
     call = message.get('call', {})
     call_id = call.get('id', 'unknown')
     customer = call.get('customer', {})
-    phone_number = call.get('phoneNumber', {})
     from_phone = customer.get('number', '')
-    to_phone = phone_number.get('number', '') or TWILIO_NUMBER
+    to_phone = resolve_to_phone(call)
 
     logger.info(f"[VAPI] Function call: {function_name}, params={parameters}")
-    logger.info(f"[VAPI] Call context: call_id={call_id}, from={mask_phone(from_phone)}")
+    logger.info(f"[VAPI] Call context: call_id={call_id}, from={mask_phone(from_phone)}, to={mask_phone(to_phone)}")
 
     # Handle projectforce_api - the main tool for all project operations
     if function_name == 'projectforce_api':
@@ -288,12 +386,12 @@ def handle_tool_calls(message: Dict) -> Dict:
     call = message.get('call', {})
     call_id = call.get('id', 'unknown')
     customer = call.get('customer', {})
-    phone_number = call.get('phoneNumber', {})
     from_phone = customer.get('number', '')
-    to_phone = phone_number.get('number', '') or TWILIO_NUMBER
+    to_phone = resolve_to_phone(call)
 
     logger.info(f"[VAPI] Tool calls received: {len(tool_calls)} calls")
-    logger.info(f"[VAPI] Call context: call_id={call_id}, from={mask_phone(from_phone)}")
+    logger.info(f"[VAPI] Call context: call_id={call_id}, from={mask_phone(from_phone)}, to={mask_phone(to_phone)}")
+    logger.info(f"[VAPI] phoneNumberId: {call.get('phoneNumberId', 'N/A')}")
 
     results = []
 
@@ -540,15 +638,6 @@ def format_for_voice(text: str) -> str:
             text = truncated + "..."
 
     return text
-
-
-def mask_phone(phone: str) -> str:
-    """Mask phone for logging."""
-    if not phone:
-        return 'unknown'
-    if len(phone) > 4:
-        return '*' * (len(phone) - 4) + phone[-4:]
-    return '****'
 
 
 def create_response(status_code: int, body: Dict) -> Dict:
