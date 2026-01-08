@@ -32,6 +32,7 @@ import boto3
 import os
 import sys
 import logging
+import random
 from typing import Dict, Any, Optional
 from datetime import datetime
 
@@ -72,6 +73,46 @@ lambda_client = boto3.client('lambda', region_name=ORCHESTRATOR_REGION)
 
 # Session cache (in-memory for Lambda warm starts)
 _session_cache = {}
+
+# Filler messages for tool call waiting - randomized per call
+FILLER_MESSAGES = [
+    "Just a moment while I gather the information for you.",
+    "I'm here and actively retrieving the details you requested.",
+    "Thank you for your patience — I'll share the information shortly.",
+    "I'm making sure everything is accurate before responding.",
+    "Almost ready! Just verifying the details.",
+    "Wrapping this up now — I'll have an update for you shortly.",
+    "Thanks for waiting while I look this up for you.",
+    "Pulling everything together and will respond shortly.",
+]
+
+# Timing intervals for filler messages (in milliseconds)
+FILLER_TIMINGS = [3000, 10000, 15000]
+
+
+def get_random_filler_messages():
+    """
+    Generate randomized filler messages for VAPI tool calls.
+    Returns a list of request-response-delayed messages with random content.
+    """
+    # Randomly select messages for each timing slot (without replacement if possible)
+    selected = random.sample(FILLER_MESSAGES, min(len(FILLER_TIMINGS), len(FILLER_MESSAGES)))
+
+    messages = []
+    for i, timing in enumerate(FILLER_TIMINGS):
+        messages.append({
+            'type': 'request-response-delayed',
+            'content': selected[i],
+            'timingMilliseconds': timing
+        })
+
+    # Always add the request-failed message at the end
+    messages.append({
+        'type': 'request-failed',
+        'content': "I had some trouble with that. Could you try asking again?"
+    })
+
+    return messages
 
 
 def mask_phone(phone: str) -> str:
@@ -143,10 +184,10 @@ def resolve_to_phone(call: Dict) -> str:
     2. Dynamic VAPI API lookup by phoneNumberId (cached)
     3. TWILIO_NUMBER env var as fallback
     """
-    phone_number = call.get('phoneNumber', {})
+    phone_number = call.get('phoneNumber') or {}
 
     # First try: direct phoneNumber.number field
-    to_phone = phone_number.get('number', '')
+    to_phone = phone_number.get('number', '') if phone_number else ''
     if to_phone:
         return to_phone
 
@@ -218,11 +259,202 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return create_response(500, {"error": str(e)})
 
 
+def generate_dynamic_greeting(client_name: str, user_name: str = None) -> str:
+    """
+    Generate dynamic greeting with client-specific company name.
+
+    Args:
+        client_name: Company name from auth API (e.g., "ProjectsForce Validation", "Window Universe")
+        user_name: Optional user name for personalization
+
+    Returns:
+        SSML-formatted greeting string
+    """
+    display_name = client_name if client_name else 'ProjectForce'
+
+    greeting = (
+        f'<break time="3000ms"/> Hello, <break time="2000ms"/> '
+        f"I'm J. <break time=\"3000ms\"/> "
+        f"Your AI assistant from {display_name}! <break time=\"3000ms\"/> "
+        f"I can help you view your projects, check available dates, or schedule appointments. "
+        f"What would you like to do today?"
+    )
+    return greeting
+
+
+def create_assistant_config_response(first_message: str) -> Dict:
+    """
+    Create response with customized assistant configuration.
+
+    Used at call start to return dynamic greeting.
+    Returns full assistant config with voice, model, tools, etc.
+    """
+    assistant_config = {
+        'name': 'ProjectForce Scheduling',
+        'voice': {
+            'voiceId': 'Paige',
+            'provider': 'vapi'
+        },
+        'model': {
+            'model': 'gpt-4o-mini',
+            'provider': 'openai',
+            'temperature': 0.3,
+            'tools': [{
+                'type': 'function',
+                'function': {
+                    'name': 'projectforce_api',
+                    'description': 'Call this tool for ALL user requests including: listing projects, scheduling, rescheduling, canceling, checking status, getting available dates/times, weather forecasts for appointment days, and any project-related questions. ALWAYS use this tool - never answer project or weather questions yourself.',
+                    'parameters': {
+                        'type': 'object',
+                        'required': ['message', 'action'],
+                        'properties': {
+                            'action': {
+                                'type': 'string',
+                                'enum': ['list_projects', 'get_project_details', 'get_available_dates', 'get_time_slots', 'schedule_project', 'reschedule_appointment', 'cancel_appointment', 'get_weather', 'other'],
+                                'description': 'The type of action requested'
+                            },
+                            'message': {
+                                'type': 'string',
+                                'description': 'The user request or question. Pass the user exact words.'
+                            }
+                        }
+                    }
+                },
+                'messages': get_random_filler_messages()
+            }],
+            'messages': [{
+                'role': 'system',
+                'content': '''## Identity
+
+You are **J**, a friendly voice assistant, helping homeowners manage their home improvement projects and appointments.
+
+## Personality
+
+- Warm, upbeat, and genuinely helpful
+- Professional but conversational - use contractions naturally
+- Patient - never rush the customer
+- Confident but not pushy
+- Speaks like a helpful neighbor, not a robot
+
+## What You Can Do
+
+Help customers with:
+- Viewing their projects and statuses
+- Checking available appointment dates and times
+- Scheduling new appointments
+- Rescheduling existing appointments
+- Canceling appointments
+- Answering project questions
+- Details of a project
+
+## CRITICAL: Always Use the Tool
+
+You MUST call `projectforce_api` for ANY project-related request. Never make up project information.
+
+**IMPORTANT RULES:**
+1. When user wants to schedule but doesn't specify a project, ALWAYS call list_projects with message "show schedulable projects" to list unscheduled projects first. Never ask "which project?" without showing the list.
+2. When user says "yes" or confirms after you showed project details, immediately call get_available_dates.
+3. For filter queries (technician, address, status, project type), pass the user's exact words to preserve filters.
+
+Examples of when to call the tool:
+- "What projects do I have?" → action: list_projects
+- "Schedule my appointment" → action: list_projects, message: "show my scheduled projects" (list SCHEDULE projects first!)
+- "I want to schedule" → action: list_projects, message: "show projects ready to schedule or new"
+- "Schedule my fence project" → action: schedule_project
+- "What dates are available?" → action: get_available_dates
+- "Yes" (after showing project) → action: get_available_dates
+- "Cancel my appointment" → action: cancel_appointment
+- "Reschedule to next week" → action: reschedule_appointment
+- "Tell me about my project" → action: get_project_details
+- "What's the weather on my appointment day?" → action: get_weather
+- "Will it rain on Tuesday?" → action: get_weather
+- "Weather forecast for my install date" → action: get_weather
+
+**Filter examples (pass exact words to preserve filters):**
+- "Show projects assigned to John" → action: list_projects, message: "Show projects assigned to John"
+- "Decking projects at Main Street" → action: list_projects, message: "Decking projects at Main Street"
+- "Schedulable bathroom projects" → action: list_projects, message: "Schedulable bathroom projects"
+- "Projects scheduled for January" → action: list_projects, message: "Projects scheduled for January"
+
+**IMPORTANT:** Always pass the customer's EXACT words as the message. Do NOT rephrase or summarize - filters like technician names, addresses, and project types are extracted from the exact wording.
+
+## Conversation Flow
+
+### Opening
+After greeting, if the customer seems unsure, briefly mention what you can help with:
+"I can help you check your projects, see available dates, or schedule appointments."
+
+### Gathering Information
+- Ask ONE question at a time
+- Wait for the customer to respond before continuing
+- If they mention multiple projects, ask which one they mean
+
+### Before Any Action (IMPORTANT)
+Always confirm details before scheduling, rescheduling, or canceling:
+- "Just to confirm - you'd like to schedule your [project] for [date] at [time]. Is that correct?"
+- Wait for "yes" or confirmation before proceeding
+
+### After Successful Actions
+- Confirm what was done: "Done! Your [project] is now scheduled for [date] at [time]."
+- Offer next steps: "Is there anything else I can help you with?"
+
+### Handling Multiple Projects
+If customer has several projects, summarize briefly:
+"You have [X] projects - including [top 2-3 names]. Which one would you like to work with?"
+
+## Voice Best Practices
+
+- Keep responses under 30 words when possible
+- Speak dates naturally: "Tuesday, December 26th" not "12/26/2024"
+- Speak times naturally: "2 PM" not "14:00"
+- Use verbal confirmations: "Got it", "Perfect", "Sounds good"
+- If listing items, limit to 3-4 at a time
+
+## Handling Issues
+
+- If authentication fails: "I'm having trouble accessing your account. Please make sure you're calling from your registered phone number."
+- If no projects found: "I don't see any projects on your account. Would you like me to help with something else?"
+- If technical error: "I'm having a brief technical issue. Let me try that again."
+- If you don't understand: "I didn't quite catch that. Could you say that again?"
+
+## What NOT To Do
+
+- Never guess project details - always use the tool
+- Never confirm an action without customer approval
+- Never rush through important details like dates and times
+- Never interrupt the customer while they're speaking
+- Never provide information you don't have
+- NEVER say filler phrases like "Let me check", "One moment", "Just a sec" before calling the tool - the system handles wait messages automatically. Just call the tool directly.'''
+            }]
+        },
+        'transcriber': {
+            'model': 'nova-3',
+            'language': 'en',
+            'provider': 'deepgram',
+            'endpointing': 150
+        },
+        'firstMessage': first_message,
+        'endCallPhrases': ['goodbye', 'talk to you soon'],
+        'startSpeakingPlan': {
+            'waitSeconds': 0.4,
+            'smartEndpointingEnabled': 'livekit'
+        }
+    }
+
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps({'assistant': assistant_config})
+    }
+
+
 def handle_assistant_request(message: Dict) -> Dict:
     """
-    Handle assistant-request: User spoke, generate response.
+    Handle assistant-request: User spoke or call start.
 
     This is the main conversation handler.
+    At call start (no messages), returns dynamic assistant config with greeting.
+    During call (has messages), processes user message via orchestrator.
     """
     try:
         # Extract call info
@@ -241,8 +473,23 @@ def handle_assistant_request(message: Dict) -> Dict:
         user_message = extract_latest_user_message(messages)
 
         if not user_message:
-            logger.warning("[VAPI] No user message found")
-            return create_assistant_response("I didn't catch that. Could you please repeat?")
+            # Call start - return dynamic assistant config with greeting
+            logger.info(f"[VAPI] Call start detected - generating dynamic greeting")
+
+            # Authenticate to get client_name
+            credentials = authenticate_caller(from_phone, to_phone)
+
+            if credentials:
+                client_name = credentials.get('client_name', 'ProjectForce')
+                user_name = credentials.get('user_name', '')
+                logger.info(f"[VAPI] Dynamic greeting for client: {client_name}")
+                greeting = generate_dynamic_greeting(client_name, user_name)
+                return create_assistant_config_response(greeting)
+            else:
+                # Auth failed - use default greeting
+                logger.warning(f"[VAPI] Auth failed at call start, using default greeting")
+                greeting = generate_dynamic_greeting('ProjectForce')
+                return create_assistant_config_response(greeting)
 
         logger.info(f"[VAPI] User message: {user_message[:100]}")
 

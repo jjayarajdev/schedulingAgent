@@ -15,8 +15,7 @@ from typing import Dict, Any, Optional
 import boto3
 from botocore.exceptions import ClientError
 
-# Add shared module to path for phone_auth import
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
+# Import local phone_auth module (SMS-specific with DynamoDB support)
 try:
     from phone_auth import get_or_authenticate, AuthenticationError
     PHONE_AUTH_AVAILABLE = True
@@ -36,7 +35,8 @@ CONSENT_TABLE = os.environ.get('CONSENT_TABLE', '')
 OPT_OUT_TRACKING_TABLE = os.environ.get('OPT_OUT_TRACKING_TABLE', '')
 MESSAGES_TABLE = os.environ.get('MESSAGES_TABLE', '')
 SESSIONS_TABLE = os.environ.get('SESSIONS_TABLE', '')
-PF_SECRET_NAME = os.environ.get('PF_SECRET_NAME', 'projectforce/api/credentials')
+SMS_CREDENTIALS_TABLE = os.environ.get('SMS_CREDENTIALS_TABLE', f'pf-syn-sms-credentials-{ENVIRONMENT}')
+PF_SECRET_NAME = os.environ.get('PF_SECRET_NAME', 'projectforce/api/credentials')  # Fallback only
 SMS_CONFIGURATION_SET = os.environ.get('SMS_CONFIGURATION_SET', f'scheduling-agent-sms-config-{ENVIRONMENT}')
 
 # Multi-region configuration

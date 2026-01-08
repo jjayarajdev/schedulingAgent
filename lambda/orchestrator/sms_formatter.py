@@ -146,8 +146,9 @@ def _protect_project_numbers(text: str) -> str:
 
     # Pattern: 2+ segments of alphanumeric separated by underscores
     # Must have at least one underscore and contain both letters and numbers
+    # Use lookahead/lookbehind to also match inside markdown (e.g., **proj_num**)
     project_pattern = re.compile(
-        r'\b([A-Za-z0-9]+(?:_[A-Za-z0-9]+){2,})\b'  # At least 3 segments with underscores
+        r'(?<![A-Za-z0-9_])([A-Za-z0-9]+(?:_[A-Za-z0-9]+){2,})(?![A-Za-z0-9_])'
     )
 
     def replace_with_placeholder(match):
