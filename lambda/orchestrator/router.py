@@ -746,8 +746,31 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 logger.warning(f"[ERROR] Appointment confirmation failed: {error_message}")
                 return friendly_error
 
+            # Helper to convert date from YYYY-MM-DD to MM/DD/YYYY
+            def format_date_display(date_str):
+                if not date_str:
+                    return date_str
+                try:
+                    from datetime import datetime
+                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                    return date_obj.strftime("%m/%d/%Y")
+                except:
+                    return date_str
+
             # Format successful appointment confirmation response
             appointment = response_body.get('appointment', {})
+
+            # Format dates in appointment object
+            if appointment:
+                if 'scheduled_date' in appointment:
+                    appointment['scheduled_date'] = format_date_display(appointment['scheduled_date'])
+                if 'scheduledDate' in appointment:
+                    appointment['scheduledDate'] = format_date_display(appointment['scheduledDate'])
+
+            # Also format top-level scheduled_date if present
+            if 'scheduled_date' in response_body:
+                response_body['scheduled_date'] = format_date_display(response_body['scheduled_date'])
+
             if not appointment and response_body.get('success'):
                 # Handle simplified success response
                 result = {
@@ -838,17 +861,75 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                 available_dates = response_body.get('available_dates', [])
                 project_id = response_body.get('project_id', '')
 
-                # NOTE: Weather enrichment is handled in intelligent_orchestrator.py
-                # which has access to weather data. We just pass through the dates here.
+                # Check for weather-enriched dates (same as get_available_dates)
+                dates_with_weather = response_body.get('dates_with_weather', [])
+                has_weather_concerns = response_body.get('has_weather_concerns', False)
+
+                from datetime import datetime
+                formatted_dates = []
+
+                if dates_with_weather:
+                    # Use enriched dates with weather indicators (same as scheduling)
+                    for enriched_date in dates_with_weather:
+                        date_str = enriched_date.get('date', '')
+                        try:
+                            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                            formatted_dates.append({
+                                "date": date_obj.strftime("%m/%d/%Y"),
+                                "displayDate": date_obj.strftime("%m/%d/%Y"),
+                                "dayShort": date_obj.strftime("%a"),
+                                "monthDay": date_obj.strftime("%m/%d"),
+                                "dayName": date_obj.strftime("%A"),
+                                "formatted": date_obj.strftime("%a %m/%d/%Y"),
+                                # Weather info
+                                "weatherIndicator": enriched_date.get('indicator', ''),
+                                "weatherSuitable": enriched_date.get('suitable', True),
+                                "weatherSeverity": enriched_date.get('severity', 'low'),
+                                "weatherCondition": enriched_date.get('condition', ''),
+                                "weatherWarnings": enriched_date.get('warnings', []),
+                                "highTemp": enriched_date.get('high_temp'),
+                                "lowTemp": enriched_date.get('low_temp')
+                            })
+                        except:
+                            formatted_dates.append({
+                                "date": date_str,
+                                "monthDay": date_str,
+                                "weatherIndicator": enriched_date.get('indicator', ''),
+                                "weatherSuitable": enriched_date.get('suitable', True)
+                            })
+
+                    logger.info(f"[WEATHER] Formatted {len(formatted_dates)} reschedule dates with weather indicators")
+                else:
+                    # No weather data - use basic date formatting (convert to MM/DD/YYYY)
+                    for date_str in available_dates:
+                        try:
+                            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                            formatted_dates.append({
+                                "date": date_obj.strftime("%m/%d/%Y"),
+                                "displayDate": date_obj.strftime("%m/%d/%Y"),
+                                "dayShort": date_obj.strftime("%a"),
+                                "monthDay": date_obj.strftime("%m/%d"),
+                                "dayName": date_obj.strftime("%A"),
+                                "formatted": date_obj.strftime("%a %m/%d/%Y")
+                            })
+                        except:
+                            formatted_dates.append({"date": date_str, "monthDay": date_str})
 
                 result = {
                     "message": f"I've initiated the rescheduling process for project #{project_id}. Here are the available dates:",
                     "project_id": project_id,
-                    "available_dates": available_dates,
+                    "dates": formatted_dates,
+                    "dateCount": len(formatted_dates),
                     "request_id": response_body.get('request_id'),
                     "status": "awaiting_date_selection",
                     "action_type": "reschedule"
                 }
+
+                # Add weather concern flags if present
+                if has_weather_concerns:
+                    result['has_weather_concerns'] = True
+                    result['suitable_date_count'] = response_body.get('suitable_date_count', 0)
+                    result['unsuitable_date_count'] = response_body.get('unsuitable_date_count', 0)
 
                 conversational = generate_conversational_response(action, user_message, result, channel)
                 if channel == 'voice':
@@ -857,6 +938,29 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
 
             # Format successful reschedule confirmation response
             appointment = response_body.get('appointment', {})
+
+            # Helper to convert date from YYYY-MM-DD to MM/DD/YYYY
+            def format_date_display(date_str):
+                if not date_str:
+                    return date_str
+                try:
+                    from datetime import datetime
+                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                    return date_obj.strftime("%m/%d/%Y")
+                except:
+                    return date_str
+
+            # Format dates in appointment object
+            if appointment:
+                if 'scheduled_date' in appointment:
+                    appointment['scheduled_date'] = format_date_display(appointment['scheduled_date'])
+                if 'scheduledDate' in appointment:
+                    appointment['scheduledDate'] = format_date_display(appointment['scheduledDate'])
+
+            # Also format top-level scheduled_date if present
+            if 'scheduled_date' in response_body:
+                response_body['scheduled_date'] = format_date_display(response_body['scheduled_date'])
+
             result = {
                 "message": "[OK] Appointment rescheduled successfully!",
                 "appointment": appointment or response_body,
