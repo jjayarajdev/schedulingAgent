@@ -254,6 +254,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if message_type == 'assistant-request':
             return handle_assistant_request(message)
 
+        elif message_type == 'assistant.started':
+            # VAPI sends this at call start - return dynamic greeting
+            return handle_assistant_started(message)
+
         elif message_type == 'conversation-update':
             return handle_conversation_update(message)
 
@@ -281,24 +285,37 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 def generate_dynamic_greeting(client_name: str, user_name: str = None) -> str:
     """
-    Generate dynamic greeting with client-specific company name.
+    Generate dynamic greeting with client-specific company name and user name.
 
     Args:
         client_name: Company name from auth API (e.g., "ProjectsForce Validation", "Window Universe")
         user_name: Optional user name for personalization
 
     Returns:
-        SSML-formatted greeting string
+        SSML-formatted greeting string with pauses
     """
     display_name = client_name if client_name else 'ProjectForce'
 
-    greeting = (
-        f'<break time="3000ms"/> Hello, <break time="2000ms"/> '
-        f"I'm J. <break time=\"3000ms\"/> "
-        f"Your AI assistant from {display_name}! <break time=\"3000ms\"/> "
-        f"I can help you view your projects, check available dates, or schedule appointments. "
-        f"What would you like to do today?"
-    )
+    # Extract first name only for greeting
+    first_name = ''
+    if user_name:
+        first_name = user_name.split()[0] if user_name.strip() else ''
+
+    # Build greeting with customer name if available
+    if first_name:
+        greeting = (
+            f'<break time="3000ms"/> Hello {first_name}! <break time="300ms"/> '
+            f"I'm J, your AI assistant from {display_name}. <break time=\"3000ms\"/> "
+            f"I can help you view your projects, check available dates, or schedule appointments. <break time=\"3000ms\"/> "
+            f"What would you like to do today?"
+        )
+    else:
+        greeting = (
+            f'<break time="3000ms"/> Hello! <break time="3000ms"/> '
+            f"I'm J, your AI assistant from {display_name}. <break time=\"3000ms\"/> "
+            f"I can help you view your projects, check available dates, or schedule appointments. <break time=\"3000ms\"/> "
+            f"What would you like to do today?"
+        )
     return greeting
 
 
@@ -634,6 +651,47 @@ def handle_assistant_request(message: Dict) -> Dict:
     except Exception as e:
         logger.error(f"[VAPI] Error in assistant_request: {e}", exc_info=True)
         return create_assistant_response("I'm having trouble right now. Please try again.")
+
+
+def handle_assistant_started(message: Dict) -> Dict:
+    """
+    Handle assistant.started: VAPI notifies that assistant has started.
+
+    This is sent at call start. We use it to return dynamic greeting
+    with personalized client name and customer name.
+    """
+    try:
+        # Extract call info
+        call = message.get('call', {})
+        call_id = call.get('id', 'unknown')
+
+        # Extract phone numbers
+        customer = call.get('customer', {})
+        from_phone = customer.get('number', '')
+        to_phone = resolve_to_phone(call)
+
+        logger.info(f"[VAPI] assistant.started - Call {call_id}: from={mask_phone(from_phone)}, to={mask_phone(to_phone)}")
+
+        # Authenticate to get client_name and user_name
+        credentials = authenticate_caller(from_phone, to_phone)
+
+        if credentials:
+            client_name = credentials.get('client_name', 'ProjectForce')
+            user_name = credentials.get('user_name', '')
+            logger.info(f"[VAPI] Dynamic greeting for: {user_name} @ {client_name}")
+            greeting = generate_dynamic_greeting(client_name, user_name)
+            return create_assistant_config_response(greeting)
+        else:
+            # Auth failed - use default greeting
+            logger.warning(f"[VAPI] Auth failed at assistant.started, using default greeting")
+            greeting = generate_dynamic_greeting('ProjectForce')
+            return create_assistant_config_response(greeting)
+
+    except Exception as e:
+        logger.error(f"[VAPI] Error in assistant.started: {e}", exc_info=True)
+        # Return default greeting on error
+        greeting = generate_dynamic_greeting('ProjectForce')
+        return create_assistant_config_response(greeting)
 
 
 def handle_conversation_update(message: Dict) -> Dict:

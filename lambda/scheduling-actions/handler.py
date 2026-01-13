@@ -1766,7 +1766,7 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
         "project_id": project_id,
         "scheduled_date": date,
         "scheduled_time": time,
-        "message": response.get("message", "Appointment confirmed successfully"),
+        "message": response.get("message", "Appointment confirmed successfully. We will send you a confirmation to your registered email and phone number."),
         "appointment": appointment,  # Enhanced appointment object for UI
         "confirmation_data": confirmation_details,
         "mock_mode": use_mock,
