@@ -146,16 +146,21 @@ get_lambda_env_vars() {
             env_vars="${env_vars},REGION=${VOICE_REGION}"
             ;;
         "vapi-webhook")
-            # Voice region Lambda - VAPI/Twilio voice webhook
+            # VAPI/Twilio voice webhook Lambda
             # Receives calls from VAPI, authenticates via phone-call-login, invokes orchestrator
+            # NOTE: DEV deploys to VOICE_REGION (us-east-1), PROD deploys to CORE_REGION (us-east-2)
+            # DynamoDB tables are always in CORE_REGION (us-east-2)
+            local vapi_deploy_region=$(get_vapi_deploy_region)
             env_vars="ENVIRONMENT=${ENVIRONMENT}"
             env_vars="${env_vars},ORCHESTRATOR_LAMBDA=${orchestrator_arn}"
             env_vars="${env_vars},ORCHESTRATOR_REGION=${CORE_REGION}"
+            env_vars="${env_vars},PHONE_CREDENTIALS_TABLE=$(table_name 'phone-credentials')"
+            env_vars="${env_vars},DYNAMODB_REGION=${CORE_REGION}"
             env_vars="${env_vars},TWILIO_NUMBER=${TWILIO_PHONE_NUMBER:-+12185516488}"
             env_vars="${env_vars},PF_SECRET_NAME=${SECRETS_NAME:-projectforce/api/credentials}"
             env_vars="${env_vars},SECRETS_REGION=${SECRETS_REGION:-us-east-2}"
             env_vars="${env_vars},LOG_LEVEL=INFO"
-            env_vars="${env_vars},REGION=${VOICE_REGION}"
+            env_vars="${env_vars},REGION=${vapi_deploy_region}"
             ;;
         *)
             env_vars="ENVIRONMENT=${ENVIRONMENT}"
@@ -394,12 +399,30 @@ deploy_lambda() {
     return 0
 }
 
+# Get deployment region for VAPI webhook based on environment
+# DEV: us-east-1 (VOICE_REGION) - for testing alongside other voice services
+# PROD: us-east-2 (CORE_REGION) - for production with Lambda URL in us-east-2
+get_vapi_deploy_region() {
+    case "$ENVIRONMENT" in
+        "prod")
+            echo "$CORE_REGION"
+            ;;
+        *)
+            echo "$VOICE_REGION"
+            ;;
+    esac
+}
+
 # Get deployment region for a Lambda based on its role
 # Voice/SMS Lambdas deploy to VOICE_REGION, others to CORE_REGION
+# Special case: vapi-webhook uses get_vapi_deploy_region() for environment-specific region
 get_lambda_deploy_region() {
     local role_base="$1"
     case "$role_base" in
-        "vapi-webhook"|"lex-fulfillment"|"sms-inbound"|"customer-lookup"|"voice-bedrock-bridge")
+        "vapi-webhook")
+            get_vapi_deploy_region
+            ;;
+        "lex-fulfillment"|"sms-inbound"|"customer-lookup"|"voice-bedrock-bridge")
             echo "$VOICE_REGION"
             ;;
         *)

@@ -106,6 +106,9 @@ ensure_role_policies() {
         "sms-inbound")
             configure_sms_inbound_role "$full_role_name"
             ;;
+        "vapi-webhook")
+            configure_vapi_webhook_role "$full_role_name"
+            ;;
         *)
             log_warn "No specific policy configuration for role base: $role_base"
             ;;
@@ -584,6 +587,76 @@ EOF
     log_info "SMS inbound role configured"
 }
 
+# Configure vapi-webhook role policies
+# MULTI-REGION NOTE:
+# - VAPI webhook Lambda can run in VOICE_REGION (us-east-1) for DEV or CORE_REGION (us-east-2) for PROD
+# - DynamoDB tables (phone-credentials, sessions) are in CORE_REGION (us-east-2)
+# - Secrets Manager is in SECRETS_REGION (us-east-2)
+# - Orchestrator Lambda is in CORE_REGION (us-east-2)
+configure_vapi_webhook_role() {
+    local role_name="$1"
+
+    log_info "Configuring vapi-webhook role: $role_name"
+
+    # VAPI webhook permissions - DynamoDB access for phone credentials cache and sessions
+    local vapi_dynamodb_policy
+    vapi_dynamodb_policy=$(cat <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "DynamoDBPhoneCredentials",
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:Query"
+            ],
+            "Resource": [
+                "arn:aws:dynamodb:${CORE_REGION}:${EXPECTED_ACCOUNT}:table/${RESOURCE_PREFIX}-phone-credentials-${ENVIRONMENT}",
+                "arn:aws:dynamodb:${CORE_REGION}:${EXPECTED_ACCOUNT}:table/${RESOURCE_PREFIX}-sessions-${ENVIRONMENT}"
+            ]
+        }
+    ]
+}
+EOF
+)
+
+    put_role_policy "$role_name" "VAPIDynamoDBPolicy" "$vapi_dynamodb_policy"
+
+    # VAPI Lambda invocation - cross-region to orchestrator in CORE_REGION
+    # Secrets are in SECRETS_REGION (us-east-2)
+    local vapi_lambda_policy
+    vapi_lambda_policy=$(cat <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "LambdaInvokeOrchestrator",
+            "Effect": "Allow",
+            "Action": "lambda:InvokeFunction",
+            "Resource": "arn:aws:lambda:${CORE_REGION}:${EXPECTED_ACCOUNT}:function:${RESOURCE_PREFIX}-orchestrator-${ENVIRONMENT}"
+        },
+        {
+            "Sid": "SecretsAccess",
+            "Effect": "Allow",
+            "Action": [
+                "secretsmanager:GetSecretValue"
+            ],
+            "Resource": "arn:aws:secretsmanager:${SECRETS_REGION}:${EXPECTED_ACCOUNT}:secret:projectforce/*"
+        }
+    ]
+}
+EOF
+)
+
+    put_role_policy "$role_name" "VAPILambdaPolicy" "$vapi_lambda_policy"
+
+    log_info "VAPI webhook role configured"
+}
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -707,6 +780,22 @@ validate_role_policies() {
         "voice-bedrock-bridge")
             if ! echo "$inline_policies" | grep -q "BedrockBridgePolicy"; then
                 log_warn "  Missing BedrockBridgePolicy"
+                ((failed++))
+            fi
+            ;;
+        "vapi-webhook")
+            if ! echo "$inline_policies" | grep -q "VAPIDynamoDBPolicy"; then
+                log_warn "  Missing VAPIDynamoDBPolicy"
+                ((failed++))
+            fi
+            if ! echo "$inline_policies" | grep -q "VAPILambdaPolicy"; then
+                log_warn "  Missing VAPILambdaPolicy"
+                ((failed++))
+            fi
+            ;;
+        "sms-inbound")
+            if ! echo "$inline_policies" | grep -q "SMSDynamoDBPolicy"; then
+                log_warn "  Missing SMSDynamoDBPolicy"
                 ((failed++))
             fi
             ;;

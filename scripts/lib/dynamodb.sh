@@ -30,6 +30,9 @@ DYNAMODB_TABLES=(
     # Customer tables
     "customers:phone_number:NONE:S:NONE"
 
+    # VAPI/Voice phone credentials cache (for vapi-webhook Lambda)
+    "phone-credentials:to_phone:NONE:S:NONE"
+
     # DSPy training logs (for continuous learning)
     "training-logs:log_id:NONE:S:NONE"
 )
