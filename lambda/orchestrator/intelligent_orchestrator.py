@@ -1291,12 +1291,17 @@ def intelligent_classify(
         viewed_projects = current_workflow_state.get('viewed_projects', [])
 
         # Format project_mapping for clear display
+        # Show projectNumber (Order Number) for user display - never show internal IDs to users
         project_mapping_str = ""
         if project_mapping:
             mapping_lines = []
             for pid, info in project_mapping.items():
                 cat = info.get('category', 'Unknown')
-                mapping_lines.append(f"  - Project #{pid}: category='{cat}'")
+                project_number = info.get('projectNumber', '')
+                # Only show entries with projectNumber (user-facing Order Numbers)
+                # Skip reverse-lookup entries (Order Number -> internal ID mappings)
+                if project_number:
+                    mapping_lines.append(f"  - Project #{project_number}: category='{cat}'")
             project_mapping_str = f"""
 
 AVAILABLE PROJECTS (use this for matching user references by category/type):
@@ -2390,6 +2395,15 @@ def orchestrate_intelligent_workflow(
                 address = preserve_context.get('address', preserve_context.get('full_address', ''))
                 project_type = preserve_context.get('project_type', '')
 
+                # Format date for preview (YYYY-MM-DD -> MM/DD/YYYY with day name)
+                formatted_preview_date = date_str
+                try:
+                    from datetime import datetime as dt
+                    date_obj = dt.strptime(date_str, "%Y-%m-%d")
+                    formatted_preview_date = date_obj.strftime("%a %m/%d/%Y")  # Mon 01/26/2026
+                except:
+                    pass  # Keep original if parsing fails
+
                 # Store pending action in workflow state
                 pending_action = {
                     'action': 'confirm_appointment',
@@ -2403,8 +2417,10 @@ def orchestrate_intelligent_workflow(
                         'project_name': project_name,
                         'project_id': project_id,
                         'project_type': project_type,
-                        'date': date_str,
+                        'date': formatted_preview_date,  # Formatted for UI display
+                        'rawDate': date_str,  # Keep raw for API calls
                         'time': time_str,
+                        'formattedTime': format_time_12hr(time_str),
                         'address': address
                     }
                 }
@@ -2419,11 +2435,20 @@ def orchestrate_intelligent_workflow(
                 logger.info(f"[CONFIRM] Stored pending action in context, stage=awaiting_confirmation")
 
                 # Build confirmation preview response
+                # Format date for display (YYYY-MM-DD -> MM/DD/YYYY with day name)
+                formatted_date_str = date_str
+                try:
+                    from datetime import datetime as dt
+                    date_obj = dt.strptime(date_str, "%Y-%m-%d")
+                    formatted_date_str = date_obj.strftime("%a %m/%d/%Y")  # Mon 01/26/2026
+                except:
+                    pass  # Keep original if parsing fails
+
                 preview_text = f"📋 **Appointment Preview**\n\n"
                 preview_text += f"**Project:** {project_name}\n"
                 if project_type:
                     preview_text += f"**Type:** {project_type}\n"
-                preview_text += f"**Date:** {date_str}\n"
+                preview_text += f"**Date:** {formatted_date_str}\n"
                 preview_text += f"**Time:** {format_time_12hr(time_str)}\n"
                 if address:
                     preview_text += f"**Location:** {address}\n"
@@ -4964,6 +4989,15 @@ What would you like to do?"""
             address = context.get('address', context.get('full_address', ''))
             project_type = context.get('project_type', '')
 
+            # Format date for preview (YYYY-MM-DD -> MM/DD/YYYY with day name)
+            formatted_preview_date = date_str
+            try:
+                from datetime import datetime as dt
+                date_obj = dt.strptime(date_str, "%Y-%m-%d")
+                formatted_preview_date = date_obj.strftime("%a %m/%d/%Y")  # Mon 01/26/2026
+            except:
+                pass  # Keep original if parsing fails
+
             # Store pending action in workflow state
             pending_action = {
                 'action': 'confirm_appointment',
@@ -4977,8 +5011,10 @@ What would you like to do?"""
                     'project_name': project_name,
                     'project_id': project_id,
                     'project_type': project_type,
-                    'date': date_str,
+                    'date': formatted_preview_date,  # Formatted for UI display
+                    'rawDate': date_str,  # Keep raw for API calls
                     'time': time_str,
+                    'formattedTime': format_time_12hr(time_str),
                     'address': address
                 }
             }
@@ -4993,11 +5029,20 @@ What would you like to do?"""
             state_manager.save_state(session_id, workflow_state)
 
             # Build confirmation preview response
+            # Format date for display (YYYY-MM-DD -> MM/DD/YYYY with day name)
+            formatted_date_str = date_str
+            try:
+                from datetime import datetime as dt
+                date_obj = dt.strptime(date_str, "%Y-%m-%d")
+                formatted_date_str = date_obj.strftime("%a %m/%d/%Y")  # Mon 01/26/2026
+            except:
+                pass  # Keep original if parsing fails
+
             preview_text = f"📋 **Appointment Preview**\n\n"
             preview_text += f"**Project:** {project_name}\n"
             if project_type:
                 preview_text += f"**Type:** {project_type}\n"
-            preview_text += f"**Date:** {date_str}\n"
+            preview_text += f"**Date:** {formatted_date_str}\n"
             preview_text += f"**Time:** {format_time_12hr(time_str)}\n"
             if address:
                 preview_text += f"**Location:** {address}\n"

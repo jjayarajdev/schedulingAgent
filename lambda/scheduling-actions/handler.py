@@ -695,7 +695,14 @@ def extract_project_minimal(item: Dict) -> Dict[str, Any]:
 
     date_sold = safe_get(item, "project_date_sold")
     if date_sold:
-        project["dateSold"] = date_sold.split("T")[0] if "T" in date_sold else date_sold
+        # Format date as MM/DD/YYYY for UI display
+        raw_date = date_sold.split("T")[0] if "T" in date_sold else date_sold
+        try:
+            from datetime import datetime
+            date_obj = datetime.strptime(raw_date, "%Y-%m-%d")
+            project["dateSold"] = date_obj.strftime("%m/%d/%Y")  # 01/30/2025
+        except:
+            project["dateSold"] = raw_date  # Keep original if parsing fails
 
     project["hasDocuments"] = bool(safe_get(item, "projectDocument"))
 

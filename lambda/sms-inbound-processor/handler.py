@@ -619,30 +619,52 @@ def get_or_create_session(phone_number: str) -> str:
         Session ID (compatible with Bedrock agent pattern)
     """
     try:
-        # Query sessions by phone number
+        # Query ALL sessions by phone number (GSI has no sort key, so we must find newest in code)
+        # Increased limit to get all recent sessions, then find the most recent one
         response = sessions_table.query(
             IndexName='phone-index',
             KeyConditionExpression='phone_number = :phone',
             ExpressionAttributeValues={
                 ':phone': phone_number
             },
-            Limit=1,
-            ScanIndexForward=False  # Get most recent
+            Limit=50  # Get multiple sessions since GSI returns in random order
         )
 
-        # Check if active session exists
-        if response.get('Items'):
-            session = response['Items'][0]
-            session_id = session['session_id']
-
-            # Check if session is still valid (within 24 hours)
-            created_at = datetime.fromisoformat(session['created_at'])
-            if datetime.utcnow() - created_at < timedelta(hours=24):
-                logger.debug(f"Using existing session {session_id}")
-                return session_id
-
-        # Create new session with sanitized phone number
+        # Find the most recent ACTIVE session (within 24 hours)
         now = datetime.utcnow()
+        if response.get('Items'):
+            # Sort by created_at descending to find newest
+            sessions = sorted(
+                response['Items'],
+                key=lambda x: x.get('created_at', ''),
+                reverse=True
+            )
+
+            for session in sessions:
+                session_id = session['session_id']
+                try:
+                    created_at = datetime.fromisoformat(session['created_at'])
+                    age_hours = (now - created_at).total_seconds() / 3600
+
+                    # Check if session is still valid (within 24 hours)
+                    if age_hours < 24:
+                        # Update last_activity timestamp
+                        try:
+                            sessions_table.update_item(
+                                Key={'session_id': session_id},
+                                UpdateExpression='SET last_activity = :now',
+                                ExpressionAttributeValues={':now': now.isoformat()}
+                            )
+                        except Exception:
+                            pass  # Non-critical, continue
+
+                        logger.info(f"Reusing existing session {session_id} (age: {age_hours:.1f}h)")
+                        return session_id
+                except (ValueError, KeyError) as e:
+                    logger.debug(f"Skipping session {session_id}: {e}")
+                    continue
+
+        # No active session found - create new one
         sanitized_phone = sanitize_phone_for_session(phone_number)
         session_id = f"sms-{sanitized_phone}-{int(now.timestamp())}"
         ttl = int((now + timedelta(hours=24)).timestamp())
