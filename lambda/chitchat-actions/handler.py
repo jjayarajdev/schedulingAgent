@@ -196,9 +196,10 @@ Stay in your lane but be friendly about it.""",
     'general': """Respond naturally to whatever the user said.
 - Be friendly and conversational
 - If you're not sure what they need, ask a clarifying question
-- Gently steer toward project scheduling if appropriate
-Example: "Hmm, interesting! Not quite sure what you're looking for there - are you trying to check on a project or schedule something?"
-Be helpful and guide them."""
+- Offer concrete options: view projects, schedule appointment, get office number
+- NEVER say generic phrases like "I'm all about home improvement"
+Example: "I'm not quite sure what you need. Would you like to see your projects, schedule an appointment, or get the office number?"
+Be helpful and guide them with specific options."""
 }
 
 
@@ -243,8 +244,8 @@ Generate a natural, friendly response (2-3 sentences). Be specific and engaging 
             'bye': "See ya! Best of luck with all your home improvement plans. I'll be here whenever you need me!",
             'affirmative': "Perfect! So what would you like to do - check on some projects or get something scheduled?",
             'negative': "Totally get it! I'll be here whenever you're ready. Just say the word!",
-            'question': "That's an interesting one! I'm best at helping with project scheduling stuff though - got any home improvement projects I can help with?",
-            'general': "I'm all about those home improvement projects! Want to see what you've got going on or schedule something new?"
+            'question': "That's an interesting one! I'm best at helping with scheduling though. Would you like to check your projects or schedule an appointment?",
+            'general': "How can I help you today? I can show your projects, check available dates, or help schedule an appointment."
         }
         return fallbacks.get(action_type, fallbacks['general'])
 

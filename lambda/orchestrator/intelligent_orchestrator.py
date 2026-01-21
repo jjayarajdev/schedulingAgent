@@ -2595,8 +2595,8 @@ def orchestrate_intelligent_workflow(
                         }
                     )
 
-                state_manager.clear_state(session_id)
-                logger.info("[CONTINUATION] Workflow complete, state cleared")
+                state_manager.reset_workflow_state(session_id)
+                logger.info("[CONTINUATION] Workflow complete, state reset (memory preserved)")
             else:
                 # Update context with preserved values and selected date
                 new_context = {k: v for k, v in preserve_context.items() if v is not None}
@@ -2613,10 +2613,13 @@ def orchestrate_intelligent_workflow(
                     new_context['request_id'] = response_body['request_id']
                     logger.info(f"[CONTINUATION] Extracted request_id from reschedule dates: {response_body['request_id']}")
 
+                # Preserve project_mapping from existing state
+                existing_mapping = workflow_state.get('project_mapping', {}) if workflow_state else {}
                 state_manager.save_state(session_id, {
                     'workflow_type': cont_workflow_type,
                     'current_stage': next_stage,
-                    'context': new_context
+                    'context': new_context,
+                    'project_mapping': existing_mapping
                 })
                 logger.info(f"[CONTINUATION] State updated: stage={next_stage}")
 
@@ -3023,7 +3026,8 @@ You can say something like:
                         'context': {
                             'project_ids': project_ids,
                             'project_mapping': project_mapping
-                        }
+                        },
+                        'project_mapping': project_mapping  # Top-level for save_state()
                     })
                     logger.info(f"[CALENDAR-QUERY] Saved {len(project_ids)} scheduled project_ids to state")
 
@@ -3584,7 +3588,8 @@ What would you like to do?"""
                                     'context': {
                                         'project_ids': fetched_ids,
                                         'project_mapping': fetched_mapping
-                                    }
+                                    },
+                                    'project_mapping': fetched_mapping  # Top-level for save_state()
                                 })
                                 logger.info(f"[VOICE-AUTOFETCH] Saved {len(fetched_ids)} project_ids and mapping to workflow state")
 
@@ -4194,9 +4199,9 @@ What would you like to do?"""
                             project_name=project_name
                         )
 
-                    # Clear workflow state
-                    state_manager.clear_state(session_id)
-                    logger.info("[CANCEL] Cancellation complete, workflow state cleared")
+                    # Reset workflow state (preserves memory)
+                    state_manager.reset_workflow_state(session_id)
+                    logger.info("[CANCEL] Cancellation complete, workflow state reset (memory preserved)")
 
                     timing['total'] = time.time() - start_time
                     return {
@@ -4223,7 +4228,7 @@ What would you like to do?"""
 
         elif any(neg in user_lower for neg in negative_responses):
             logger.info("[CANCEL] User declined cancellation")
-            state_manager.clear_state(session_id)
+            state_manager.reset_workflow_state(session_id)
             timing['total'] = time.time() - start_time
             return {
                 'response': "No problem, I've cancelled the cancellation request. Your appointment remains scheduled. Is there anything else I can help with?",
@@ -4244,9 +4249,9 @@ What would you like to do?"""
         project_id = workflow_context.get('project_id', '')
         category = workflow_context.get('category', 'project')
 
-        # Clear workflow state
-        state_manager.clear_state(session_id)
-        logger.info(f"[WORKFLOW] Workflow state cleared for session {session_id}")
+        # Reset workflow state (preserves memory)
+        state_manager.reset_workflow_state(session_id)
+        logger.info(f"[WORKFLOW] Workflow state reset for session {session_id} (memory preserved)")
 
         if action_type == 'defer_workflow':
             response = "No problem! I've put the scheduling on hold for now."
@@ -4419,7 +4424,8 @@ What would you like to do?"""
                                 'project_mapping': fetched_mapping,
                                 'resolved_project_id': resolved_project_id,
                                 'category': search_category
-                            }
+                            },
+                            'project_mapping': fetched_mapping  # Top-level for save_state()
                         })
                         logger.info(f"[CATEGORY-RESOLVE] Saved project_mapping to workflow state")
                     else:
@@ -4428,6 +4434,32 @@ What would you like to do?"""
                     logger.warning(f"[CATEGORY-RESOLVE] No projects returned from list_projects")
             except Exception as fetch_err:
                 logger.error(f"[CATEGORY-RESOLVE] Error fetching projects: {fetch_err}")
+
+    # PRE-RESOLVE: Ensure project_id is resolved BEFORE Sonnet decision
+    # This handles: ordinals ("first project"), context refs ("this project"), projectNumbers ("9000489")
+    # Sonnet needs internal project_id to validate and make correct decisions
+    if 'entities' not in classification:
+        classification['entities'] = {}
+
+    # Source 1: resolved_project_id from ordinal/context detection (already internal ID)
+    if workflow_state:
+        context = workflow_state.get('context', {})
+        resolved_from_context = context.get('resolved_project_id')
+        if resolved_from_context and not classification['entities'].get('project_id'):
+            classification['entities']['project_id'] = resolved_from_context
+            logger.info(f"[PRE-RESOLVE] Using resolved_project_id from context: {resolved_from_context}")
+
+    # Source 2: projectNumber → internal project_id lookup (user said "schedule project 9000489")
+    if classification['entities'].get('project_id') and workflow_state:
+        raw_pid = str(classification['entities']['project_id'])
+        pm = workflow_state.get('project_mapping', {}) or workflow_state.get('context', {}).get('project_mapping', {})
+        if pm and raw_pid in pm:
+            info = pm[raw_pid]
+            resolved = info.get('project_id')
+            if resolved and resolved != raw_pid:
+                logger.info(f"[PRE-RESOLVE] projectNumber '{raw_pid}' → internal project_id '{resolved}'")
+                classification['entities']['project_id'] = resolved
+                classification['entities']['projectNumber'] = raw_pid  # Preserve original for display
 
     # Step 2: Intelligent decision using Sonnet 3.7
     # CONTEXT SWITCH FIX: When context switch just happened, skip the decision step
@@ -4605,13 +4637,13 @@ What would you like to do?"""
                               str(new_project_id) != str(old_project_id))
 
             if old_workflow_type and old_workflow_type != new_workflow_type:
-                logger.info(f"[WORKFLOW SWITCH] Clearing old '{old_workflow_type}' state - user starting new '{new_workflow_type}' workflow")
-                state_manager.clear_state(session_id)
-                workflow_state = None  # Reset local variable too
+                logger.info(f"[WORKFLOW SWITCH] Resetting old '{old_workflow_type}' state - user starting new '{new_workflow_type}' workflow")
+                state_manager.reset_workflow_state(session_id)
+                workflow_state = state_manager.get_state(session_id)  # Reload to get preserved project_mapping
             elif is_new_project and new_workflow_type in ['schedule_appointment', 'reschedule_appointment', 'cancel_appointment']:
-                logger.info(f"[WORKFLOW SWITCH] New project {new_project_id} detected (explicit workflow_type={classification.get('workflow_type')}) - clearing old workflow state for project {old_project_id}")
-                state_manager.clear_state(session_id)
-                workflow_state = None
+                logger.info(f"[WORKFLOW SWITCH] New project {new_project_id} detected (explicit workflow_type={classification.get('workflow_type')}) - resetting old workflow state for project {old_project_id}")
+                state_manager.reset_workflow_state(session_id)
+                workflow_state = state_manager.get_state(session_id)  # Reload to get preserved project_mapping
 
         # RESCHEDULE: Use get_rescheduler_slots instead of get_available_dates/get_time_slots
         # For already scheduled projects, the normal slots API returns "Job already requested"
@@ -4740,7 +4772,8 @@ What would you like to do?"""
                                 'context': {
                                     'project_ids': fetched_ids,
                                     'project_mapping': fetched_mapping
-                                }
+                                },
+                                'project_mapping': fetched_mapping  # Top-level for save_state()
                             })
 
                             # Now resolve project_index (supports negative indices)
@@ -5446,14 +5479,18 @@ What would you like to do?"""
                 project_id = response_body.get('project_id') or lambda_params.get('project_id')
                 logger.info(f"[WORKFLOW] Project {project_id} already scheduled - saving state for reschedule offer confirmation")
 
+                # Preserve project_mapping from existing state
+                existing_mapping = workflow_state.get('project_mapping', {}) if workflow_state else {}
                 # Save workflow state so we can handle "yes" confirmation
                 state_manager.save_state(session_id, {
                     'workflow_type': 'reschedule_appointment',
                     'current_stage': 'awaiting_reschedule_offer_confirmation',
                     'context': {
                         'project_id': project_id,
-                        'already_scheduled': True
+                        'already_scheduled': True,
+                        'project_mapping': existing_mapping
                     },
+                    'project_mapping': existing_mapping,
                     'conversation_summary': f"Project #{project_id} already scheduled - offered reschedule, awaiting user confirmation"
                 })
 
@@ -5479,6 +5516,8 @@ What would you like to do?"""
 
                 logger.info(f"[WORKFLOW] Setting awaiting_cancel_confirmation workflow state for project {project_id}, workflow_type={wf_type}")
 
+                # Preserve project_mapping from existing state
+                existing_mapping = workflow_state.get('project_mapping', {}) if workflow_state else {}
                 # Save workflow state for confirmation step
                 state_manager.save_state(session_id, {
                     'workflow_type': wf_type,  # Preserve reschedule_appointment if that's what started this
@@ -5490,8 +5529,10 @@ What would you like to do?"""
                         'project_type': project.get('projectType', project.get('ProjectType', '')),
                         'scheduled_date': project.get('scheduledDate', ''),
                         'city': project.get('city', project.get('address', {}).get('city', '')),
-                        'state': project.get('state', project.get('address', {}).get('state', ''))
+                        'state': project.get('state', project.get('address', {}).get('state', '')),
+                        'project_mapping': existing_mapping
                     },
+                    'project_mapping': existing_mapping,
                     'conversation_summary': f"User wants to {'reschedule' if is_reschedule else 'cancel'} project #{project_id}, awaiting confirmation"
                 })
 
@@ -5517,6 +5558,8 @@ What would you like to do?"""
                 project_city = workflow_state.get('context', {}).get('city', '') if workflow_state else ''
                 project_state = workflow_state.get('context', {}).get('state', '') if workflow_state else ''
 
+                # Preserve project_mapping from existing state
+                existing_mapping = workflow_state.get('project_mapping', {}) if workflow_state else {}
                 # Save workflow state for Step 2 (fetching dates when user confirms)
                 state_manager.save_state(session_id, {
                     'workflow_type': 'reschedule_appointment',
@@ -5526,8 +5569,10 @@ What would you like to do?"""
                         'category': project_category,
                         'project_type': project_type_ctx,
                         'city': project_city,
-                        'state': project_state
+                        'state': project_state,
+                        'project_mapping': existing_mapping
                     },
+                    'project_mapping': existing_mapping,
                     'conversation_summary': f"User reschedule for project #{project_id} - cancelled existing appointment, awaiting user confirmation to fetch available dates"
                 })
 
@@ -5626,15 +5671,18 @@ What would you like to do?"""
                             decision['update_workflow_state']['context'] = {}
                         decision['update_workflow_state']['context']['project_ids'] = project_ids
                         decision['update_workflow_state']['context']['project_mapping'] = project_mapping
+                        decision['update_workflow_state']['project_mapping'] = project_mapping  # Top-level for save_state()
                     else:
                         # Create update_workflow_state if Sonnet didn't provide one
+                        # IMPORTANT: project_mapping must be at top level AND in context for save_state() to find it
                         decision['update_workflow_state'] = {
                             'workflow_type': 'project_listing',
                             'current_stage': 'listing_projects',
                             'context': {
                                 'project_ids': project_ids,
                                 'project_mapping': project_mapping
-                            }
+                            },
+                            'project_mapping': project_mapping  # Top-level for save_state()
                         }
                         logger.info(f"[PROJECTS] Created workflow state with project_ids and project_mapping")
 
@@ -5695,7 +5743,8 @@ What would you like to do?"""
                                 'project_mapping': {viewed_project_id: viewed_project_info},
                                 'city': project_city,
                                 'state': project_state
-                            }
+                            },
+                            'project_mapping': {viewed_project_id: viewed_project_info}  # Top-level for save_state()
                         }
                         logger.info(f"[PROJECT] Created workflow state with project_id={viewed_project_id}, city={project_city}, state={project_state}")
 
@@ -6022,6 +6071,17 @@ What would you like to do?"""
                     new_state['context'][field] = existing_batch_context[field]
                     logger.info(f"[BATCH] Preserved batch field: {field}={existing_batch_context[field]}")
 
+        # CRITICAL: Preserve project_mapping - Sonnet's response never includes it
+        if workflow_state:
+            existing_mapping = workflow_state.get('project_mapping', {}) or workflow_state.get('context', {}).get('project_mapping', {})
+            if existing_mapping and not new_state.get('project_mapping'):
+                new_state['project_mapping'] = existing_mapping
+                if 'context' not in new_state:
+                    new_state['context'] = {}
+                if not new_state['context'].get('project_mapping'):
+                    new_state['context']['project_mapping'] = existing_mapping
+                logger.info(f"[STATE] Preserved project_mapping ({len(existing_mapping)} projects) in new_state")
+
         state_manager.save_state(session_id, new_state)
 
     # Step 5: Clear workflow if complete
@@ -6035,8 +6095,8 @@ What would you like to do?"""
         if lambda_action in actions_that_need_context:
             logger.info(f"[STATE] Keeping workflow state after {lambda_action} (project_mapping needed for follow-up)")
         else:
-            state_manager.clear_state(session_id)
-            logger.info("[OK] Workflow complete, state cleared")
+            state_manager.reset_workflow_state(session_id)
+            logger.info("[OK] Workflow complete, state reset (memory preserved)")
 
     timing['total'] = time.time() - start_time
 

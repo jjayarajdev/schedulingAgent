@@ -214,13 +214,13 @@ def _fallback_interpret(phrase: str, current_date: str) -> Dict[str, Any]:
             '_source': 'fallback'
         }
 
-    # Default: next 5 days
+    # Default: 2 days (balance between options and API performance)
     return {
         'start_date': tomorrow.strftime("%Y-%m-%d"),
-        'end_date': (tomorrow + timedelta(days=4)).strftime("%Y-%m-%d"),
+        'end_date': (tomorrow + timedelta(days=1)).strftime("%Y-%m-%d"),
         'is_past': False,
-        'date_type': 'week',
-        'interpretation': f'Defaulting to next 5 days from {tomorrow.strftime("%Y-%m-%d")}',
+        'date_type': 'day',
+        'interpretation': f'Defaulting to next 2 days from {tomorrow.strftime("%Y-%m-%d")}',
         '_source': 'fallback'
     }
 

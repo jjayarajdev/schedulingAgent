@@ -186,7 +186,10 @@ def _get_existing_credentials(table, from_phone: str) -> Optional[Dict]:
             'user_email': existing.get('user_email', ''),
             'timezone': existing.get('timezone', 'US/Eastern'),
             'exp': float(exp) if hasattr(exp, '__float__') else exp,
-            'updated_at': existing.get('updated_at', '')
+            'updated_at': existing.get('updated_at', ''),
+            # Support contact info
+            'support_number': existing.get('support_number', ''),
+            'support_email': existing.get('support_email', ''),
         }
 
         return credentials
@@ -248,7 +251,10 @@ def _call_auth_api(from_phone: str, to_phone: str) -> Dict:
                 'user_email': user.get('email', ''),
                 'timezone': data.get('timezone', 'US/Eastern'),
                 'exp': data.get('exp', 0),
-                'updated_at': datetime.utcnow().isoformat()
+                'updated_at': datetime.utcnow().isoformat(),
+                # Support contact info from API
+                'support_number': data.get('support_number', ''),
+                'support_email': data.get('support_email_1', ''),
             }
 
             return credentials
@@ -297,7 +303,10 @@ def _store_credentials(table, phone_number: str, credentials: Dict):
             'timezone': credentials.get('timezone', 'US/Eastern'),
             'exp': credentials.get('exp', 0),
             'updated_at': credentials.get('updated_at', datetime.utcnow().isoformat()),
-            'ttl': ttl
+            'ttl': ttl,
+            # Support contact info
+            'support_number': credentials.get('support_number', ''),
+            'support_email': credentials.get('support_email', ''),
         }
 
         table.put_item(Item=item)

@@ -263,9 +263,15 @@ NEVER SAY:
 - "I'd be happy to" / "Certainly" / "Absolutely" (too formal)
 - "Here's what I found" (just say it)
 
+CRITICAL - NEVER HALLUCINATE:
+- ONLY mention technician/installer names if they appear in the data
+- NEVER invent or guess names (like "Alice", "Jake", "Bob")
+- If user mentions a name not in the data, say "I don't see a technician name in your project details"
+- Stick strictly to facts in the provided data
+
 GOOD EXAMPLES:
 "You've got 3 projects lined up - a kitchen remodel, deck work, and some plumbing. What should we tackle?"
-"Good news - your deck install is all set for the 15th, morning slot. Jake will be there around 8."
+"Good news - your deck install is all set for January 15th at 8 AM."
 "Got 5 open dates next week. Tuesday and Thursday look best weather-wise."
 
 BAD EXAMPLES (don't do this):
@@ -357,7 +363,7 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
         if action == 'list_projects':
             projects = response_body.get('projects', [])
             if not projects:
-                return "Hmm, I don't see any projects in your account yet. Once you have some, I can help you schedule them!"
+                return "I don't see any projects in your account yet. If you recently received a call about scheduling, your project may still be processing. Please check back in a few minutes, or contact customer service for assistance."
 
             # Prepare structured data
             result = {
@@ -1734,8 +1740,10 @@ def route_request(
     can_call_direct = classification.get('can_call_direct', False)
     extracted_params = classification.get('params') or {}
 
-    # Merge resolved entities with extracted params (resolved entities take precedence)
-    merged_params = {**extracted_params, **resolved_entities}
+    # Merge resolved entities with extracted params
+    # IMPORTANT: Extracted params (from user's explicit input) take precedence over resolved entities (from context)
+    # e.g., "schedule project 9000489" should use 9000489, not last_project from context
+    merged_params = {**resolved_entities, **extracted_params}
 
     timing['classification'] = time.time() - start_time
 

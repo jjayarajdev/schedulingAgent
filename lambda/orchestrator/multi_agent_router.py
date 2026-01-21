@@ -199,8 +199,8 @@ def _route_single_agent(
                     'customer_id': session_attributes['customer_id'],
                     'client_id': session_attributes['client_id'],
                     'pf_bearer_token': session_attributes['pf_bearer_token'],
-                    **classifier_params_filtered,  # Include classifier params (filtered)
-                    **entities  # Include resolved entities (take precedence over classifier)
+                    **entities,  # Context-resolved entities (fallback)
+                    **classifier_params_filtered  # Classifier params take precedence (user's explicit input)
                 }
 
                 lambda_response = call_lambda_directly(action, lambda_params)

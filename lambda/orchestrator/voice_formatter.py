@@ -348,7 +348,7 @@ def _format_projects_for_voice(data: Dict) -> str:
     count = len(projects)
 
     if count == 0:
-        return "I don't see any projects for you right now."
+        return "I don't see any projects in your account yet. If you recently received a call about scheduling, your project may still be processing."
 
     if count == 1:
         p = projects[0]
@@ -681,7 +681,7 @@ def format_projects_summary_for_voice(projects: List[Dict], voice_context: Optio
         total = summary['total']
 
         if total == 0:
-            return "I don't see any projects for you right now."
+            return "I don't see any projects in your account yet. If you recently received a call about scheduling, your project may still be processing."
 
         if total == 1:
             project = projects[0]

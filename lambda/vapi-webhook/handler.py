@@ -74,28 +74,14 @@ lambda_client = boto3.client('lambda', region_name=ORCHESTRATOR_REGION)
 # Session cache (in-memory for Lambda warm starts)
 _session_cache = {}
 
-# Filler messages for longer waits (no 'quick' - GPT handles initial acknowledgment)
+# Filler messages - SIMPLIFIED
+# Only used for genuinely slow operations (12s+)
+# GPT is instructed to be SILENT before tool calls, so no quick acknowledgments needed
 FILLER_MESSAGES = {
-    'action_oriented': [
-        "Running through the details now.",
-        "Just cross-referencing a few things.",
-        "Checking the schedule as we speak.",
-        "Looking into that right now.",
-        "Scanning through the available options.",
-    ],
     'warm': [
-        "Bear with me for just a sec.",
-        "Let me take a quick look at that for you.",
-        "Hang tight, I'm on it.",
-    ],
-    'reassuring': [
-        "Still here — just making sure I get this right.",
-        "Haven't forgotten about you — working on it.",
-        "I appreciate you holding on.",
-        "Right with you — just a moment more.",
-        "This is taking a moment longer than usual — thanks for sticking with me.",
-        "Still pulling things together — shouldn't be much longer.",
-        "Almost there — just finishing up.",
+        "Still working on that.",
+        "Almost there.",
+        "Just a moment more.",
     ]
 }
 
@@ -104,30 +90,20 @@ def get_tool_messages():
     """
     Generate tool messages for VAPI tool calls.
 
-    Strategy:
-    - GPT-4o says brief acknowledgment immediately (guided by system prompt)
-    - Delayed messages kick in only for longer waits (8s+) to avoid doubling
+    Strategy (CONTEXTUAL):
+    - Model provides SHORT contextual acknowledgment (e.g., "Checking your projects.")
+    - Only one backup filler at 15s for genuinely slow operations
+    - Tool timeout set to 45s in server config
     """
     return [
-        # 8s - First reassurance (GPT's filler done by now)
+        # 15s - Single backup filler only for very slow operations
+        # Model's contextual acknowledgment handles the initial wait
         {
             'type': 'request-response-delayed',
-            'content': random.choice(FILLER_MESSAGES['action_oriented']),
-            'timingMilliseconds': 8000
-        },
-        # 15s - Warm message for longer waits
-        {
-            'type': 'request-response-delayed',
-            'content': random.choice(FILLER_MESSAGES['warm']),
+            'content': "Still working on that.",
             'timingMilliseconds': 15000
         },
-        # 25s - Reassuring for very long waits
-        {
-            'type': 'request-response-delayed',
-            'content': random.choice(FILLER_MESSAGES['reassuring']),
-            'timingMilliseconds': 25000
-        },
-        # Failed message
+        # Failed message - for actual failures
         {
             'type': 'request-failed',
             'content': "I had some trouble with that. Could you try asking again?"
@@ -319,13 +295,24 @@ def generate_dynamic_greeting(client_name: str, user_name: str = None) -> str:
     return greeting
 
 
-def create_assistant_config_response(first_message: str) -> Dict:
+def create_assistant_config_response(first_message: str, support_number: str = '', client_name: str = 'ProjectForce') -> Dict:
     """
     Create response with customized assistant configuration.
 
     Used at call start to return dynamic greeting.
     Returns full assistant config with voice, model, tools, etc.
+
+    Args:
+        first_message: The greeting message
+        support_number: Client's support phone number for escalation
+        client_name: Client company name
     """
+    # Format support number for voice (spell out digits)
+    support_number_voice = ''
+    if support_number:
+        # Format as "2-0-3-8-9-4-6-5-9-9" for clear voice reading
+        digits = ''.join(c for c in support_number if c.isdigit())
+        support_number_voice = '-'.join(digits) if digits else ''
     assistant_config = {
         'name': 'ProjectForce Scheduling',
         'voice': {
@@ -335,12 +322,12 @@ def create_assistant_config_response(first_message: str) -> Dict:
         'model': {
             'model': 'gpt-4o',
             'provider': 'openai',
-            'temperature': 0.3,
+            'temperature': 0,
             'tools': [{
                 'type': 'function',
                 'function': {
                     'name': 'projectforce_api',
-                    'description': 'SILENT CALL - Say NOTHING before calling. No "hold on", "let me check", "one moment". Just call silently, then speak the result. Use for: listing projects, scheduling, rescheduling, canceling, checking status, getting available dates/times, weather forecasts. Pass user EXACT words as message.',
+                    'description': 'Say a SHORT contextual phrase (2-4 words) like "Checking your projects" or "Looking at dates" before calling. NO generic phrases like "hold on" or "just a sec". Use for: listing projects, scheduling, rescheduling, canceling, checking status, getting available dates/times, weather forecasts. Pass user EXACT words as message.',
                     'parameters': {
                         'type': 'object',
                         'required': ['message', 'action'],
@@ -357,22 +344,67 @@ def create_assistant_config_response(first_message: str) -> Dict:
                         }
                     }
                 },
+                'async': False,
+                'server': {
+                    'timeoutSeconds': 60
+                },
                 'messages': get_tool_messages()
             }],
             'messages': [{
                 'role': 'system',
-                'content': '''## RULE #1 - BRIEF ACKNOWLEDGMENT ONLY
+                'content': '''## RULE #1 - CONTEXTUAL ACKNOWLEDGMENT BEFORE TOOL CALLS
 
-Before calling a tool, say ONE short friendly phrase (max 3 words):
-- "Sure thing!"
-- "Got it!"
-- "Absolutely!"
-- "You got it!"
+Before calling a tool, say a SHORT (2-4 words) contextual phrase that tells the user what you're doing:
 
-Then immediately call the tool. NO extra words.
+EXAMPLES BY ACTION:
+- list_projects → "Pulling up your projects."
+- get_project_details → "Getting those details."
+- get_available_dates → "Checking available dates."
+- get_time_slots → "Looking at time slots."
+- schedule_project → "Scheduling that now."
+- reschedule_appointment → "Rescheduling for you."
+- cancel_appointment → "Canceling that appointment."
+- get_weather → "Checking the weather."
 
-WRONG: "Sure, let me check on that for you. One moment please."
-RIGHT: "Sure thing!" [call tool]
+WRONG (generic/repetitive):
+- "Hold on a sec" / "Just a moment" / "Give me a moment" / "1 moment"
+
+RIGHT (contextual):
+- "Pulling up your projects." [tool call]
+- "Checking dates for you." [tool call]
+
+Keep it SHORT and RELEVANT to what you're doing.
+
+---
+
+## RULE #2 - SPEAK THE TOOL RESULT
+
+After a tool call completes, the result contains a "response" field. You MUST speak that response.
+Do NOT make up your own response. Do NOT say generic phrases.
+
+Tool returns: {"response": "I don't see any projects for you right now."}
+YOU SAY: "I don't see any projects for you right now."
+
+Tool returns: {"response": "You have 3 projects..."}
+YOU SAY: "You have 3 projects..."
+
+NEVER ignore the tool response. NEVER say "I'm all about home improvement" or similar generic phrases.
+
+---
+
+## RULE #3 - AI DISCLOSURE (CRITICAL)
+
+If customer asks "Am I talking to AI?", "Are you a robot?", "Is this a real person?":
+HONEST ANSWER: "Yes, I'm J, an AI assistant. I help with scheduling appointments. Would you like me to connect you with our office instead?"
+
+NEVER dodge this question. NEVER pretend to be human.
+
+---
+
+## RULE #4 - ESCALATION TO HUMAN
+
+If customer asks for "representative", "real person", "customer service", "office number":
+''' + (f'''RESPONSE: "I can give you our office contact. For {client_name}, you can reach them at {support_number_voice}. Would you like me to repeat that?"''' if support_number_voice else '''RESPONSE: "I don't have the office number available right now, but you can check your confirmation email or the company website for contact details."''') + '''
 
 ---
 
@@ -540,26 +572,37 @@ If customer has several projects, summarize briefly:
 - Never interrupt the customer while they're speaking
 - Never provide information you don't have
 
-## ABSOLUTELY NO FILLER PHRASES - CRITICAL
+## HANDLING SPECIAL SITUATIONS
 
-The system automatically plays waiting messages. You must stay COMPLETELY SILENT before tool calls.
+### Dropped Call Recovery
+If customer mentions "call dropped", "got disconnected", "was just talking to you":
+- Acknowledge it: "Sorry about that! Let me pick up where we left off."
+- Try to resume their request
 
-BANNED PHRASES (never say these):
-- "Hold on...", "One moment...", "Just a sec...", "Let me check..."
-- "Sure thing...", "Give me a moment...", "Checking now..."
-- "One second...", "Bear with me...", "Let me look..."
-- ANY phrase indicating you're about to do something
+### Frustrated Customer
+If customer sounds frustrated or repeats themselves:
+- Don't repeat the same response
+- Acknowledge their frustration: "I understand this is frustrating."
+- Offer concrete help or escalation: "Would you like me to give you the office number so you can speak with someone directly?"
 
-When calling the tool:
-1. Say NOTHING before the call
-2. Call the tool in complete silence
-3. Wait for the result
-4. ONLY THEN speak the result
+### No Projects Found
+If tool returns no projects and customer insists they were told to call:
+- Acknowledge: "I'm sorry, I don't see a project in our system yet. It may not have been entered yet."
+''' + (f'''- Offer help: "You can call the office at {support_number_voice} to get this sorted out."''' if support_number_voice else '''- Offer help: "You might want to contact the store or check your confirmation email for the office contact."''') + '''
 
-The user will hear system-generated waiting messages. You adding your own creates annoying repetition.
+### REMINDER: CONTEXTUAL ACKNOWLEDGMENTS
+Before calling a tool, say a SHORT (2-4 words) contextual phrase:
 
-WRONG: "Hold on a sec." [tool call] → User hears: "Hold on a sec. Sure thing let me look." (doubled!)
-CORRECT: [silent tool call] → User hears only: "Sure thing let me look." (clean!)'''
+GOOD EXAMPLES:
+- "Pulling up your projects." (for list_projects)
+- "Checking available dates." (for get_available_dates)
+- "Scheduling that now." (for schedule_project)
+
+**BANNED (too generic/repetitive):**
+- "1 moment", "One moment", "Just a moment"
+- "Just a sec", "Hold on", "Give me a moment"
+
+Make it SHORT and RELEVANT to the action.'''
             }]
         },
         'transcriber': {
@@ -573,7 +616,9 @@ CORRECT: [silent tool call] → User hears only: "Sure thing let me look." (clea
         'startSpeakingPlan': {
             'waitSeconds': 0.4,
             'smartEndpointingEnabled': 'livekit'
-        }
+        },
+        'backgroundDenoisingEnabled': True,  # Filter caller's background noise
+        'silenceTimeoutSeconds': 30  # Allow 30s silence before ending call
     }
 
     return {
@@ -617,14 +662,15 @@ def handle_assistant_request(message: Dict) -> Dict:
             if credentials:
                 client_name = credentials.get('client_name', 'ProjectForce')
                 user_name = credentials.get('user_name', '')
-                logger.info(f"[VAPI] Dynamic greeting for client: {client_name}")
+                support_number = credentials.get('support_number', '')
+                logger.info(f"[VAPI] Dynamic greeting for client: {client_name}, support: {support_number}")
                 greeting = generate_dynamic_greeting(client_name, user_name)
-                return create_assistant_config_response(greeting)
+                return create_assistant_config_response(greeting, support_number, client_name)
             else:
                 # Auth failed - use default greeting
                 logger.warning(f"[VAPI] Auth failed at call start, using default greeting")
                 greeting = generate_dynamic_greeting('ProjectForce')
-                return create_assistant_config_response(greeting)
+                return create_assistant_config_response(greeting, '', 'ProjectForce')
 
         logger.info(f"[VAPI] User message: {user_message[:100]}")
 
@@ -678,20 +724,21 @@ def handle_assistant_started(message: Dict) -> Dict:
         if credentials:
             client_name = credentials.get('client_name', 'ProjectForce')
             user_name = credentials.get('user_name', '')
-            logger.info(f"[VAPI] Dynamic greeting for: {user_name} @ {client_name}")
+            support_number = credentials.get('support_number', '')
+            logger.info(f"[VAPI] Dynamic greeting for: {user_name} @ {client_name}, support: {support_number}")
             greeting = generate_dynamic_greeting(client_name, user_name)
-            return create_assistant_config_response(greeting)
+            return create_assistant_config_response(greeting, support_number, client_name)
         else:
             # Auth failed - use default greeting
             logger.warning(f"[VAPI] Auth failed at assistant.started, using default greeting")
             greeting = generate_dynamic_greeting('ProjectForce')
-            return create_assistant_config_response(greeting)
+            return create_assistant_config_response(greeting, '', 'ProjectForce')
 
     except Exception as e:
         logger.error(f"[VAPI] Error in assistant.started: {e}", exc_info=True)
         # Return default greeting on error
         greeting = generate_dynamic_greeting('ProjectForce')
-        return create_assistant_config_response(greeting)
+        return create_assistant_config_response(greeting, '', 'ProjectForce')
 
 
 def handle_conversation_update(message: Dict) -> Dict:

@@ -137,7 +137,9 @@ class WorkflowStateManager:
 
     def clear_state(self, session_id: str) -> bool:
         """
-        Clear workflow state when workflow completes or is cancelled
+        Clear workflow state when workflow completes or is cancelled.
+        WARNING: This deletes EVERYTHING including project_mapping and viewed_projects.
+        Use reset_workflow_state() instead if you want to preserve memory.
         """
         try:
             self.table.delete_item(Key={'session_id': session_id})
@@ -146,6 +148,65 @@ class WorkflowStateManager:
 
         except Exception as e:
             logger.error(f"Error clearing workflow state: {e}")
+            return False
+
+    def reset_workflow_state(self, session_id: str) -> bool:
+        """
+        Reset workflow state while PRESERVING memory (project_mapping, viewed_projects, last_action).
+
+        Use this after completing an action (scheduling, canceling, etc.) to allow
+        the user to continue with other projects without losing context.
+
+        Preserves:
+            - project_mapping (ordinal -> project_id mapping from last list)
+            - viewed_projects (history of projects user has looked at)
+            - context.last_project_id (most recently referenced project)
+            - last_action (what was just completed)
+
+        Clears:
+            - workflow_type (ready for new workflow)
+            - current_stage (reset to initial)
+            - conversation_summary
+            - pending_confirmation
+        """
+        try:
+            state = self.get_state(session_id)
+            if not state:
+                logger.info(f"[RESET] No state to reset for session {session_id}")
+                return True
+
+            # Preserve memory fields
+            preserved = {
+                'project_mapping': state.get('project_mapping', {}),
+                'viewed_projects': state.get('viewed_projects', []),
+                'last_action': state.get('last_action', ''),
+            }
+
+            # Preserve last_project_id from context if available
+            context = state.get('context', {})
+            last_project_id = context.get('last_project_id', '')
+
+            # Create fresh state with preserved memory
+            new_state = {
+                'workflow_type': None,
+                'current_stage': None,
+                'context': {
+                    'last_project_id': last_project_id
+                },
+                'project_mapping': preserved['project_mapping'],
+                'viewed_projects': preserved['viewed_projects'],
+                'last_action': preserved['last_action'],
+            }
+
+            success = self.save_state(session_id, new_state)
+
+            if success:
+                logger.info(f"[RESET] Reset workflow state for {session_id}, preserved {len(preserved['project_mapping'])} project mappings, {len(preserved['viewed_projects'])} viewed projects")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error resetting workflow state: {e}")
             return False
 
     def add_viewed_project(self, session_id: str, project_info: Dict[str, Any]) -> bool:
