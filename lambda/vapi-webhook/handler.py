@@ -48,6 +48,14 @@ except ImportError:
     PHONE_AUTH_AVAILABLE = False
     logger.warning("phone_auth module not available")
 
+# Import voice session cache for project preloading
+try:
+    from voice_session_cache import preload_projects_for_voice, get_cached_projects
+    VOICE_CACHE_AVAILABLE = True
+except ImportError:
+    VOICE_CACHE_AVAILABLE = False
+    logger.warning("voice_session_cache module not available")
+
 # Configuration
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
 AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
@@ -664,6 +672,22 @@ def handle_assistant_request(message: Dict) -> Dict:
                 user_name = credentials.get('user_name', '')
                 support_number = credentials.get('support_number', '')
                 logger.info(f"[VAPI] Dynamic greeting for client: {client_name}, support: {support_number}")
+
+                # PRELOAD PROJECTS at call start for faster voice responses
+                if VOICE_CACHE_AVAILABLE:
+                    try:
+                        from phone_auth import normalize_phone
+                        normalized_phone = normalize_phone(from_phone)
+                        preload_result = preload_projects_for_voice(
+                            phone_number=normalized_phone,
+                            client_id=credentials.get('client_id', ''),
+                            customer_id=credentials.get('user_id', ''),
+                            bearer_token=credentials.get('bearer_token', '')
+                        )
+                        logger.info(f"[VAPI] Preload result: {preload_result.get('project_count', 0)} projects cached")
+                    except Exception as e:
+                        logger.warning(f"[VAPI] Preload failed (non-blocking): {e}")
+
                 greeting = generate_dynamic_greeting(client_name, user_name)
                 return create_assistant_config_response(greeting, support_number, client_name)
             else:
@@ -685,11 +709,12 @@ def handle_assistant_request(message: Dict) -> Dict:
 
         logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, name={credentials.get('user_name')}")
 
-        # Call orchestrator
+        # Call orchestrator (include from_phone for voice cache lookup)
         response_text = call_orchestrator(
             message=user_message,
             call_id=call_id,
-            credentials=credentials
+            credentials=credentials,
+            from_phone=from_phone
         )
 
         return create_assistant_response(response_text)
@@ -804,11 +829,12 @@ def handle_function_call(message: Dict) -> Dict:
 
         logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, action={action}")
 
-        # Call orchestrator with the user's message
+        # Call orchestrator with the user's message (include from_phone for voice cache lookup)
         response_text = call_orchestrator(
             message=user_message,
             call_id=call_id,
-            credentials=credentials
+            credentials=credentials,
+            from_phone=from_phone
         )
 
         return create_function_response({
@@ -910,11 +936,12 @@ def handle_tool_calls(message: Dict) -> Dict:
 
             logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, action={action}")
 
-            # Call orchestrator
+            # Call orchestrator (include from_phone for voice cache lookup)
             response_text = call_orchestrator(
                 message=user_message,
                 call_id=call_id,
-                credentials=credentials
+                credentials=credentials,
+                from_phone=from_phone
             )
 
             results.append({
@@ -1001,7 +1028,7 @@ def authenticate_caller(from_phone: str, to_phone: str) -> Optional[Dict]:
         return None
 
 
-def call_orchestrator(message: str, call_id: str, credentials: Dict) -> str:
+def call_orchestrator(message: str, call_id: str, credentials: Dict, from_phone: str = '') -> str:
     """
     Call the orchestrator Lambda with the user's message.
     """
@@ -1015,11 +1042,12 @@ def call_orchestrator(message: str, call_id: str, credentials: Dict) -> str:
                 'pf_client_id': credentials.get('client_id', ''),
                 'pf_user_id': credentials.get('user_id', ''),
                 'pf_user_name': credentials.get('user_name', ''),
-                'channel': 'voice'
+                'channel': 'voice',
+                'from_phone': from_phone  # For voice cache lookup in scheduling-actions
             })
         }
 
-        logger.info(f"[VAPI] Calling orchestrator: {ORCHESTRATOR_LAMBDA}")
+        logger.info(f"[VAPI] Calling orchestrator: {ORCHESTRATOR_LAMBDA}, from_phone={'***'+from_phone[-4:] if from_phone else 'empty'}")
 
         response = lambda_client.invoke(
             FunctionName=ORCHESTRATOR_LAMBDA,

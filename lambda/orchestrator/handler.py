@@ -57,6 +57,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         pf_user_name = body.get('pf_user_name', '')  # User's display name for personalization
         channel = body.get('channel', 'chat')  # 'voice' or 'chat'
         caller_phone = body.get('caller_phone', '')  # For Vapi voice calls
+        from_phone = body.get('from_phone', '')  # For voice cache lookup in scheduling-actions
 
         # Validate required parameters
         if not message:
@@ -79,7 +80,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if not pf_client_id or not pf_user_id:
             return create_error_response(400, "Missing authentication parameters: pf_client_id and pf_user_id required")
 
-        logger.info(f"[REQUEST] session_id={session_id}, message='{message[:50]}...', channel={channel}")
+        logger.info(f"[REQUEST] session_id={session_id}, message='{message[:50]}...', channel={channel}, from_phone={'***'+from_phone[-4:] if from_phone else 'empty'}")
 
         # WELCOME FLOW: Detect __WELCOME__ signal from frontend after login
         logger.info(f"[DEBUG] message repr={repr(message)}, len={len(message)}, startswith='__'={message.startswith('__')}")
@@ -138,7 +139,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             client_id=pf_client_id,
             pf_bearer_token=pf_token,
             conversation_history=conversation_history,
-            channel=channel
+            channel=channel,
+            from_phone=from_phone  # For voice cache lookup in scheduling-actions
         )
 
         # Extract response components

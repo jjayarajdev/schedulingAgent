@@ -54,6 +54,17 @@ try:
 except Exception as e:
     print(f"[DATE-LLM] Failed to load module: {type(e).__name__}: {e}")
 
+# Voice session cache for preloaded projects (optional)
+VOICE_CACHE_AVAILABLE = False
+VOICE_CACHE_TABLE = os.environ.get('VOICE_CREDENTIALS_TABLE', f'pf-syn-phone-credentials-{os.environ.get("ENVIRONMENT", "dev")}')
+try:
+    import boto3
+    _dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
+    VOICE_CACHE_AVAILABLE = True
+    print(f"[VOICE-CACHE] DynamoDB available, table: {VOICE_CACHE_TABLE}")
+except Exception as e:
+    print(f"[VOICE-CACHE] DynamoDB not available: {type(e).__name__}: {e}")
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -499,6 +510,65 @@ def extract_parameters(event: Dict) -> Dict[str, Any]:
         logger.error(f"Error extracting parameters: {str(e)}")
         return {}
 
+
+def get_voice_cached_projects(phone_number: str) -> Optional[Dict]:
+    """
+    Get cached projects from voice session cache (DynamoDB).
+
+    Used for voice channel optimization - projects preloaded at call start.
+
+    Args:
+        phone_number: Normalized phone number (E.164 format)
+
+    Returns:
+        Dict with 'projects' list and 'project_mapping' dict, or None if not cached
+    """
+    if not VOICE_CACHE_AVAILABLE or not phone_number:
+        return None
+
+    try:
+        table = _dynamodb.Table(VOICE_CACHE_TABLE)
+        response = table.get_item(Key={'phone_number': phone_number})
+
+        if 'Item' not in response:
+            logger.info(f"[VOICE-CACHE] No cache for ***{phone_number[-4:]}")
+            return None
+
+        item = response['Item']
+
+        # Check if projects are cached
+        projects_json = item.get('projects_cache')
+        if not projects_json:
+            logger.info(f"[VOICE-CACHE] No projects in cache for ***{phone_number[-4:]}")
+            return None
+
+        # Check TTL
+        projects_ttl = item.get('projects_ttl', 0)
+        if hasattr(projects_ttl, '__float__'):
+            projects_ttl = float(projects_ttl)
+
+        now = datetime.utcnow().timestamp()
+        if projects_ttl and now > projects_ttl:
+            logger.info(f"[VOICE-CACHE] Cache expired for ***{phone_number[-4:]}")
+            return None
+
+        # Parse cached data
+        projects = json.loads(projects_json)
+        mapping_json = item.get('project_mapping', '{}')
+        project_mapping = json.loads(mapping_json)
+
+        logger.info(f"[VOICE-CACHE] Cache hit for ***{phone_number[-4:]}: {len(projects)} projects")
+
+        return {
+            'projects': projects,
+            'project_mapping': project_mapping
+        }
+
+    except Exception as e:
+        logger.warning(f"[VOICE-CACHE] Failed to get cache: {e}")
+        return None
+
+
 def make_api_request_with_retry(
     method: str,
     url: str,
@@ -750,6 +820,7 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
     3. Pre-formats for UI consumption (agent does zero formatting)
     4. Uses connection pooling + compression
     5. Supports filtering by status, category, and projectType
+    6. VOICE: Uses preloaded cache for instant response (no API call)
 
     Before: ~2000 lines to agent  agent formats  ~200 lines to UI
     After: ~200 lines to agent (already formatted)  pass-through to UI
@@ -770,6 +841,71 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
     # Start timing for monitoring
     import time
     start_time = time.time()
+
+    # VOICE OPTIMIZATION: Check preloaded cache first (instant response)
+    # Use cache for ALL voice requests, apply filters locally
+    from_phone = params.get('_from_phone', '')
+    if from_phone:
+        # Normalize phone number to match cache key format (digits only, no country code)
+        normalized_phone = ''.join(c for c in from_phone if c.isdigit())
+        if len(normalized_phone) == 11 and normalized_phone.startswith('1'):
+            normalized_phone = normalized_phone[1:]  # Remove US country code
+        logger.info(f"[VOICE-CACHE] Looking up cache for normalized phone: ***{normalized_phone[-4:]}")
+
+        # Voice channel - try cache first
+        cached = get_voice_cached_projects(normalized_phone)
+        if cached:
+            projects = cached.get('projects', [])
+            original_count = len(projects)
+
+            # Apply filters locally to cached projects (same logic as API path)
+            if filter_status or filter_category or filter_project_type or filter_scheduled_month or filter_scheduled_date:
+                filtered_projects = []
+                for project in projects:
+                    include = True
+
+                    if filter_status:
+                        project_status = project.get('status', '').lower()
+                        filter_status_lower = filter_status.lower()
+                        # Handle 'schedulable' status (New + Ready To Schedule)
+                        if filter_status_lower == 'schedulable':
+                            if project_status not in ['new', 'ready to schedule']:
+                                include = False
+                        elif filter_status_lower not in project_status:
+                            include = False
+
+                    if include and filter_category:
+                        project_category = project.get('category', '').lower()
+                        if filter_category.lower() not in project_category:
+                            include = False
+
+                    if include and filter_project_type:
+                        project_type = project.get('projectType', '').lower()
+                        if filter_project_type.lower() not in project_type:
+                            include = False
+
+                    if include and filter_scheduled_month:
+                        scheduled_date = project.get('scheduledDate', '')
+                        if not scheduled_date or filter_scheduled_month not in scheduled_date:
+                            include = False
+
+                    if include and filter_scheduled_date:
+                        scheduled_date = project.get('scheduledDate', '')
+                        if scheduled_date != filter_scheduled_date:
+                            include = False
+
+                    if include:
+                        filtered_projects.append(project)
+
+                projects = filtered_projects
+
+            cache_duration = (time.time() - start_time) * 1000
+            logger.info(f"[VOICE-CACHE] Returning {len(projects)}/{original_count} cached projects (filtered) in {cache_duration:.2f}ms")
+
+            # Format response same as API path
+            formatted_response = format_projects_for_agent(projects, customer_id, 200)
+            formatted_response['_source'] = 'voice_cache'
+            return formatted_response
 
     # Track PF API HTTP status code
     pf_http_status_code = 200  # Default for mock/success
@@ -966,10 +1102,163 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
     # Agent receives this ready for UI - NO additional formatting needed
     return formatted_response
 
+
+def _build_project_details_response(
+    project: Dict,
+    project_id: str,
+    client_id: str,
+    customer_id: str,
+    extra_key: str = None,
+    extra_value: str = None
+) -> Dict[str, Any]:
+    """
+    Build project details response from a project dict.
+
+    Used by both API path and voice cache path to ensure consistent response format.
+    """
+    # Extract fields from the project (works with both API and cached format)
+    project_id_str = project.get("id", project_id)
+    project_number = project.get("projectNumber", "")
+    status = project.get("status", "Unknown")
+    project_category = project.get("category", "Not specified")
+    project_type = project.get("projectType", "Not specified")
+
+    # Address information - handle both formats
+    address_info = project.get("address", {})
+    address1 = address_info.get("address1", address_info.get("address_1", ""))
+    city = address_info.get("city", "")
+    state = address_info.get("state", "")
+    zipcode = address_info.get("zipcode", "")
+
+    # Build full address
+    city_state_zip = f"{city}, {state} {zipcode}".strip()
+    if city_state_zip and city_state_zip != ", ":
+        full_address = f"{address1}, {city_state_zip}" if address1 else city_state_zip
+    else:
+        full_address = address1 or "Address not available"
+
+    # Scheduling information - handle both formats
+    scheduled_start = project.get("scheduledDate", "")
+    scheduled_end = project.get("scheduledEndDate", "")
+    scheduled_time = project.get("scheduledTime", "")
+
+    if scheduled_start and scheduled_end:
+        scheduling_status = f"Scheduled from {scheduled_start} to {scheduled_end}"
+    elif scheduled_start:
+        if scheduled_time:
+            scheduling_status = f"Scheduled for {scheduled_start} at {scheduled_time}"
+        else:
+            scheduling_status = f"Scheduled for {scheduled_start}"
+    else:
+        scheduling_status = "Not yet scheduled"
+
+    # Store information
+    store_info = project.get("store", {})
+    store_number = store_info.get("storeNumber", "")
+    store_name = store_info.get("storeName", "")
+    store_display = f"{store_name} (#{store_number})" if store_number and store_name else store_name or store_number or "Not specified"
+
+    # Installer/technician information - handle both formats
+    installer_info = project.get("installer", {})
+    technician_name = installer_info.get("name", project.get("installerName", ""))
+    technician_id = installer_info.get("id", "")
+
+    # Format technician display
+    if technician_name:
+        technician_display = f"{technician_name}"
+        if technician_id:
+            technician_display += f" (ID: {technician_id})"
+    else:
+        technician_display = "Not assigned"
+
+    # Get additional fields
+    date_sold = project.get("dateSold", "")
+
+    # Create a human-readable summary for the agent
+    summary = f"""Project #{project_number or 'Unknown'} - {project_category} ({project_type})
+Status: {status}
+Installation Address: {full_address}
+Store: {store_display}
+{scheduling_status}"""
+
+    if technician_name:
+        summary += f"\nTechnician: {technician_display}"
+
+    if date_sold:
+        summary += f"\nSold Date: {date_sold}"
+
+    # Build response
+    response = {
+        "action": "get_project_details",
+        "project": project,
+
+        # Legacy fields for backward compatibility
+        "project_id": project_id_str,
+        "project_number": project_number,
+        "client_id": client_id,
+        "customer_id": customer_id,
+        "summary": summary,
+        "full_address": full_address,
+        "scheduling_status": scheduling_status,
+        "store_display": store_display,
+        "technician_display": technician_display,
+        "category": project_category,
+        "type": project_type,
+        "status": status,
+        "status_id": project.get("status_id"),
+        "scheduled_start": scheduled_start,
+        "scheduled_end": scheduled_end,
+        "date_sold": date_sold,
+        "customer": {
+            "customer_id": customer_id,
+            "first_name": "",
+            "last_name": "",
+            "full_name": "Unknown Customer",
+            "email": None,
+            "phone": None
+        },
+        "installation_address": {
+            "address_id": None,
+            "address1": address1,
+            "address2": "",
+            "city": city,
+            "state": state,
+            "zipcode": zipcode,
+            "full_address": full_address
+        },
+        "store_info": {
+            "store_id": None,
+            "store_number": store_number,
+            "store_name": store_name,
+            "display_name": store_display
+        },
+        "technician": {
+            "technician_id": technician_id,
+            "name": technician_name,
+            "email": None,
+            "phone": None,
+            "bio": None,
+            "display_name": technician_display
+        } if technician_name else None,
+        "service_time": None,
+        "service_time_unit": "hours",
+        "default_service_time": None,
+        "client_timezone": "US/Eastern"
+    }
+
+    # Add extra field if provided (e.g., '_source': 'voice_cache')
+    if extra_key and extra_value:
+        response[extra_key] = extra_value
+
+    return response
+
+
 def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
     """
     Action: get_project_details
     Returns detailed information for a specific project with enhanced formatting and validation
+
+    VOICE OPTIMIZATION: Uses preloaded cache to avoid API call
     """
     project_id = params.get('project_id')
     client_id = params.get('client_id', 'default')
@@ -984,6 +1273,49 @@ def handle_get_project_details(params: Dict, config: Dict, auth_headers: Dict) -
         logger.warning("customer_id not provided in parameters, this may cause issues")
 
     logger.info(f"[REAL] Fetching project details for project {project_id}, client {client_id}, customer {customer_id}")
+
+    # VOICE OPTIMIZATION: Check preloaded cache first
+    from_phone = params.get('_from_phone', '')
+    if from_phone:
+        cached = get_voice_cached_projects(from_phone)
+        if cached:
+            projects = cached.get('projects', [])
+            project_mapping = cached.get('project_mapping', {})
+
+            # Try to find project by ID, projectNumber, or ordinal
+            project = None
+            project_id_str = str(project_id)
+
+            # Check ordinal mapping first (e.g., "1", "2", "first", "last")
+            ordinal_key = f'ordinal:{project_id_str}'
+            if ordinal_key in project_mapping:
+                mapped_id = project_mapping[ordinal_key]
+                project = next((p for p in projects if p.get('id') == mapped_id), None)
+                if project:
+                    logger.info(f"[VOICE-CACHE] Resolved ordinal '{project_id}' to project {mapped_id}")
+
+            # Check projectNumber mapping
+            if not project:
+                pn_key = f'projectNumber:{project_id_str}'
+                if pn_key in project_mapping:
+                    mapped_id = project_mapping[pn_key]
+                    project = next((p for p in projects if p.get('id') == mapped_id), None)
+                    if project:
+                        logger.info(f"[VOICE-CACHE] Resolved projectNumber '{project_id}' to project {mapped_id}")
+
+            # Direct ID/projectNumber match
+            if not project:
+                for p in projects:
+                    if p.get('id') == project_id_str or p.get('projectNumber', '').lower() == project_id_str.lower():
+                        project = p
+                        logger.info(f"[VOICE-CACHE] Found project by direct match: {project_id}")
+                        break
+
+            if project:
+                # Build response from cached project
+                return _build_project_details_response(project, project_id, client_id, customer_id, '_source', 'voice_cache')
+
+            logger.info(f"[VOICE-CACHE] Project {project_id} not found in cache, falling back to API")
 
     try:
         # Use the same endpoint as list_projects which returns full project details
@@ -2470,6 +2802,12 @@ def lambda_handler(event, context):
             params['customer_id'] = customer_id
         if client_id and 'client_id' not in params:
             params['client_id'] = client_id
+
+        # Add from_phone for voice channel cache lookup
+        from_phone = session_attributes.get('from_phone', '')
+        if from_phone:
+            params['_from_phone'] = from_phone
+            logger.info(f"[VOICE] Detected voice channel, phone: ***{from_phone[-4:]}")
 
         # Get configuration
         config = get_api_config(client_id)

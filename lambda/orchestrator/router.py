@@ -1550,12 +1550,13 @@ def call_lambda_directly(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         'parameters': [
             {'name': key, 'value': str(value)}
             for key, value in params.items()
-            if key not in ['customer_id', 'client_id', 'pf_bearer_token']
+            if key not in ['customer_id', 'client_id', 'pf_bearer_token', 'from_phone']
         ],
         'sessionAttributes': {
             'customer_id': params.get('customer_id', ''),
             'client_id': params.get('client_id', ''),
-            'pf_bearer_token': params.get('pf_bearer_token', '')
+            'pf_bearer_token': params.get('pf_bearer_token', ''),
+            'from_phone': params.get('from_phone', '')  # For voice cache lookup
         }
     }
 
@@ -1624,7 +1625,8 @@ def route_request(
     client_id: str,
     pf_bearer_token: str = None,
     conversation_history: Optional[list] = None,
-    channel: str = 'chat'
+    channel: str = 'chat',
+    from_phone: str = ''
 ) -> Dict[str, Any]:
     """
     Route request to either Direct Lambda or Bedrock Agent
@@ -1638,6 +1640,7 @@ def route_request(
         pf_bearer_token: ProjectForce API bearer token (optional - can use Secrets Manager)
         conversation_history: Previous conversation for context
         channel: Channel type ('voice' or 'chat') - determines response formatting
+        from_phone: Caller phone number for voice cache lookup
 
     Returns:
         Dictionary with:
@@ -1698,7 +1701,8 @@ def route_request(
                 client_id=client_id,
                 pf_bearer_token=pf_bearer_token,
                 conversation_history=conversation_history,
-                channel=channel
+                channel=channel,
+                from_phone=from_phone
             )
 
             # VOICE ADAPTATION: For voice channel, format the response
@@ -1787,7 +1791,8 @@ def route_request(
                 client_id=client_id,
                 pf_bearer_token=pf_bearer_token,
                 conversation_history=conversation_history,
-                channel=channel  # Pass channel for voice-specific handling
+                channel=channel,  # Pass channel for voice-specific handling
+                from_phone=from_phone
             )
 
             # VOICE ADAPTATION: For voice channel, format the response
@@ -1822,6 +1827,7 @@ def route_request(
                 'customer_id': customer_id,
                 'client_id': client_id,
                 'pf_bearer_token': pf_bearer_token,
+                'from_phone': from_phone,  # For voice cache lookup
                 **merged_params  # Add merged params (extracted + resolved entities)
             }
 

@@ -659,6 +659,93 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
             'abort_message': "No problem. What else can I help with?"
         }
 
+    # ========================================================================
+    # Stage: SHOWING SCHEDULABLE PROJECTS - User selects a project to schedule
+    # When user names a project by category, ordinal, or project number after
+    # seeing schedulable projects, go directly to get_available_dates
+    # Handles multiple stage names: showing_schedulable_projects, project_selection, awaiting_project_selection
+    # Also handles guided_selection workflow when user initiated with "schedule a project"
+    # ========================================================================
+    # Check if this is a scheduling-related guided selection
+    pending_action = context.get('pending_action', '')
+    is_scheduling_guided = (workflow_type == 'guided_selection' and
+                            any(kw in str(pending_action).lower() for kw in ['schedule', 'book', 'available dates']))
+
+    if current_stage in ['showing_schedulable_projects', 'project_selection', 'awaiting_project_selection'] and (workflow_type == 'schedule_appointment' or is_scheduling_guided):
+        # Get project_ids and project_mapping from context (these ARE saved)
+        project_ids = context.get('project_ids', [])
+        project_mapping = context.get('project_mapping', {})
+
+        logger.info(f"[CONTINUATION] {current_stage}: {len(project_ids)} projects available, mapping keys: {list(project_mapping.keys())[:5]}")
+
+        # Try to match user's reference to a project
+        selected_project_id = None
+
+        # Check for ordinal references: "the first one", "second project", "1st", "2nd", etc.
+        ordinal_map = {
+            'first': 1, '1st': 1, 'one': 1,
+            'second': 2, '2nd': 2, 'two': 2,
+            'third': 3, '3rd': 3, 'three': 3,
+            'fourth': 4, '4th': 4, 'four': 4,
+            'fifth': 5, '5th': 5, 'five': 5,
+            'sixth': 6, '6th': 6, 'six': 6,
+            'seventh': 7, '7th': 7, 'seven': 7,
+            'eighth': 8, '8th': 8, 'eight': 8,
+            'ninth': 9, '9th': 9, 'nine': 9,
+            'tenth': 10, '10th': 10, 'ten': 10,
+            'last': -1
+        }
+
+        for word, ordinal in ordinal_map.items():
+            if word in message_lower:
+                if ordinal == -1 and project_ids:
+                    selected_project_id = project_ids[-1]
+                    logger.info(f"[CONTINUATION] Ordinal 'last' matched project {selected_project_id}")
+                elif 0 < ordinal <= len(project_ids):
+                    selected_project_id = project_ids[ordinal - 1]
+                    logger.info(f"[CONTINUATION] Ordinal '{word}' matched project {selected_project_id}")
+                break
+
+        # Check for category match: "washer dryer", "storm door", "decking", etc.
+        if not selected_project_id:
+            category_keywords = [
+                'storm door', 'decking', 'dishwasher', 'sink', 'oven',
+                'washer dryer', 'washer', 'dryer', 'cooktop', 'exterior',
+                'electric', 'kitchen', 'windows', 'doors', 'faucet',
+                'refrigerator', 'fridge', 'microwave', 'range', 'garbage disposal'
+            ]
+            for kw in category_keywords:
+                if kw in message_lower:
+                    # Find matching project by category using project_mapping
+                    for pid, pinfo in project_mapping.items():
+                        proj_category = (pinfo.get('category') or '').lower()
+                        proj_type = (pinfo.get('project_type') or '').lower()
+                        category_bucket = (pinfo.get('category_bucket') or '').lower()
+                        if kw in proj_category or kw in proj_type or kw in category_bucket:
+                            selected_project_id = pid
+                            logger.info(f"[CONTINUATION] Category '{kw}' matched project {selected_project_id} (category={proj_category})")
+                            break
+                    if selected_project_id:
+                        break
+
+        # If we found a project, go directly to get_available_dates
+        if selected_project_id:
+            logger.info(f"[CONTINUATION] SCHEDULE PROJECT SELECTION: User selected project {selected_project_id} from schedulable list - going to get_available_dates")
+            return {
+                'continue_workflow': True,
+                'action': 'get_available_dates',
+                'params': {
+                    'project_id': str(selected_project_id)
+                },
+                'next_stage': 'awaiting_date_selection',
+                'preserve_context': {
+                    'project_id': str(selected_project_id),
+                    'project_ids': project_ids,
+                    'project_mapping': project_mapping
+                },
+                'workflow_type': 'schedule_appointment'
+            }
+
     # Stage: Awaiting cancel confirmation (two-step cancel flow)
     if current_stage == 'awaiting_cancel_confirmation':
         # Check for confirmation or denial
@@ -2119,7 +2206,8 @@ def orchestrate_intelligent_workflow(
     client_id: str,
     pf_bearer_token: str,
     conversation_history: List[Dict],
-    channel: str = 'chat'  # 'chat' or 'voice' - for channel-specific handling
+    channel: str = 'chat',  # 'chat' or 'voice' - for channel-specific handling
+    from_phone: str = ''  # For voice cache lookup
 ) -> Dict[str, Any]:
     """
     Main intelligent orchestration function
@@ -2132,6 +2220,8 @@ def orchestrate_intelligent_workflow(
         client_id: Client ID
         pf_bearer_token: ProjectForce API token
         conversation_history: Previous messages
+        channel: 'chat' or 'voice'
+        from_phone: Caller phone number for voice cache lookup
 
     Returns:
         Response dictionary with text, intent, action, timing
@@ -2370,7 +2460,8 @@ def orchestrate_intelligent_workflow(
             params.update({
                 'customer_id': customer_id,
                 'client_id': client_id,
-                'pf_bearer_token': pf_bearer_token
+                'pf_bearer_token': pf_bearer_token,
+                'from_phone': from_phone
             })
 
             # INJECT BASE_DATE FOR GET_TIME_SLOTS in continuation handler
@@ -2661,7 +2752,8 @@ def orchestrate_intelligent_workflow(
                 list_response = call_lambda_directly('list_projects', {
                     'customer_id': customer_id,
                     'client_id': client_id,
-                    'pf_bearer_token': pf_bearer_token
+                    'pf_bearer_token': pf_bearer_token,
+                    'from_phone': from_phone  # For voice cache lookup
                 })
 
                 # Parse response
@@ -2795,6 +2887,32 @@ def orchestrate_intelligent_workflow(
             "needs": "project",
             "response_intro": "I can show you project details!",
             "filter_status": None
+        },
+        # Common variations for scheduling
+        "schedule a project": {
+            "needs": "project",
+            "response_intro": "I'd be happy to help you schedule a project!",
+            "filter_status": "schedulable"
+        },
+        "schedule project": {
+            "needs": "project",
+            "response_intro": "I'd be happy to help you schedule a project!",
+            "filter_status": "schedulable"
+        },
+        "i want to schedule a project": {
+            "needs": "project",
+            "response_intro": "I'd be happy to help you schedule a project!",
+            "filter_status": "schedulable"
+        },
+        "i want to schedule": {
+            "needs": "project",
+            "response_intro": "I'd be happy to help you schedule!",
+            "filter_status": "schedulable"
+        },
+        "schedule something": {
+            "needs": "project",
+            "response_intro": "I'd be happy to help you schedule!",
+            "filter_status": "schedulable"
         }
     }
 
@@ -2809,7 +2927,8 @@ def orchestrate_intelligent_workflow(
             list_response = call_lambda_directly('list_projects', {
                 'customer_id': customer_id,
                 'client_id': client_id,
-                'pf_bearer_token': pf_bearer_token
+                'pf_bearer_token': pf_bearer_token,
+                'from_phone': from_phone
             })
 
             # Parse response
@@ -2978,7 +3097,8 @@ You can say something like:
                 'status': 'Scheduled',
                 'customer_id': customer_id,
                 'client_id': client_id,
-                'pf_bearer_token': pf_bearer_token
+                'pf_bearer_token': pf_bearer_token,
+                'from_phone': from_phone
             })
 
             # Parse response
@@ -3206,7 +3326,8 @@ You can say something like:
                     'project_id': resolved_project_id,
                     'customer_id': customer_id,
                     'client_id': client_id,
-                    'pf_bearer_token': pf_bearer_token
+                    'pf_bearer_token': pf_bearer_token,
+                    'from_phone': from_phone
                 })
                 timing['lambda_call'] = time.time() - ordinal_start
 
@@ -3484,7 +3605,8 @@ What would you like to do?"""
                     list_response = call_lambda_directly('list_projects', {
                         'customer_id': customer_id,
                         'client_id': client_id,
-                        'pf_bearer_token': pf_bearer_token
+                        'pf_bearer_token': pf_bearer_token,
+                        'from_phone': from_phone
                     })
 
                     # Extract projects from response
@@ -3926,7 +4048,8 @@ What would you like to do?"""
                 list_response = call_lambda_directly('list_projects', {
                     'customer_id': customer_id,
                     'client_id': client_id,
-                    'pf_bearer_token': pf_bearer_token
+                    'pf_bearer_token': pf_bearer_token,
+                    'from_phone': from_phone
                 })
 
                 list_data = list_response.get('response', {})
@@ -4359,7 +4482,8 @@ What would you like to do?"""
                 list_response = call_lambda_directly('list_projects', {
                     'customer_id': customer_id,
                     'client_id': client_id,
-                    'pf_bearer_token': pf_bearer_token
+                    'pf_bearer_token': pf_bearer_token,
+                    'from_phone': from_phone
                 })
 
                 # Parse Bedrock agent format response (response.functionResponse.responseBody.TEXT.body)
@@ -4713,7 +4837,8 @@ What would you like to do?"""
                     list_response = call_lambda_directly('list_projects', {
                         'customer_id': customer_id,
                         'client_id': client_id,
-                        'pf_bearer_token': pf_bearer_token
+                        'pf_bearer_token': pf_bearer_token,
+                        'from_phone': from_phone
                     })
 
                     # Extract projects from response
@@ -4797,7 +4922,8 @@ What would you like to do?"""
         lambda_params.update({
             'customer_id': customer_id,
             'client_id': client_id,
-            'pf_bearer_token': pf_bearer_token
+            'pf_bearer_token': pf_bearer_token,
+            'from_phone': from_phone
         })
 
         # INJECT BASE_DATE FOR GET_TIME_SLOTS: Use start_date from workflow state (saved by get_available_dates)
@@ -4845,7 +4971,8 @@ What would you like to do?"""
                     list_response = call_lambda_directly('list_projects', {
                         'customer_id': customer_id,
                         'client_id': client_id,
-                        'pf_bearer_token': pf_bearer_token
+                        'pf_bearer_token': pf_bearer_token,
+                        'from_phone': from_phone
                     })
                     list_data = list_response.get('response', {})
                     list_func = list_data.get('functionResponse', {})
@@ -4925,7 +5052,8 @@ What would you like to do?"""
                         'project_id': project_id,
                         'customer_id': customer_id,
                         'client_id': client_id,
-                        'pf_bearer_token': pf_bearer_token
+                        'pf_bearer_token': pf_bearer_token,
+                        'from_phone': from_phone
                     })
 
                     # Extract project info
