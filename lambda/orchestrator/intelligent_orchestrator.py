@@ -2243,7 +2243,9 @@ def orchestrate_intelligent_workflow(
     context = workflow_state.get('context', {}) if workflow_state else {}
     pending_action_data = context.get('pending_action')
     logger.info(f"[CONFIRM-CHECK] pending_action in context: {pending_action_data is not None}, channel: {channel}")
-    if workflow_state and pending_action_data and channel != 'voice':
+    # pending_action_data can be a dict (from confirm flow) or string (from vague_prompts like "schedule a project")
+    # Only process as confirmation if it's a dict with 'action' key
+    if workflow_state and pending_action_data and isinstance(pending_action_data, dict) and channel != 'voice':
         pending = pending_action_data
         pending_action = pending.get('action')
         message_lower = message.lower().strip()
