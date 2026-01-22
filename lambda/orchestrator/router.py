@@ -361,9 +361,34 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
     """
     try:
         if action == 'list_projects':
+            # Check if all projects are already scheduled (user wanted to schedule but nothing schedulable)
+            if response_body.get('already_scheduled'):
+                projects = response_body.get('projects', [])
+                message = response_body.get('message', 'Your projects are already scheduled.')
+
+                if channel == 'voice':
+                    # For voice: friendly message about scheduled projects
+                    if projects:
+                        first_proj = projects[0]
+                        cat = first_proj.get('category', 'Your project')
+                        date = first_proj.get('scheduledDate', '')
+                        if date:
+                            return f"{cat} is already scheduled for {date}. Would you like to reschedule, or check the appointment details?"
+                        return f"{cat} is already scheduled. Would you like to reschedule, or check the appointment details?"
+                    return "Your projects are already scheduled. Would you like to reschedule, or check the appointment details?"
+
+                # For chat: include structured data
+                result = {
+                    "message": message,
+                    "projects": projects,
+                    "already_scheduled": True,
+                    "offer_reschedule": True
+                }
+                return f"{message}\n\n```json\n{json.dumps(result, indent=2)}\n```"
+
             projects = response_body.get('projects', [])
             if not projects:
-                return "I don't see any projects in your account yet. If you recently received a call about scheduling, your project may still be processing. Please check back in a few minutes, or contact customer service for assistance."
+                return "I don't see any projects linked to your phone number. If you received a text or call about an appointment, you may be calling from a different number than we have on file. Would you like me to give you the office number so they can help you directly?"
 
             # Prepare structured data
             result = {

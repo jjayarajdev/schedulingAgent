@@ -87,7 +87,6 @@ _session_cache = {}
 # GPT is instructed to be SILENT before tool calls, so no quick acknowledgments needed
 FILLER_MESSAGES = {
     'warm': [
-        "Still working on that.",
         "Almost there.",
         "Just a moment more.",
     ]
@@ -98,13 +97,16 @@ def get_tool_messages():
     """
     Generate tool messages for VAPI tool calls.
 
-    Strategy: COMPLETE SILENCE during tool calls
-    - AI says ONE acknowledgment BEFORE calling tool
-    - No automatic messages at all (not even empty ones)
-    - Only failure message for actual errors
+    Strategy:
+    - Filler at start: "One moment."
+    - Failure message for errors
+    - No delayed filler - responses should be fast enough now
     """
     return [
-        # Only include failure message - no other automatic messages
+        {
+            'type': 'request-start',
+            'content': "One moment."
+        },
         {
             'type': 'request-failed',
             'content': "I had some trouble with that. Could you try asking again?"
@@ -308,21 +310,19 @@ def create_assistant_config_response(first_message: str, support_number: str = '
         support_number: Client's support phone number for escalation
         client_name: Client company name
     """
-    # Format support number for voice using SSML for slow, clear readout
+    # Format support number for voice - natural formatting (no SSML, GPT-4o outputs as text)
+    # Use commas and ellipsis for natural pauses when spoken by TTS
     support_number_voice = ''
     if support_number:
         digits = ''.join(c for c in support_number if c.isdigit())
         if len(digits) == 10:
-            # Format as "203-894-6599" with SSML slow rate and breaks
-            formatted = f"{digits[0:3]}-{digits[3:6]}-{digits[6:10]}"
-            support_number_voice = f'<prosody rate="70%"><say-as interpret-as="telephone">{formatted}</say-as></prosody>'
+            # Format: "7, 6, 7... 6, 7, 6... 7, 6, 7, 6" - commas for micro-pauses, ellipsis for group breaks
+            support_number_voice = f"{', '.join(digits[0:3])}... {', '.join(digits[3:6])}... {', '.join(digits[6:10])}"
         elif len(digits) == 11 and digits[0] == '1':
-            # Format as "1-203-894-6599" with SSML
-            formatted = f"1-{digits[1:4]}-{digits[4:7]}-{digits[7:11]}"
-            support_number_voice = f'<prosody rate="70%"><say-as interpret-as="telephone">{formatted}</say-as></prosody>'
+            support_number_voice = f"1... {', '.join(digits[1:4])}... {', '.join(digits[4:7])}... {', '.join(digits[7:11])}"
         else:
-            # Fallback: 70% speed with digits
-            support_number_voice = f'<prosody rate="70%">{" ".join(digits)}</prosody>'
+            # Fallback: commas between all digits
+            support_number_voice = ', '.join(digits)
     assistant_config = {
         'name': 'ProjectForce Scheduling',
         'voice': {
@@ -344,7 +344,7 @@ def create_assistant_config_response(first_message: str, support_number: str = '
                         'properties': {
                             'action': {
                                 'type': 'string',
-                                'enum': ['list_projects', 'get_project_details', 'get_available_dates', 'get_time_slots', 'schedule_project', 'reschedule_appointment', 'cancel_appointment', 'get_weather', 'other'],
+                                'enum': ['list_projects', 'get_project_details', 'get_available_dates', 'get_time_slots', 'schedule_project', 'reschedule_appointment', 'get_weather', 'other'],
                                 'description': 'The type of action requested'
                             },
                             'message': {
@@ -362,41 +362,20 @@ def create_assistant_config_response(first_message: str, support_number: str = '
             }],
             'messages': [{
                 'role': 'system',
-                'content': '''## RULE #1 - ONE CONTEXTUAL FILLER, THEN ABSOLUTE SILENCE
+                'content': '''## RULE #1 - TOOL CALL BEHAVIOR
 
-**BEFORE tool call:** Say EXACTLY ONE phrase based on the action, then SILENCE.
-**DURING tool call:** SAY NOTHING. Complete silence.
-**AFTER tool call:** Speak the result directly.
+The system will automatically say filler phrases during tool calls.
+**AFTER tool call completes:** Immediately speak the result from the "response" field.
 
-CONTEXTUAL FILLERS (use the one matching your action):
-- list_projects → "Checking your projects."
-- get_project_details → "Looking up that project."
-- get_available_dates → "Checking available dates."
-- get_time_slots → "Looking at time slots."
-- schedule_project → "Scheduling that for you."
-- reschedule_appointment → "Rescheduling that."
-- cancel_appointment → "Processing that cancellation."
-- get_weather → "Checking the weather."
-- other → "One moment."
-
-RULES:
-- Say ONLY the filler for your action - nothing else
-- After your ONE filler, your next words MUST be the actual answer
-- NEVER say multiple fillers
-- NEVER add extra words like "Let me check on that for you real quick"
-
-BANNED PHRASES (never say these):
-- "Hold on a sec" - BANNED
-- "Just a sec" - BANNED
-- "Still working on that" - BANNED
-- "Give me a moment" - BANNED
+IMPORTANT: When you receive a tool result, your VERY NEXT words must be the content from the "response" field. Do not add any preamble or filler - just speak the response directly.
 - "This will just take a sec" - BANNED
 
 ## RULE #1b - PHONE NUMBER READOUT
 
-When reading phone numbers, read SLOWLY with pauses:
-"five... five... five... (pause)... one... two... three... (pause)... four... five... six... seven"
-Read one digit at a time. Pause between groups.
+When reading phone numbers, output exactly as formatted in this prompt.
+The format uses commas between digits and ellipsis (...) between groups.
+Example output: "7, 6, 7... 6, 7, 6... 7, 6, 7, 6"
+Do NOT add words like "pause" or "break" - the punctuation creates natural pauses.
 
 ---
 
@@ -417,10 +396,20 @@ NEVER ignore the tool response. NEVER say "I'm all about home improvement" or si
 
 ## RULE #3 - AI DISCLOSURE (CRITICAL)
 
-If customer asks "Am I talking to AI?", "Are you a robot?", "Is this a real person?":
-HONEST ANSWER: "Yes, I'm J, an AI assistant. I help with scheduling appointments. Would you like me to connect you with our office instead?"
+If customer asks or implies ANY of these:
+- "Am I talking to AI?" / "Is this AI?" / "Is this artificial intelligence?"
+- "Are you a robot?" / "Are you a computer?" / "Are you a bot?"
+- "Is this a real person?" / "Am I talking to a real person?"
+- "Are you a girl?" / "Are you human?" / "Are you a person?"
+- "You're not a real person, right?" / "This is a computer, isn't it?"
+- "Are you one of those AI things?"
 
-NEVER dodge this question. NEVER pretend to be human.
+HONEST ANSWER: "Yes, I'm J, an AI assistant. I help with scheduling appointments. Would you like me to give you our office number to speak with someone directly?"
+
+If customer STATES to someone else "This is an AI" or "This isn't a real person":
+RESPONSE: "That's right, I'm an AI assistant. I'm happy to help with scheduling, or I can give you the office number if you'd prefer to speak with someone."
+
+NEVER dodge this question. NEVER pretend to be human. NEVER deflect with unrelated topics like "I'm all about home improvement".
 
 ---
 
@@ -450,9 +439,26 @@ Help customers with:
 - Checking available appointment dates and times
 - Scheduling new appointments
 - Rescheduling existing appointments
-- Canceling appointments
 - Answering project questions
 - Details of a project
+
+## What You CANNOT Do (redirect to office immediately)
+
+**CRITICAL - These features do NOT exist. Do NOT attempt them:**
+
+1. **CANCEL appointments**: "I'm not able to cancel appointments directly. Let me give you our office number - they can take care of that for you right away."
+
+2. **Change ADDRESS**: "I can't update addresses in the system. Our office can make that change for you - would you like their number?"
+
+3. **Pricing/cost questions**: "I don't have pricing information. Our office can help with that - would you like the number?"
+
+4. **Product questions** (not about their project): "For product questions, our office would be the best resource."
+
+5. **Complaints about service**: "I'm sorry to hear that. Let me give you our office number so you can speak with someone who can help."
+
+6. **Technical/installation questions**: "That's a great question for the installer. I can tell you when they're scheduled, or give you the office number."
+
+NEVER say "I'm having trouble" or "I couldn't complete that" for cancel/address - these imply temporary failure. Be honest that the feature doesn't exist.
 
 ## CRITICAL: Always Use the Tool
 
@@ -481,12 +487,23 @@ You MUST call `projectforce_api` for ANY project-related request. Never make up 
 - "Any openings next week?" → action: get_available_dates, message: "Any openings next week?" (PASS EXACT WORDS!)
 - "What about the week of the 20th?" → action: get_available_dates, message: "What about the week of the 20th?" (PASS EXACT WORDS!)
 - "Yes" (after showing project) → action: get_available_dates
-- "Cancel my appointment" → action: cancel_appointment
+- "Cancel my appointment" → DO NOT call tool. Say: "I'm not able to cancel appointments directly. Let me give you our office number."
 - "Reschedule to next week" → action: reschedule_appointment
 - "Tell me about my project" → action: get_project_details
 - "What's the weather on my appointment day?" → action: get_weather
 - "Will it rain on Tuesday?" → action: get_weather
 - "Weather forecast for my install date" → action: get_weather
+
+**GENERIC SCHEDULING REQUESTS (CRITICAL - always call list_projects):**
+When user wants to schedule but doesn't specify which project, ALWAYS call list_projects:
+- "Schedule appointment" → action: list_projects, message: "schedule appointment" (backend shows schedulable projects)
+- "Schedule a project" → action: list_projects, message: "schedule a project" (backend shows schedulable projects)
+- "I want to schedule" → action: list_projects, message: "I want to schedule" (backend shows schedulable projects)
+- "Book an appointment" → action: list_projects, message: "book an appointment" (backend shows schedulable projects)
+- "Make an appointment" → action: list_projects, message: "make an appointment" (backend shows schedulable projects)
+- "Help me schedule" → action: list_projects, message: "help me schedule" (backend shows schedulable projects)
+- "Can I schedule something?" → action: list_projects, message: "can I schedule something" (backend shows schedulable projects)
+NEVER ask "which project?" for these - the backend will show available projects automatically.
 
 **Filter examples (pass exact words to preserve filters):**
 - "Show projects assigned to John" → action: list_projects, message: "Show projects assigned to John"
@@ -512,7 +529,7 @@ These are requests for available appointment dates - ALWAYS pass exact words:
 **PRONOUN & REFERENCE HANDLING (backend resolves these from context):**
 - "Schedule it" → get_available_dates, message: "schedule it" (backend knows which project from context)
 - "Reschedule it" → reschedule_appointment, message: "reschedule it"
-- "Cancel it" → cancel_appointment, message: "cancel it"
+- "Cancel it" → DO NOT call tool. Say: "I can't cancel appointments, but our office can help with that right away."
 - "Tell me about it" → get_project_details, message: "tell me about it"
 - "Schedule that one" → get_available_dates, message: "schedule that one"
 - "What about the other one?" → get_project_details, message: "what about the other one"
@@ -952,6 +969,7 @@ def handle_tool_calls(message: Dict) -> Dict:
                 from_phone=from_phone
             )
 
+            logger.info(f"[VAPI] Tool call result: {response_text[:200] if response_text else 'empty'}")
             results.append({
                 "toolCallId": tool_call_id,
                 "result": json.dumps({
@@ -1065,6 +1083,7 @@ def call_orchestrator(message: str, call_id: str, credentials: Dict, from_phone:
 
         result = json.loads(response['Payload'].read())
         logger.info(f"[VAPI] Orchestrator response: status={result.get('statusCode')}")
+        logger.info(f"[VAPI] Orchestrator result body: {str(result.get('body', ''))[:500]}")
 
         if result.get('statusCode') == 200:
             body = result.get('body', '{}')
@@ -1108,11 +1127,18 @@ def format_for_voice(text: str) -> str:
     """
     Format text for voice output.
 
+    - Strip Amazon Polly-specific SSML (Cartesia doesn't support it)
+    - Keep <speak>, <prosody>, <break> which Cartesia supports
     - Remove markdown
     - Clean up formatting
     - Keep it concise
     """
     import re
+
+    # Strip Amazon Polly-specific tags (Cartesia doesn't support these)
+    # Keep <speak>, <prosody>, <break> which Cartesia supports
+    text = re.sub(r'<amazon:domain[^>]*>', '', text)
+    text = re.sub(r'</amazon:domain>', '', text)
 
     # Remove markdown formatting
     text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # **bold**

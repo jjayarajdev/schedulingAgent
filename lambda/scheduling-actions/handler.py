@@ -897,6 +897,84 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
                     if include:
                         filtered_projects.append(project)
 
+                # HELPFUL MESSAGE: If filtering returns empty, explain why based on actual status
+                # Status lists match statuses.json config
+                if not filtered_projects and cached.get('projects'):
+                    all_projects = cached.get('projects', [])
+                    # From statuses.json - exact matches
+                    scheduled_statuses = ['scheduled', 'tentatively scheduled', 'customer scheduled', 'store scheduled', 'install scheduled', 'hdms scheduled']
+                    cancelled_statuses = ['cancelled', 'cancelled/surge', 'ready to cancel']
+                    completed_statuses = ['completed', 'work complete', 'project completed', 'work order completed', 'done', 'completed-archived']
+                    on_hold_statuses = ['on hold', 'waiting for product', 'waiting product', 'missing product', 'paused - missing product', 'paused - waiting on product', 'waiting for permit', 'needs permit', 'product ordered', 'pending']
+
+                    # Categorize projects by status
+                    scheduled_projects = [p for p in all_projects if p.get('status', '').lower() in scheduled_statuses]
+                    cancelled_projects = [p for p in all_projects if p.get('status', '').lower() in cancelled_statuses]
+                    completed_projects = [p for p in all_projects if p.get('status', '').lower() in completed_statuses]
+                    on_hold_projects = [p for p in all_projects if any(s in p.get('status', '').lower() for s in on_hold_statuses)]
+
+                    cache_duration = (time.time() - start_time) * 1000
+
+                    if scheduled_projects:
+                        logger.info(f"[VOICE-CACHE] No schedulable projects, but found {len(scheduled_projects)} already scheduled")
+                        scheduled_info = []
+                        for p in scheduled_projects[:3]:
+                            cat = p.get('category', 'Project')
+                            date = p.get('scheduledDate', 'upcoming')
+                            scheduled_info.append(f"{cat} scheduled for {date}")
+                        return {
+                            "message": f"I found {len(scheduled_projects)} project(s), but they're already scheduled: {'; '.join(scheduled_info)}. Would you like to reschedule, cancel, or check the details?",
+                            "projects": scheduled_projects,
+                            "already_scheduled": True,
+                            "_source": "voice_cache",
+                            "pf_http_status_code": 200
+                        }
+
+                    if cancelled_projects:
+                        logger.info(f"[VOICE-CACHE] No schedulable projects, found {len(cancelled_projects)} cancelled")
+                        cat = cancelled_projects[0].get('category', 'Your project')
+                        return {
+                            "message": f"Your {cat} project has been cancelled and cannot be scheduled. Would you like more information or to speak with customer service?",
+                            "projects": cancelled_projects,
+                            "status_reason": "cancelled",
+                            "_source": "voice_cache",
+                            "pf_http_status_code": 200
+                        }
+
+                    if completed_projects:
+                        logger.info(f"[VOICE-CACHE] No schedulable projects, found {len(completed_projects)} completed")
+                        cat = completed_projects[0].get('category', 'Your project')
+                        return {
+                            "message": f"Your {cat} project has been completed. Is there anything else I can help you with?",
+                            "projects": completed_projects,
+                            "status_reason": "completed",
+                            "_source": "voice_cache",
+                            "pf_http_status_code": 200
+                        }
+
+                    if on_hold_projects:
+                        logger.info(f"[VOICE-CACHE] No schedulable projects, found {len(on_hold_projects)} on hold")
+                        cat = on_hold_projects[0].get('category', 'Your project')
+                        status = on_hold_projects[0].get('status', 'on hold')
+                        return {
+                            "message": f"Your {cat} project is currently {status} and cannot be scheduled yet. Would you like more details?",
+                            "projects": on_hold_projects,
+                            "status_reason": "on_hold",
+                            "_source": "voice_cache",
+                            "pf_http_status_code": 200
+                        }
+
+                    # Fallback: show all projects with their actual status
+                    logger.info(f"[VOICE-CACHE] No schedulable projects, showing {len(all_projects)} with current status")
+                    project_info = [f"{p.get('category', 'Project')} ({p.get('status', 'Unknown')})" for p in all_projects[:3]]
+                    return {
+                        "message": f"I found {len(all_projects)} project(s): {'; '.join(project_info)}. None are ready to schedule. Would you like more details?",
+                        "projects": all_projects,
+                        "status_reason": "not_schedulable",
+                        "_source": "voice_cache",
+                        "pf_http_status_code": 200
+                    }
+
                 projects = filtered_projects
 
             cache_duration = (time.time() - start_time) * 1000
@@ -1084,7 +1162,65 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
             filtered_projects.append(project)
 
         logger.info(f"Filtered {len(projects)} projects down to {len(filtered_projects)} projects")
+
+        # HELPFUL MESSAGE: If filtering for schedulable returns empty, check for scheduled projects
+        if filter_status and filter_status.lower() == 'schedulable' and not filtered_projects and projects:
+            # Check if any projects are already scheduled
+            scheduled_statuses = ['scheduled', 'tentatively scheduled', 'customer scheduled', 'store scheduled', 'install scheduled']
+            scheduled_projects = [
+                p for p in projects
+                if p.get('status', '').lower() in scheduled_statuses
+            ]
+
+            if scheduled_projects:
+                # Build helpful message about scheduled projects
+                logger.info(f"No schedulable projects, but found {len(scheduled_projects)} already scheduled")
+                scheduled_info = []
+                for p in scheduled_projects[:3]:  # Limit to first 3
+                    cat = p.get('category', 'Project')
+                    date = p.get('scheduledDate', 'upcoming')
+                    scheduled_info.append(f"{cat} scheduled for {date}")
+
+                return {
+                    "message": f"All your projects are already scheduled. {'; '.join(scheduled_info)}. Would you like to reschedule or check the appointment details?",
+                    "projects": scheduled_projects,
+                    "already_scheduled": True,
+                    "pf_http_status_code": pf_http_status_code
+                }
+
         projects = filtered_projects
+
+    # FALLBACK: If NO projects after filtering, but we had projects before filtering,
+    # check if there are scheduled projects to inform user about
+    if not projects and raw_data:
+        all_projects = [extract_project_minimal(item) for item in raw_data]
+        scheduled_statuses = ['scheduled', 'tentatively scheduled', 'customer scheduled', 'store scheduled', 'install scheduled']
+        scheduled_projects = [
+            p for p in all_projects
+            if p.get('status', '').lower() in scheduled_statuses
+        ]
+
+        if scheduled_projects:
+            logger.info(f"No projects after filter, but found {len(scheduled_projects)} scheduled projects")
+            scheduled_info = []
+            for p in scheduled_projects[:3]:
+                cat = p.get('category', 'Project')
+                date = p.get('scheduledDate', 'upcoming')
+                scheduled_info.append(f"{cat} scheduled for {date}")
+
+            # Return scheduled projects with info
+            return {
+                "message": f"I found {len(scheduled_projects)} project(s), but they're already scheduled: {'; '.join(scheduled_info)}. Would you like to reschedule, cancel, or check the details?",
+                "projects": scheduled_projects,
+                "already_scheduled": True,
+                "pf_http_status_code": pf_http_status_code
+            }
+
+        # Check for any other projects (not scheduled) to show
+        other_projects = [p for p in all_projects if p.get('status', '').lower() not in scheduled_statuses]
+        if other_projects:
+            logger.info(f"No matching projects, but found {len(other_projects)} other projects")
+            return format_projects_for_agent(other_projects, customer_id, pf_http_status_code)
 
     # Pre-format exactly as agent expects (no agent work needed)
     formatted_response = format_projects_for_agent(projects, customer_id, pf_http_status_code)

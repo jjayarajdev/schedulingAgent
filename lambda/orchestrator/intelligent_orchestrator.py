@@ -660,6 +660,102 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
         }
 
     # ========================================================================
+    # Stage: AWAITING SCHEDULE CONFIRM - Single project, user confirms "yes"
+    # Voice fast path sets this stage when there's exactly 1 schedulable project
+    # ========================================================================
+    if current_stage == 'awaiting_schedule_confirm' and workflow_type == 'guided_selection':
+        project_ids = context.get('project_ids', [])
+        project_mapping = context.get('project_mapping', {})
+
+        # Check for confirmation phrases
+        confirm_phrases = ['yes', 'yeah', 'sure', 'ok', 'okay', 'yep', 'yup', 'please', 'go ahead',
+                          'show me', 'let me see', 'sounds good', 'do it', 'proceed', 'right', 'correct']
+        is_confirm = any(phrase in message_lower for phrase in confirm_phrases)
+
+        if is_confirm and project_ids:
+            # User confirmed - proceed to get_available_dates for the single project
+            selected_project_id = project_ids[0]
+            project_info = project_mapping.get(selected_project_id, {})
+
+            logger.info(f"[CONTINUATION] SCHEDULE CONFIRM: User confirmed single project {selected_project_id} - going to get_available_dates")
+            return {
+                'continue_workflow': True,
+                'action': 'get_available_dates',
+                'params': {
+                    'project_id': str(selected_project_id)
+                },
+                'next_stage': 'awaiting_date_selection',
+                'preserve_context': {
+                    'project_id': str(selected_project_id),
+                    'project_ids': project_ids,
+                    'project_mapping': project_mapping,
+                    'category': project_info.get('category', ''),
+                    'address': project_info.get('address', '')
+                },
+                'workflow_type': 'schedule_appointment'
+            }
+
+    # ========================================================================
+    # Stage: AWAITING RESCHEDULE CONFIRM - User asked to schedule but project is already scheduled
+    # Voice fast path sets this stage when user says "schedule" but project is already scheduled
+    # User can say "yes", "reschedule", or "check details"
+    # ========================================================================
+    if current_stage == 'awaiting_reschedule_confirm' and workflow_type == 'reschedule_offer':
+        project_ids = context.get('project_ids', [])
+        project_mapping = context.get('project_mapping', {})
+        selected_project_id = context.get('selected_project_id', project_ids[0] if project_ids else None)
+
+        # Check for reschedule confirmation
+        reschedule_phrases = ['yes', 'yeah', 'sure', 'ok', 'okay', 'yep', 'yup', 'please', 'reschedule',
+                              'change', 'different date', 'another date', 'move it', 'new date',
+                              'go ahead', 'do it', 'proceed', 'let me reschedule', 'i want to reschedule']
+        is_reschedule = any(phrase in message_lower for phrase in reschedule_phrases)
+
+        # Check for details request
+        details_phrases = ['details', 'check', 'appointment', 'when is', 'what time', 'what date', 'info']
+        is_details = any(phrase in message_lower for phrase in details_phrases)
+
+        if is_reschedule and selected_project_id:
+            project_info = project_mapping.get(str(selected_project_id), {})
+            logger.info(f"[CONTINUATION] RESCHEDULE CONFIRM: User wants to reschedule project {selected_project_id} - going to get_available_dates")
+            return {
+                'continue_workflow': True,
+                'action': 'get_available_dates',
+                'params': {
+                    'project_id': str(selected_project_id)
+                },
+                'next_stage': 'awaiting_date_selection',
+                'preserve_context': {
+                    'project_id': str(selected_project_id),
+                    'project_ids': project_ids,
+                    'project_mapping': project_mapping,
+                    'category': project_info.get('category', ''),
+                    'address': project_info.get('address', ''),
+                    'is_reschedule': True
+                },
+                'workflow_type': 'reschedule_appointment'
+            }
+
+        if is_details and selected_project_id:
+            project_info = project_mapping.get(str(selected_project_id), {})
+            logger.info(f"[CONTINUATION] RESCHEDULE -> DETAILS: User wants to check appointment details for {selected_project_id}")
+            return {
+                'continue_workflow': True,
+                'action': 'get_project_details',
+                'params': {
+                    'project_id': str(selected_project_id)
+                },
+                'next_stage': 'showing_details',
+                'preserve_context': {
+                    'project_id': str(selected_project_id),
+                    'project_ids': project_ids,
+                    'project_mapping': project_mapping,
+                    'category': project_info.get('category', '')
+                },
+                'workflow_type': 'view_appointment'
+            }
+
+    # ========================================================================
     # Stage: SHOWING SCHEDULABLE PROJECTS - User selects a project to schedule
     # When user names a project by category, ordinal, or project number after
     # seeing schedulable projects, go directly to get_available_dates
@@ -2840,6 +2936,177 @@ def orchestrate_intelligent_workflow(
                 logger.warning(f"[VOICE-PRECHECK] Error in voice pre-check: {voice_err}, falling through to normal flow")
                 # Fall through to normal classification
 
+        # ====================================================================
+        # VOICE FAST PATH: Handle "schedule projects" type requests instantly
+        # This bypasses Sonnet classification (6-10s) and uses voice cache
+        # ====================================================================
+        scheduling_patterns = [
+            'schedule project', 'schedule a project', 'schedule the project',
+            'schedule something', 'schedule appointment', 'schedule an appointment',
+            'i want to schedule', 'let me schedule', "let's schedule",
+            'book an appointment', 'book appointment', 'make an appointment',
+            'schedule my', 'can i schedule', 'could i schedule',
+            'i need to schedule', 'help me schedule'
+        ]
+        if any(pattern in msg_lower for pattern in scheduling_patterns):
+            logger.info(f"[VOICE-FAST-PATH] Detected scheduling request: '{message}' - bypassing Sonnet classification")
+            try:
+                # Call list_projects with from_phone to use voice cache
+                list_response = call_lambda_directly('list_projects', {
+                    'customer_id': customer_id,
+                    'client_id': client_id,
+                    'pf_bearer_token': pf_bearer_token,
+                    'from_phone': from_phone  # Voice cache lookup
+                })
+
+                # Parse response
+                list_data = list_response.get('response', {})
+                list_func = list_data.get('functionResponse', {})
+                list_body_wrapper = list_func.get('responseBody', {})
+                list_text = list_body_wrapper.get('TEXT', {})
+                list_body_str = list_text.get('body', '{}')
+
+                if isinstance(list_body_str, str):
+                    response_body = json.loads(list_body_str)
+                else:
+                    response_body = list_body_str
+
+                projects = response_body.get('projects', [])
+
+                # Filter to schedulable projects only (exclude already scheduled)
+                schedulable_statuses = ['New', 'Ready To Schedule']
+                schedulable_projects = [p for p in projects if p.get('status') in schedulable_statuses]
+
+                logger.info(f"[VOICE-FAST-PATH] Found {len(schedulable_projects)} schedulable projects out of {len(projects)} total")
+
+                # Handle case: All projects already scheduled
+                if not schedulable_projects and projects:
+                    # Check if any are scheduled
+                    scheduled_projects = [p for p in projects if p.get('status') in SCHEDULED_STATUSES]
+                    if scheduled_projects:
+                        first = scheduled_projects[0]
+                        cat = first.get('category', 'Your project')
+                        project_id = str(first.get('id', ''))
+                        sched_date = first.get('scheduledDate', '')
+                        if sched_date:
+                            voice_response = f"{cat} is already scheduled for {sched_date}. Would you like to reschedule, or check the appointment details?"
+                        else:
+                            voice_response = f"{cat} is already scheduled. Would you like to reschedule, or check the appointment details?"
+
+                        # Save workflow state so "yes" or "reschedule" can continue the flow
+                        project_mapping = {
+                            project_id: {
+                                'category': cat,
+                                'category_bucket': get_category_bucket(cat),
+                                'address': first.get('address', ''),
+                                'status': first.get('status', ''),
+                                'projectNumber': first.get('projectNumber', ''),
+                                'project_type': first.get('projectType', first.get('ProjectType', '')),
+                                'scheduled_date': sched_date
+                            }
+                        }
+                        state_manager.save_state(session_id, {
+                            'workflow_type': 'reschedule_offer',
+                            'current_stage': 'awaiting_reschedule_confirm',
+                            'context': {
+                                'project_ids': [project_id],
+                                'project_mapping': project_mapping,
+                                'selected_project_id': project_id,
+                                'customer_id': customer_id,
+                                'pending_action': 'reschedule_appointment'
+                            },
+                            'project_mapping': project_mapping
+                        })
+                        logger.info(f"[VOICE-FAST-PATH] Saved reschedule_offer state for project {project_id}")
+
+                        timing['total'] = time.time() - start_time
+                        return {
+                            'response': voice_response,
+                            'intent': 'scheduling',
+                            'action': 'already_scheduled',
+                            'agent_name': 'Intelligent Orchestrator (Voice Fast Path)',
+                            'direct_call': True,
+                            'timing': timing,
+                            'channel': channel
+                        }
+
+                # Handle case: No projects at all
+                if not projects:
+                    timing['total'] = time.time() - start_time
+                    return {
+                        'response': "I don't see any projects linked to your phone number. If you received a text or call about an appointment, you may be calling from a different number than we have on file. Would you like me to give you the office number so they can help you directly?",
+                        'intent': 'scheduling',
+                        'action': 'no_projects',
+                        'agent_name': 'Intelligent Orchestrator (Voice Fast Path)',
+                        'direct_call': True,
+                        'timing': timing,
+                        'channel': channel
+                    }
+
+                # Build project mapping for workflow state
+                project_ids = [str(p.get('id', '')) for p in schedulable_projects if p.get('id')]
+                project_mapping = {}
+                for p in schedulable_projects:
+                    pid = str(p.get('id', ''))
+                    if pid:
+                        exact_category = p.get('category', '')
+                        project_number = p.get('projectNumber', '')
+                        project_mapping[pid] = {
+                            'category': exact_category,
+                            'category_bucket': get_category_bucket(exact_category),
+                            'address': p.get('address', ''),
+                            'status': p.get('status', ''),
+                            'projectNumber': project_number,
+                            'project_type': p.get('projectType', p.get('ProjectType', ''))
+                        }
+
+                # Format voice response for scheduling selection
+                if len(schedulable_projects) == 1:
+                    # Single project - ask for confirmation
+                    proj = schedulable_projects[0]
+                    cat = proj.get('category', 'project')
+                    voice_response = f"I see you have a {cat} project ready to schedule. Would you like me to show you the available dates?"
+                    next_stage = 'awaiting_schedule_confirm'
+                elif len(schedulable_projects) <= 3:
+                    # 2-3 projects - list them
+                    categories = [p.get('category', 'project') for p in schedulable_projects]
+                    voice_response = f"You have {len(schedulable_projects)} projects ready to schedule: " + ", ".join(categories) + ". Which one would you like to schedule?"
+                    next_stage = 'awaiting_project_selection'
+                else:
+                    # Many projects - summarize
+                    voice_response = f"You have {len(schedulable_projects)} projects ready to schedule. Which one would you like to start with?"
+                    next_stage = 'awaiting_project_selection'
+
+                # Save workflow state for next turn
+                state_manager.save_state(session_id, {
+                    'workflow_type': 'guided_selection',
+                    'current_stage': next_stage,
+                    'context': {
+                        'project_ids': project_ids,
+                        'project_mapping': project_mapping,
+                        'customer_id': customer_id,
+                        'filter_status': 'schedulable',
+                        'pending_action': 'schedule_appointment'  # For continuation handler recognition
+                    },
+                    'project_mapping': project_mapping
+                })
+
+                timing['total'] = time.time() - start_time
+                logger.info(f"[VOICE-FAST-PATH] Returning in {timing['total']:.2f}s (skipped Sonnet)")
+
+                return {
+                    'response': voice_response,
+                    'intent': 'scheduling',
+                    'action': 'list_projects',
+                    'agent_name': 'Intelligent Orchestrator (Voice Fast Path)',
+                    'direct_call': True,
+                    'timing': timing,
+                    'channel': channel
+                }
+            except Exception as voice_sched_err:
+                logger.warning(f"[VOICE-FAST-PATH] Error: {voice_sched_err}, falling through to normal flow")
+                # Fall through to normal classification
+
     # ========================================================================
     # STEP 0.4a: VAGUE CHATBOT ACTION PROMPTS - Provide guided responses
     # When user clicks action buttons like "Schedule appointments" without context,
@@ -2984,7 +3251,7 @@ def orchestrate_intelligent_workflow(
                 if filter_status == 'schedulable':
                     response_text = f"{intro}\n\nHowever, you don't have any projects ready to schedule at the moment. Would you like to see all your projects instead?"
                 else:
-                    response_text = f"{intro}\n\nHowever, I couldn't find any projects. Please try again later."
+                    response_text = f"{intro}\n\nHowever, I don't see any projects linked to your account. If you received a message about an appointment, you may need to contact our office directly for assistance."
             else:
                 # Build project list for user to choose from
                 project_lines = []
@@ -5248,17 +5515,22 @@ What would you like to do?"""
 
             # POST-FILTER PROJECTS: Apply semantic filters since upstream API doesn't filter
             # Use lambda_params which contains status, category, projectType from classification
+            # SKIP if scheduling-actions already handled special cases (already_scheduled, status_reason)
             if lambda_action == 'list_projects' and 'projects' in response_body and isinstance(response_body['projects'], list):
-                original_count = len(response_body['projects'])
-                # DEBUG: Log filter params before applying
-                logger.info(f"[FILTER-DEBUG] About to filter {original_count} projects with params: {lambda_params}")
-                if original_count > 0:
-                    # Log first project's installer info for debugging
-                    first_proj = response_body['projects'][0]
-                    logger.info(f"[FILTER-DEBUG] First project installer: {first_proj.get('installer', 'NOT FOUND')}")
-                response_body['projects'] = apply_project_filters(response_body['projects'], lambda_params)
-                filtered_count = len(response_body['projects'])
-                logger.info(f"[FILTER] Applied post-filters: {original_count} -> {filtered_count} projects")
+                # Skip post-filter if Lambda already handled "no schedulable" case
+                if response_body.get('already_scheduled') or response_body.get('status_reason'):
+                    logger.info(f"[FILTER] Skipping post-filter - Lambda returned special case: already_scheduled={response_body.get('already_scheduled')}, status_reason={response_body.get('status_reason')}")
+                else:
+                    original_count = len(response_body['projects'])
+                    # DEBUG: Log filter params before applying
+                    logger.info(f"[FILTER-DEBUG] About to filter {original_count} projects with params: {lambda_params}")
+                    if original_count > 0:
+                        # Log first project's installer info for debugging
+                        first_proj = response_body['projects'][0]
+                        logger.info(f"[FILTER-DEBUG] First project installer: {first_proj.get('installer', 'NOT FOUND')}")
+                    response_body['projects'] = apply_project_filters(response_body['projects'], lambda_params)
+                    filtered_count = len(response_body['projects'])
+                    logger.info(f"[FILTER] Applied post-filters: {original_count} -> {filtered_count} projects")
 
             # Extract PF API HTTP status code from Lambda response
             # Check both 'pf_http_status_code' and 'pf_status_code' for compatibility
