@@ -185,7 +185,7 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
     today = datetime.now()
     date_lower = date_str.lower().strip()
     strategy = 'month'  # Default strategy
-    days_to_fetch = 2  # Default: 2 days
+    days_to_fetch = 5  # Default: 5 days
 
     # Already in YYYY-MM-DD format? Pass through - treat as specific day
     if re.match(r'^\d{4}-\d{2}-\d{2}$', date_str):
@@ -389,7 +389,7 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
                 # If we're already in that month, start from tomorrow
                 # If it's a future month, start from the first day of that month
                 strategy = 'day'
-                days_to_fetch = 2  # Default: 2 days
+                days_to_fetch = 5  # Default: 5 days
                 if num == today.month:
                     # Same month - start from tomorrow
                     from datetime import timedelta
@@ -1560,7 +1560,7 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
     start_date = params.get('start_date')
     explicit_end_date = params.get('end_date')  # User-provided end date for range queries
     date_strategy = None
-    days_to_fetch = 2  # Default: 2 days
+    days_to_fetch = 5  # Default: 5 days
 
     if not start_date:
         # Check if 'date' parameter has a natural language value (e.g., "next month")
@@ -1609,7 +1609,7 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
                     else:
                         start_date = None
                         date_strategy = None
-                        days_to_fetch = 2
+                        days_to_fetch = 5
 
     # Handle week_past strategy - the entire requested week is in the past
     if date_strategy == 'week_past':
@@ -1628,7 +1628,7 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
         from datetime import timedelta
         start_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
         date_strategy = 'day'
-        days_to_fetch = 2
+        days_to_fetch = 5
         logger.info(f"[DATE] Using tomorrow as start_date: {start_date}, strategy={date_strategy}")
 
     if USE_MOCK_API:
