@@ -671,7 +671,13 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
     is_scheduling_guided = (workflow_type == 'guided_selection' and
                             any(kw in str(pending_action).lower() for kw in ['schedule', 'book', 'available dates']))
 
-    if current_stage in ['showing_schedulable_projects', 'project_selection', 'awaiting_project_selection'] and (workflow_type == 'schedule_appointment' or is_scheduling_guided):
+    # Also handle project switch during awaiting_date_selection (user picks different project after one failed/was already scheduled)
+    is_project_selection_stage = current_stage in ['showing_schedulable_projects', 'project_selection', 'awaiting_project_selection']
+    is_switching_project_during_dates = (current_stage == 'awaiting_date_selection' and
+                                         workflow_type == 'schedule_appointment' and
+                                         not extract_date_from_message(message))  # Not providing a date
+
+    if (is_project_selection_stage or is_switching_project_during_dates) and (workflow_type == 'schedule_appointment' or is_scheduling_guided):
         # Get project_ids and project_mapping from context (these ARE saved)
         project_ids = context.get('project_ids', [])
         project_mapping = context.get('project_mapping', {})
