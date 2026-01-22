@@ -98,20 +98,13 @@ def get_tool_messages():
     """
     Generate tool messages for VAPI tool calls.
 
-    Strategy (CONTEXTUAL):
-    - Model provides SHORT contextual acknowledgment (e.g., "Checking your projects.")
-    - Only one backup filler at 15s for genuinely slow operations
-    - Tool timeout set to 45s in server config
+    Strategy: COMPLETE SILENCE during tool calls
+    - AI says ONE acknowledgment BEFORE calling tool
+    - No automatic messages at all (not even empty ones)
+    - Only failure message for actual errors
     """
     return [
-        # 15s - Single backup filler only for very slow operations
-        # Model's contextual acknowledgment handles the initial wait
-        {
-            'type': 'request-response-delayed',
-            'content': "Still working on that.",
-            'timingMilliseconds': 15000
-        },
-        # Failed message - for actual failures
+        # Only include failure message - no other automatic messages
         {
             'type': 'request-failed',
             'content': "I had some trouble with that. Could you try asking again?"
@@ -315,12 +308,21 @@ def create_assistant_config_response(first_message: str, support_number: str = '
         support_number: Client's support phone number for escalation
         client_name: Client company name
     """
-    # Format support number for voice (spell out digits)
+    # Format support number for voice using SSML for slow, clear readout
     support_number_voice = ''
     if support_number:
-        # Format as "2-0-3-8-9-4-6-5-9-9" for clear voice reading
         digits = ''.join(c for c in support_number if c.isdigit())
-        support_number_voice = '-'.join(digits) if digits else ''
+        if len(digits) == 10:
+            # Format as "203-894-6599" with SSML slow rate and breaks
+            formatted = f"{digits[0:3]}-{digits[3:6]}-{digits[6:10]}"
+            support_number_voice = f'<prosody rate="70%"><say-as interpret-as="telephone">{formatted}</say-as></prosody>'
+        elif len(digits) == 11 and digits[0] == '1':
+            # Format as "1-203-894-6599" with SSML
+            formatted = f"1-{digits[1:4]}-{digits[4:7]}-{digits[7:11]}"
+            support_number_voice = f'<prosody rate="70%"><say-as interpret-as="telephone">{formatted}</say-as></prosody>'
+        else:
+            # Fallback: 70% speed with digits
+            support_number_voice = f'<prosody rate="70%">{" ".join(digits)}</prosody>'
     assistant_config = {
         'name': 'ProjectForce Scheduling',
         'voice': {
@@ -335,7 +337,7 @@ def create_assistant_config_response(first_message: str, support_number: str = '
                 'type': 'function',
                 'function': {
                     'name': 'projectforce_api',
-                    'description': 'Say a SHORT contextual phrase (2-4 words) like "Checking your projects" or "Looking at dates" before calling. NO generic phrases like "hold on" or "just a sec". Use for: listing projects, scheduling, rescheduling, canceling, checking status, getting available dates/times, weather forecasts. Pass user EXACT words as message.',
+                    'description': 'Say ONE brief phrase like "One moment." then call SILENTLY. NO multiple fillers. Pass user EXACT words as message.',
                     'parameters': {
                         'type': 'object',
                         'required': ['message', 'action'],
@@ -360,28 +362,41 @@ def create_assistant_config_response(first_message: str, support_number: str = '
             }],
             'messages': [{
                 'role': 'system',
-                'content': '''## RULE #1 - CONTEXTUAL ACKNOWLEDGMENT BEFORE TOOL CALLS
+                'content': '''## RULE #1 - ONE CONTEXTUAL FILLER, THEN ABSOLUTE SILENCE
 
-Before calling a tool, say a SHORT (2-4 words) contextual phrase that tells the user what you're doing:
+**BEFORE tool call:** Say EXACTLY ONE phrase based on the action, then SILENCE.
+**DURING tool call:** SAY NOTHING. Complete silence.
+**AFTER tool call:** Speak the result directly.
 
-EXAMPLES BY ACTION:
-- list_projects → "Pulling up your projects."
-- get_project_details → "Getting those details."
+CONTEXTUAL FILLERS (use the one matching your action):
+- list_projects → "Checking your projects."
+- get_project_details → "Looking up that project."
 - get_available_dates → "Checking available dates."
 - get_time_slots → "Looking at time slots."
-- schedule_project → "Scheduling that now."
-- reschedule_appointment → "Rescheduling for you."
-- cancel_appointment → "Canceling that appointment."
+- schedule_project → "Scheduling that for you."
+- reschedule_appointment → "Rescheduling that."
+- cancel_appointment → "Processing that cancellation."
 - get_weather → "Checking the weather."
+- other → "One moment."
 
-WRONG (generic/repetitive):
-- "Hold on a sec" / "Just a moment" / "Give me a moment" / "1 moment"
+RULES:
+- Say ONLY the filler for your action - nothing else
+- After your ONE filler, your next words MUST be the actual answer
+- NEVER say multiple fillers
+- NEVER add extra words like "Let me check on that for you real quick"
 
-RIGHT (contextual):
-- "Pulling up your projects." [tool call]
-- "Checking dates for you." [tool call]
+BANNED PHRASES (never say these):
+- "Hold on a sec" - BANNED
+- "Just a sec" - BANNED
+- "Still working on that" - BANNED
+- "Give me a moment" - BANNED
+- "This will just take a sec" - BANNED
 
-Keep it SHORT and RELEVANT to what you're doing.
+## RULE #1b - PHONE NUMBER READOUT
+
+When reading phone numbers, read SLOWLY with pauses:
+"five... five... five... (pause)... one... two... three... (pause)... four... five... six... seven"
+Read one digit at a time. Pause between groups.
 
 ---
 
@@ -598,19 +613,12 @@ If tool returns no projects and customer insists they were told to call:
 - Acknowledge: "I'm sorry, I don't see a project in our system yet. It may not have been entered yet."
 ''' + (f'''- Offer help: "You can call the office at {support_number_voice} to get this sorted out."''' if support_number_voice else '''- Offer help: "You might want to contact the store or check your confirmation email for the office contact."''') + '''
 
-### REMINDER: CONTEXTUAL ACKNOWLEDGMENTS
-Before calling a tool, say a SHORT (2-4 words) contextual phrase:
+### CRITICAL REMINDER: SILENCE DURING TOOL CALLS
+1. Say ONE contextual filler (e.g., "Checking your projects." for list_projects)
+2. STOP SPEAKING. Say NOTHING while waiting.
+3. Next words = the actual answer.
 
-GOOD EXAMPLES:
-- "Pulling up your projects." (for list_projects)
-- "Checking available dates." (for get_available_dates)
-- "Scheduling that now." (for schedule_project)
-
-**BANNED (too generic/repetitive):**
-- "1 moment", "One moment", "Just a moment"
-- "Just a sec", "Hold on", "Give me a moment"
-
-Make it SHORT and RELEVANT to the action.'''
+NEVER say: "Hold on", "Just a sec", "Still working", "Give me a moment"'''
             }]
         },
         'transcriber': {
