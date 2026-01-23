@@ -66,28 +66,19 @@ def get_category_bucket(category: str) -> Optional[str]:
     return None
 
 
-def handle_calendar_info(message: str) -> Optional[Dict[str, Any]]:
+def handle_calendar_info(date_param: str, message: str) -> Dict[str, Any]:
     """
-    Handle calendar/day-of-week questions.
-    Returns response dict if this is a calendar question, None otherwise.
+    Handle calendar/day-of-week questions using Python datetime.
+    Called after LLM classifies intent as Calendar_Info_Request.
 
-    Examples:
-    - "what day is September 14th"
-    - "which day does February 20th fall on"
-    - "tell me what day March 5 is"
+    Args:
+        date_param: Date string (YYYY-MM-DD format from LLM, or natural language)
+        message: Original user message (for fallback parsing)
+
+    Returns:
+        Response dict with the day of week
     """
-    msg_lower = message.lower()
-
-    # Patterns that indicate a calendar question
-    calendar_patterns = [
-        r'what day (?:is|does|will) (\w+ \d+)',
-        r'which day (?:is|does|will) (\w+ \d+)',
-        r'(\w+ \d+(?:st|nd|rd|th)?)[,\s]+(?:what|which) day',
-        r'tell me (?:what|which) day (?:is )?(\w+ \d+)',
-        r'(\w+ \d+(?:st|nd|rd|th)?)\s+fall(?:s)? on',
-    ]
-
-    # Month name mapping
+    # Month name mapping for natural language parsing
     months = {
         'january': 1, 'jan': 1, 'february': 2, 'feb': 2, 'march': 3, 'mar': 3,
         'april': 4, 'apr': 4, 'may': 5, 'june': 6, 'jun': 6,
@@ -95,53 +86,59 @@ def handle_calendar_info(message: str) -> Optional[Dict[str, Any]]:
         'october': 10, 'oct': 10, 'november': 11, 'nov': 11, 'december': 12, 'dec': 12
     }
 
-    for pattern in calendar_patterns:
-        match = re.search(pattern, msg_lower)
-        if match:
-            date_str = match.group(1)
-            logger.info(f"[CALENDAR-INFO] Detected calendar question, date_str: {date_str}")
+    target_date = None
+    current_date = datetime.now()
 
-            # Parse month and day from date_str (e.g., "september 14th", "feb 20")
-            date_match = re.match(r'(\w+)\s+(\d+)', date_str)
-            if date_match:
-                month_str = date_match.group(1).lower()
-                day = int(date_match.group(2))
+    # Try YYYY-MM-DD format first (from LLM)
+    if date_param:
+        try:
+            target_date = datetime.strptime(date_param, "%Y-%m-%d")
+            logger.info(f"[CALENDAR-INFO] Parsed YYYY-MM-DD format: {date_param}")
+        except ValueError:
+            pass
 
-                month = months.get(month_str)
-                if month:
-                    # Assume current year, or next year if date has passed
-                    current_date = datetime.now()
-                    year = current_date.year
-
-                    try:
+    # Fallback: parse natural language from message
+    if not target_date:
+        msg_lower = message.lower()
+        # Look for "month day" pattern
+        date_match = re.search(r'(\w+)\s+(\d+)(?:st|nd|rd|th)?', msg_lower)
+        if date_match:
+            month_str = date_match.group(1).lower()
+            day = int(date_match.group(2))
+            month = months.get(month_str)
+            if month:
+                year = current_date.year
+                try:
+                    target_date = datetime(year, month, day)
+                    # If date has passed this year, use next year
+                    if target_date < current_date:
+                        year += 1
                         target_date = datetime(year, month, day)
-                        # If date has already passed this year, use next year
-                        if target_date < current_date:
-                            year += 1
-                            target_date = datetime(year, month, day)
+                    logger.info(f"[CALENDAR-INFO] Parsed natural language: {month_str} {day} -> {target_date}")
+                except ValueError:
+                    pass
 
-                        day_name = target_date.strftime("%A")
-                        formatted_date = target_date.strftime("%B %d, %Y")
+    if target_date:
+        day_name = target_date.strftime("%A")
+        formatted_date = target_date.strftime("%B %d, %Y")
+        logger.info(f"[CALENDAR-INFO] {formatted_date} is a {day_name}")
 
-                        logger.info(f"[CALENDAR-INFO] {formatted_date} is a {day_name}")
+        return {
+            'response': f"{formatted_date} is a {day_name}.",
+            'intent': 'information',
+            'action': 'calendar_info',
+            'agent_name': 'Intelligent Orchestrator (Calendar)',
+            'direct_call': True
+        }
 
-                        return {
-                            'response': f"{formatted_date} is a {day_name}.",
-                            'intent': 'information',
-                            'action': 'calendar_info',
-                            'agent_name': 'Intelligent Orchestrator (Calendar)',
-                            'direct_call': True
-                        }
-                    except ValueError as e:
-                        logger.warning(f"[CALENDAR-INFO] Invalid date: {e}")
-                        return {
-                            'response': f"I couldn't understand that date. Could you please say it again?",
-                            'intent': 'information',
-                            'action': 'calendar_info_error',
-                            'agent_name': 'Intelligent Orchestrator (Calendar)'
-                        }
-
-    return None
+    # Could not parse date
+    logger.warning(f"[CALENDAR-INFO] Could not parse date from: {date_param}, {message}")
+    return {
+        'response': "I couldn't understand that date. Could you please say it again, like 'September 14th'?",
+        'intent': 'information',
+        'action': 'calendar_info_error',
+        'agent_name': 'Intelligent Orchestrator (Calendar)'
+    }
 
 
 def find_project_by_partial_id(search_id: str, project_mapping: Dict[str, Any]) -> Optional[str]:
@@ -2505,18 +2502,6 @@ def orchestrate_intelligent_workflow(
     workflow_state = state_manager.get_state(session_id)
 
     # ========================================================================
-    # CALENDAR INFO HANDLER (All channels)
-    # Handle "what day is September 14th" type questions using Python datetime
-    # This ensures accurate day-of-week calculations (GPT-4o math can be wrong)
-    # ========================================================================
-    calendar_response = handle_calendar_info(message)
-    if calendar_response:
-        timing['total'] = time.time() - start_time
-        calendar_response['timing'] = timing
-        calendar_response['channel'] = channel
-        return calendar_response
-
-    # ========================================================================
     # SMART PROMPT PROJECT_ID FALLBACK (Voice only)
     # GPT-4o may pass project_id from embedded state in the smart system prompt
     # Use it as a fallback when workflow state doesn't have project context
@@ -4059,6 +4044,19 @@ What would you like to do?"""
             'timing': timing,
             'channel': channel
         }
+
+    # ========================================================================
+    # HANDLE CALENDAR INFO: What day is [date]?
+    # Uses Python datetime for accurate day-of-week calculations
+    # ========================================================================
+    if classification.get('action') == 'calendar_info':
+        logger.info("[CALENDAR-INFO] User asking about day of week")
+        date_param = enriched_entities.get('date', '')
+        calendar_response = handle_calendar_info(date_param, message)
+        calendar_response['timing'] = timing
+        calendar_response['timing']['total'] = time.time() - start_time
+        calendar_response['channel'] = channel
+        return calendar_response
 
     # HANDLE CONTEXT QUERIES: Answer from conversation history
     if classification.get('action') == 'context_query':

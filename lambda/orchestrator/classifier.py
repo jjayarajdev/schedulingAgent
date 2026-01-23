@@ -63,6 +63,7 @@ INTENT_ACTION_MAP = {
 
     # Non-scheduling intents
     "Weather_Request": "get_weather",
+    "Calendar_Info_Request": "calendar_info",
     "Greeting": "greet",
     "Help_Request": "help",
     "Farewell": "general",
@@ -77,7 +78,7 @@ INTENT_CATEGORIES = {
         "Schedule_Request", "Reschedule_Request", "Cancel_Request",
         "Appointment_Confirmation", "Note_Add_Request",
     },
-    "information": {"Weather_Request"},
+    "information": {"Weather_Request", "Calendar_Info_Request"},
     "chitchat": {"Greeting", "Help_Request", "Farewell", "Thanks"},
 }
 
@@ -568,6 +569,9 @@ Analyze the user utterance and extract structured information.
 
 ### Other Intents:
 - **Weather_Request**: User asks about weather
+- **Calendar_Info_Request**: User asks what day of the week a date falls on
+  Triggers: "what day is September 14th", "which day does February 20 fall on", "tell me what day March 5 is"
+  Parameters: date (the date they're asking about, format: YYYY-MM-DD)
 - **Greeting**: "hello", "hi", "hey"
 - **Help_Request**: "help", "what can you do"
 - **Thanks**: "thank you", "thanks"
