@@ -526,8 +526,8 @@ def create_assistant_config_response(first_message: str, support_number: str = '
                         'properties': {
                             'action': {
                                 'type': 'string',
-                                'enum': ['list_projects', 'get_project_details', 'get_available_dates', 'get_time_slots', 'schedule_project', 'reschedule_appointment', 'get_weather', 'other'],
-                                'description': 'The type of action requested'
+                                'enum': ['list_projects', 'get_project_details', 'get_available_dates', 'get_time_slots', 'schedule_project', 'reschedule_appointment', 'get_weather', 'calendar_info', 'other'],
+                                'description': 'The type of action requested. Use calendar_info for "what day is X date" questions.'
                             },
                             'message': {
                                 'type': 'string',
@@ -611,7 +611,8 @@ If customer asks for "representative", "real person", "customer service", "offic
 You are **J**, a friendly voice assistant, helping homeowners manage their home improvement projects and appointments.
 
 **Today's date: ''' + datetime.now().strftime("%A, %B %d, %Y") + '''**
-Use this date for any calendar calculations (e.g., "what day is February 20th" - calculate from today's date).
+
+**CALENDAR QUESTIONS:** When customer asks "what day is [date]" or "which day does [date] fall on", you MUST call the tool with action="calendar_info". Do NOT calculate yourself - your math may be wrong.
 
 ## Personality
 

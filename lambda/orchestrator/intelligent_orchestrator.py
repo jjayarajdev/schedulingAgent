@@ -19,6 +19,7 @@ import logging
 import re
 import time
 import boto3
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from botocore.config import Config as BotoConfig
 
@@ -62,6 +63,84 @@ def get_category_bucket(category: str) -> Optional[str]:
     for bucket_name, bucket_categories in CATEGORY_BUCKETS.items():
         if cat_lower in bucket_categories:
             return bucket_name
+    return None
+
+
+def handle_calendar_info(message: str) -> Optional[Dict[str, Any]]:
+    """
+    Handle calendar/day-of-week questions.
+    Returns response dict if this is a calendar question, None otherwise.
+
+    Examples:
+    - "what day is September 14th"
+    - "which day does February 20th fall on"
+    - "tell me what day March 5 is"
+    """
+    msg_lower = message.lower()
+
+    # Patterns that indicate a calendar question
+    calendar_patterns = [
+        r'what day (?:is|does|will) (\w+ \d+)',
+        r'which day (?:is|does|will) (\w+ \d+)',
+        r'(\w+ \d+(?:st|nd|rd|th)?)[,\s]+(?:what|which) day',
+        r'tell me (?:what|which) day (?:is )?(\w+ \d+)',
+        r'(\w+ \d+(?:st|nd|rd|th)?)\s+fall(?:s)? on',
+    ]
+
+    # Month name mapping
+    months = {
+        'january': 1, 'jan': 1, 'february': 2, 'feb': 2, 'march': 3, 'mar': 3,
+        'april': 4, 'apr': 4, 'may': 5, 'june': 6, 'jun': 6,
+        'july': 7, 'jul': 7, 'august': 8, 'aug': 8, 'september': 9, 'sep': 9, 'sept': 9,
+        'october': 10, 'oct': 10, 'november': 11, 'nov': 11, 'december': 12, 'dec': 12
+    }
+
+    for pattern in calendar_patterns:
+        match = re.search(pattern, msg_lower)
+        if match:
+            date_str = match.group(1)
+            logger.info(f"[CALENDAR-INFO] Detected calendar question, date_str: {date_str}")
+
+            # Parse month and day from date_str (e.g., "september 14th", "feb 20")
+            date_match = re.match(r'(\w+)\s+(\d+)', date_str)
+            if date_match:
+                month_str = date_match.group(1).lower()
+                day = int(date_match.group(2))
+
+                month = months.get(month_str)
+                if month:
+                    # Assume current year, or next year if date has passed
+                    current_date = datetime.now()
+                    year = current_date.year
+
+                    try:
+                        target_date = datetime(year, month, day)
+                        # If date has already passed this year, use next year
+                        if target_date < current_date:
+                            year += 1
+                            target_date = datetime(year, month, day)
+
+                        day_name = target_date.strftime("%A")
+                        formatted_date = target_date.strftime("%B %d, %Y")
+
+                        logger.info(f"[CALENDAR-INFO] {formatted_date} is a {day_name}")
+
+                        return {
+                            'response': f"{formatted_date} is a {day_name}.",
+                            'intent': 'information',
+                            'action': 'calendar_info',
+                            'agent_name': 'Intelligent Orchestrator (Calendar)',
+                            'direct_call': True
+                        }
+                    except ValueError as e:
+                        logger.warning(f"[CALENDAR-INFO] Invalid date: {e}")
+                        return {
+                            'response': f"I couldn't understand that date. Could you please say it again?",
+                            'intent': 'information',
+                            'action': 'calendar_info_error',
+                            'agent_name': 'Intelligent Orchestrator (Calendar)'
+                        }
+
     return None
 
 
@@ -2424,6 +2503,18 @@ def orchestrate_intelligent_workflow(
 
     # Load current workflow state (if any)
     workflow_state = state_manager.get_state(session_id)
+
+    # ========================================================================
+    # CALENDAR INFO HANDLER (All channels)
+    # Handle "what day is September 14th" type questions using Python datetime
+    # This ensures accurate day-of-week calculations (GPT-4o math can be wrong)
+    # ========================================================================
+    calendar_response = handle_calendar_info(message)
+    if calendar_response:
+        timing['total'] = time.time() - start_time
+        calendar_response['timing'] = timing
+        calendar_response['channel'] = channel
+        return calendar_response
 
     # ========================================================================
     # SMART PROMPT PROJECT_ID FALLBACK (Voice only)
