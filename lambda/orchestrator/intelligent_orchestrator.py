@@ -2309,7 +2309,8 @@ def orchestrate_intelligent_workflow(
     pf_bearer_token: str,
     conversation_history: List[Dict],
     channel: str = 'chat',  # 'chat' or 'voice' - for channel-specific handling
-    from_phone: str = ''  # For voice cache lookup
+    from_phone: str = '',  # For voice cache lookup
+    project_id: str = ''  # From GPT-4o smart prompt embedded state (voice)
 ) -> Dict[str, Any]:
     """
     Main intelligent orchestration function
@@ -2324,6 +2325,7 @@ def orchestrate_intelligent_workflow(
         conversation_history: Previous messages
         channel: 'chat' or 'voice'
         from_phone: Caller phone number for voice cache lookup
+        project_id: Optional project_id from GPT-4o smart prompt (voice fast path)
 
     Returns:
         Response dictionary with text, intent, action, timing
@@ -2336,6 +2338,39 @@ def orchestrate_intelligent_workflow(
 
     # Load current workflow state (if any)
     workflow_state = state_manager.get_state(session_id)
+
+    # ========================================================================
+    # SMART PROMPT PROJECT_ID FALLBACK (Voice only)
+    # GPT-4o may pass project_id from embedded state in the smart system prompt
+    # Use it as a fallback when workflow state doesn't have project context
+    # ========================================================================
+    if project_id and channel == 'voice':
+        logger.info(f"[SMART-PROMPT] project_id passed from GPT-4o: {project_id}")
+        # If workflow state exists but lacks project_id in context, inject it
+        context = workflow_state.get('context', {}) if workflow_state else {}
+        if workflow_state and not context.get('project_id'):
+            logger.info(f"[SMART-PROMPT] Injecting project_id into workflow context as fallback")
+            if 'context' not in workflow_state:
+                workflow_state['context'] = {}
+            workflow_state['context']['project_id'] = project_id
+            # Also add to project_ids list if not present
+            project_ids = workflow_state['context'].get('project_ids', [])
+            if project_id not in project_ids:
+                workflow_state['context']['project_ids'] = [project_id] + project_ids
+            state_manager.save_state(session_id, workflow_state)
+            logger.info(f"[SMART-PROMPT] Workflow state updated with smart prompt project_id")
+        elif not workflow_state:
+            # No workflow state at all - create minimal state with project_id
+            logger.info(f"[SMART-PROMPT] No workflow state - creating minimal state with project_id")
+            workflow_state = {
+                'workflow_type': 'smart_prompt_context',
+                'current_stage': 'initial',
+                'context': {
+                    'project_id': project_id,
+                    'project_ids': [project_id]
+                }
+            }
+            state_manager.save_state(session_id, workflow_state)
 
     # ========================================================================
     # PENDING CONFIRMATION HANDLER (Chat/SMS only)
@@ -5264,12 +5299,21 @@ What would you like to do?"""
                         for p in list_body['projects']:
                             pid = str(p.get('id', ''))
                             project_number = p.get('projectNumber', '')
+                            project_status = p.get('status', '')
                             if pid:
-                                # Map by internal ID
-                                project_mapping[pid] = {'projectNumber': project_number, 'category': p.get('category', '')}
+                                # Map by internal ID - include status for reschedule detection
+                                project_mapping[pid] = {
+                                    'projectNumber': project_number,
+                                    'category': p.get('category', ''),
+                                    'status': project_status
+                                }
                                 # Also map by Order Number for reverse lookup
                                 if project_number:
-                                    project_mapping[project_number] = {'project_id': pid, 'category': p.get('category', '')}
+                                    project_mapping[project_number] = {
+                                        'project_id': pid,
+                                        'category': p.get('category', ''),
+                                        'status': project_status
+                                    }
                         logger.info(f"[ORDER-RESOLVE] Auto-fetched {len(list_body['projects'])} projects, mapping keys: {list(project_mapping.keys())[:10]}")
 
                         # Try EXACT match first (case-insensitive for alphanumeric projectNumbers)
@@ -5310,6 +5354,45 @@ What would you like to do?"""
             logger.info(f"[ACTION CONVERT] Converting schedule_project -> get_available_dates")
             lambda_action = 'get_available_dates'
             decision['lambda_action'] = 'get_available_dates'
+
+        # ============================================================================
+        # AUTO-CONVERT TO RESCHEDULE: If get_available_dates is called on a project
+        # that is already scheduled, auto-convert to reschedule_appointment.
+        # This handles the case where NLU classifies "reschedule this week" as
+        # get_available_dates instead of reschedule_appointment.
+        # PF API returns "Not allowed" for get_available_dates on scheduled projects.
+        # ============================================================================
+        if lambda_action == 'get_available_dates' and not is_reschedule:
+            project_id_to_check = lambda_params.get('project_id')
+            if project_id_to_check:
+                # Check if project is already scheduled
+                project_status = None
+
+                # First try: Get status from project_mapping (populated during order-resolve)
+                if project_mapping:
+                    project_info = project_mapping.get(str(project_id_to_check), {})
+                    project_status = project_info.get('status', '')
+
+                # Second try: Check workflow state context
+                if not project_status and workflow_state:
+                    context = workflow_state.get('context', {})
+                    ctx_mapping = context.get('project_mapping', {})
+                    if ctx_mapping:
+                        project_info = ctx_mapping.get(str(project_id_to_check), {})
+                        project_status = project_info.get('status', '')
+
+                # Check if scheduled (matches SCHEDULED_STATUSES)
+                if project_status:
+                    scheduled_statuses = ['Scheduled', 'Customer Scheduled']
+                    if project_status in scheduled_statuses:
+                        logger.info(f"[AUTO-RESCHEDULE] Project {project_id_to_check} is already scheduled (status='{project_status}')")
+                        logger.info(f"[AUTO-RESCHEDULE] Converting get_available_dates -> reschedule_appointment")
+                        lambda_action = 'reschedule_appointment'
+                        decision['lambda_action'] = 'reschedule_appointment'
+                        is_reschedule = True
+                        is_new_reschedule_request = True
+                    else:
+                        logger.info(f"[SCHEDULE-CHECK] Project {project_id_to_check} status='{project_status}' - proceeding with get_available_dates")
 
         logger.info(f"[LAMBDA] Calling Lambda: {lambda_action} with params: {lambda_params}")
         lambda_start = time.time()

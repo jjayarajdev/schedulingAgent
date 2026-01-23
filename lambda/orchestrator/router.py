@@ -1651,7 +1651,8 @@ def route_request(
     pf_bearer_token: str = None,
     conversation_history: Optional[list] = None,
     channel: str = 'chat',
-    from_phone: str = ''
+    from_phone: str = '',
+    project_id: str = ''
 ) -> Dict[str, Any]:
     """
     Route request to either Direct Lambda or Bedrock Agent
@@ -1666,6 +1667,7 @@ def route_request(
         conversation_history: Previous conversation for context
         channel: Channel type ('voice' or 'chat') - determines response formatting
         from_phone: Caller phone number for voice cache lookup
+        project_id: Optional project_id from GPT-4o smart prompt embedded state
 
     Returns:
         Dictionary with:
@@ -1727,7 +1729,8 @@ def route_request(
                 pf_bearer_token=pf_bearer_token,
                 conversation_history=conversation_history,
                 channel=channel,
-                from_phone=from_phone
+                from_phone=from_phone,
+                project_id=project_id  # From GPT-4o smart prompt embedded state
             )
 
             # VOICE ADAPTATION: For voice channel, format the response
@@ -1817,7 +1820,8 @@ def route_request(
                 pf_bearer_token=pf_bearer_token,
                 conversation_history=conversation_history,
                 channel=channel,  # Pass channel for voice-specific handling
-                from_phone=from_phone
+                from_phone=from_phone,
+                project_id=project_id  # From GPT-4o smart prompt embedded state
             )
 
             # VOICE ADAPTATION: For voice channel, format the response

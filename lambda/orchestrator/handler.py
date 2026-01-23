@@ -58,6 +58,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         channel = body.get('channel', 'chat')  # 'voice' or 'chat'
         caller_phone = body.get('caller_phone', '')  # For Vapi voice calls
         from_phone = body.get('from_phone', '')  # For voice cache lookup in scheduling-actions
+        project_id = body.get('project_id', '')  # From GPT-4o smart prompt embedded state
 
         # Validate required parameters
         if not message:
@@ -140,7 +141,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             pf_bearer_token=pf_token,
             conversation_history=conversation_history,
             channel=channel,
-            from_phone=from_phone  # For voice cache lookup in scheduling-actions
+            from_phone=from_phone,  # For voice cache lookup in scheduling-actions
+            project_id=project_id  # From GPT-4o smart prompt embedded state
         )
 
         # Extract response components

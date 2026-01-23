@@ -93,6 +93,163 @@ FILLER_MESSAGES = {
 }
 
 
+def build_smart_project_context(projects_data: Optional[Dict]) -> str:
+    """
+    Build a smart project context string for the system prompt.
+
+    Embeds project state directly so GPT-4o can respond without tool calls
+    for common queries like "show my projects" or "schedule appointment".
+
+    Args:
+        projects_data: Dict from get_cached_projects with 'projects' and 'project_mapping'
+
+    Returns:
+        String to embed in system prompt, or empty string if no projects
+    """
+    if not projects_data:
+        return ""
+
+    projects = projects_data.get('projects', [])
+    project_mapping = projects_data.get('project_mapping', {})
+
+    if not projects:
+        return """
+
+## YOUR CUSTOMER'S PROJECTS (EMBEDDED STATE)
+
+This customer has NO projects in the system.
+
+**When they ask about projects:**
+- Say: "I don't see any projects for you right now. Is there something else I can help with?"
+- Do NOT call the tool for list_projects - you already know the answer.
+"""
+
+    # Categorize projects
+    scheduled_projects = []
+    schedulable_projects = []
+    other_projects = []
+
+    for p in projects:
+        status = (p.get('status') or '').lower()
+        category = p.get('category', 'Unknown')
+        project_id = p.get('project_id') or p.get('id', '')
+        scheduled_date = p.get('scheduled_date', '')
+
+        project_info = {
+            'category': category,
+            'project_id': project_id,
+            'status': status,
+            'scheduled_date': scheduled_date,
+            'address': p.get('address', ''),
+        }
+
+        # Determine bucket
+        if status in ['scheduled', 'customer scheduled']:
+            scheduled_projects.append(project_info)
+        elif status in ['ready to schedule', 'new', 'ready']:
+            schedulable_projects.append(project_info)
+        else:
+            other_projects.append(project_info)
+
+    # Build context string
+    context_parts = ["\n\n## YOUR CUSTOMER'S PROJECTS (EMBEDDED STATE - RESPOND WITHOUT TOOL CALL)\n"]
+    context_parts.append(f"Total projects: {len(projects)}\n")
+
+    # Scheduled projects
+    if scheduled_projects:
+        context_parts.append(f"\n**ALREADY SCHEDULED ({len(scheduled_projects)}):**")
+        for i, p in enumerate(scheduled_projects, 1):
+            date_str = p['scheduled_date'] if p['scheduled_date'] else 'date TBD'
+            context_parts.append(f"  {i}. {p['category']} - {date_str} (ID: {p['project_id']})")
+
+    # Schedulable projects
+    if schedulable_projects:
+        context_parts.append(f"\n**READY TO SCHEDULE ({len(schedulable_projects)}):**")
+        for i, p in enumerate(schedulable_projects, 1):
+            context_parts.append(f"  {i}. {p['category']} - status: {p['status']} (ID: {p['project_id']})")
+
+    # Other projects
+    if other_projects:
+        context_parts.append(f"\n**OTHER ({len(other_projects)}):**")
+        for i, p in enumerate(other_projects, 1):
+            context_parts.append(f"  {i}. {p['category']} - status: {p['status']} (ID: {p['project_id']})")
+
+    # Add response guidance
+    context_parts.append("\n\n**SMART RESPONSES (NO TOOL CALL NEEDED):**")
+
+    # Guide for "show my projects" / "what are my projects"
+    if len(projects) == 1:
+        p = projects[0]
+        status = (p.get('status') or '').lower()
+        if status in ['scheduled', 'customer scheduled']:
+            date = p.get('scheduled_date', '')
+            context_parts.append(f'''
+- "Show my projects" / "What projects do I have?" →
+  Say: "You have one project - {p.get('category')}. It's already scheduled for {date}. Would you like to reschedule, or check the appointment details?"
+  (No tool call needed - you have the info!)''')
+        else:
+            context_parts.append(f'''
+- "Show my projects" / "What projects do I have?" →
+  Say: "You have one project - {p.get('category')}. It's ready to schedule. Would you like me to check available dates?"
+  (No tool call needed!)''')
+    else:
+        # Multiple projects
+        sched_count = len(scheduled_projects)
+        ready_count = len(schedulable_projects)
+        if sched_count > 0 and ready_count > 0:
+            context_parts.append(f'''
+- "Show my projects" →
+  Say: "You have {len(projects)} projects. {sched_count} already scheduled, and {ready_count} ready to schedule. Which would you like to know more about?"''')
+        elif sched_count > 0:
+            context_parts.append(f'''
+- "Show my projects" →
+  Say: "You have {sched_count} project{'s' if sched_count > 1 else ''}, all already scheduled. Would you like to check the details or reschedule?"''')
+        elif ready_count > 0:
+            context_parts.append(f'''
+- "Show my projects" →
+  Say: "You have {ready_count} project{'s' if ready_count > 1 else ''} ready to schedule. Would you like to pick one?"''')
+
+    # Guide for "schedule appointment" / "schedule a project"
+    if len(schedulable_projects) == 0 and len(scheduled_projects) > 0:
+        p = scheduled_projects[0]
+        context_parts.append(f'''
+- "Schedule appointment" / "I want to schedule" / "Reschedule" →
+  Say: "Your {p['category']} is already scheduled for {p['scheduled_date']}. Would you like to reschedule, or check the details?"
+  If they say YES/RESCHEDULE → call tool: action=reschedule_appointment, project_id={p['project_id']}, message: "user's words"
+  (IMPORTANT: Use reschedule_appointment for already-scheduled projects, NOT get_available_dates!)''')
+    elif len(schedulable_projects) == 1:
+        p = schedulable_projects[0]
+        context_parts.append(f'''
+- "Schedule appointment" / "Schedule a project" →
+  You can offer: "I see your {p['category']} project is ready. Would you like me to check available dates?"
+  If they say YES → call tool: action=get_available_dates, project_id={p['project_id']}''')
+    elif len(schedulable_projects) > 1:
+        categories = [p['category'] for p in schedulable_projects[:3]]
+        context_parts.append(f'''
+- "Schedule appointment" →
+  Say: "I see {len(schedulable_projects)} projects ready to schedule: {', '.join(categories)}. Which one?"
+  (No tool call needed to list them!)''')
+
+    # Note about when to use tools
+    context_parts.append('''
+**WHEN TO USE THE TOOL:**
+- get_available_dates: For projects NOT yet scheduled (status: Ready To Schedule, New)
+- reschedule_appointment: For projects ALREADY scheduled (status: Scheduled, Customer Scheduled)
+  IMPORTANT: If user says "reschedule" or wants new dates for an ALREADY SCHEDULED project,
+  use action=reschedule_appointment (NOT get_available_dates!)
+- get_time_slots: When user picks a date and needs time slots
+- schedule_project: When user confirms date AND time
+- get_project_details: When user asks for details you don't have (technician, exact time, etc.)
+- ALWAYS include project_id when you know which project (from the IDs above)
+
+**CRITICAL:** When calling the tool, include the project_id from above:
+  - For NEW scheduling: action=get_available_dates, project_id: [ID], message: "user's words"
+  - For RESCHEDULING: action=reschedule_appointment, project_id: [ID], message: "user's words"
+''')
+
+    return '\n'.join(context_parts)
+
+
 def get_tool_messages():
     """
     Generate tool messages for VAPI tool calls.
@@ -298,7 +455,7 @@ def generate_dynamic_greeting(client_name: str, user_name: str = None) -> str:
     return greeting
 
 
-def create_assistant_config_response(first_message: str, support_number: str = '', client_name: str = 'ProjectForce') -> Dict:
+def create_assistant_config_response(first_message: str, support_number: str = '', client_name: str = 'ProjectForce', projects_data: Optional[Dict] = None) -> Dict:
     """
     Create response with customized assistant configuration.
 
@@ -309,6 +466,7 @@ def create_assistant_config_response(first_message: str, support_number: str = '
         first_message: The greeting message
         support_number: Client's support phone number for escalation
         client_name: Client company name
+        projects_data: Optional cached projects data for smart system prompt
     """
     # Format support number for voice - natural formatting (no SSML, GPT-4o outputs as text)
     # Use commas and ellipsis for natural pauses when spoken by TTS
@@ -337,7 +495,7 @@ def create_assistant_config_response(first_message: str, support_number: str = '
                 'type': 'function',
                 'function': {
                     'name': 'projectforce_api',
-                    'description': 'Say ONE brief phrase like "One moment." then call SILENTLY. NO multiple fillers. Pass user EXACT words as message.',
+                    'description': 'Say ONE brief phrase like "One moment." then call SILENTLY. NO multiple fillers. Pass user EXACT words as message. Include project_id when you know which project.',
                     'parameters': {
                         'type': 'object',
                         'required': ['message', 'action'],
@@ -350,6 +508,10 @@ def create_assistant_config_response(first_message: str, support_number: str = '
                             'message': {
                                 'type': 'string',
                                 'description': 'The user request or question. Pass the user exact words.'
+                            },
+                            'project_id': {
+                                'type': 'string',
+                                'description': 'The project ID from embedded state. Include when you know which project (from YOUR CUSTOMER\'S PROJECTS section).'
                             }
                         }
                     }
@@ -635,7 +797,7 @@ If tool returns no projects and customer insists they were told to call:
 2. STOP SPEAKING. Say NOTHING while waiting.
 3. Next words = the actual answer.
 
-NEVER say: "Hold on", "Just a sec", "Still working", "Give me a moment"'''
+NEVER say: "Hold on", "Just a sec", "Still working", "Give me a moment"''' + build_smart_project_context(projects_data)
             }]
         },
         'transcriber': {
@@ -699,6 +861,8 @@ def handle_assistant_request(message: Dict) -> Dict:
                 logger.info(f"[VAPI] Dynamic greeting for client: {client_name}, support: {support_number}")
 
                 # PRELOAD PROJECTS at call start for faster voice responses
+                # Then get the cached data for smart system prompt
+                projects_data = None
                 if VOICE_CACHE_AVAILABLE:
                     try:
                         from phone_auth import normalize_phone
@@ -710,11 +874,16 @@ def handle_assistant_request(message: Dict) -> Dict:
                             bearer_token=credentials.get('bearer_token', '')
                         )
                         logger.info(f"[VAPI] Preload result: {preload_result.get('project_count', 0)} projects cached")
+
+                        # Get cached projects for smart system prompt
+                        projects_data = get_cached_projects(normalized_phone)
+                        if projects_data:
+                            logger.info(f"[VAPI] Smart prompt: {len(projects_data.get('projects', []))} projects embedded in system prompt")
                     except Exception as e:
                         logger.warning(f"[VAPI] Preload failed (non-blocking): {e}")
 
                 greeting = generate_dynamic_greeting(client_name, user_name)
-                return create_assistant_config_response(greeting, support_number, client_name)
+                return create_assistant_config_response(greeting, support_number, client_name, projects_data)
             else:
                 # Auth failed - use default greeting
                 logger.warning(f"[VAPI] Auth failed at call start, using default greeting")
@@ -835,6 +1004,10 @@ def handle_function_call(message: Dict) -> Dict:
     if function_name == 'projectforce_api':
         user_message = parameters.get('message', '')
         action = parameters.get('action', 'other')
+        project_id = parameters.get('project_id', '')  # From smart prompt embedded state
+
+        if project_id:
+            logger.info(f"[VAPI] GPT-4o passed project_id from embedded state: {project_id}")
 
         if not user_message:
             return create_function_response({
@@ -854,12 +1027,13 @@ def handle_function_call(message: Dict) -> Dict:
 
         logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, action={action}")
 
-        # Call orchestrator with the user's message (include from_phone for voice cache lookup)
+        # Call orchestrator with the user's message (include from_phone for voice cache lookup, project_id from smart prompt)
         response_text = call_orchestrator(
             message=user_message,
             call_id=call_id,
             credentials=credentials,
-            from_phone=from_phone
+            from_phone=from_phone,
+            project_id=project_id
         )
 
         return create_function_response({
@@ -934,6 +1108,10 @@ def handle_tool_calls(message: Dict) -> Dict:
         if function_name == 'projectforce_api':
             user_message = arguments.get('message', '')
             action = arguments.get('action', 'other')
+            project_id = arguments.get('project_id', '')  # From smart prompt embedded state
+
+            if project_id:
+                logger.info(f"[VAPI] GPT-4o passed project_id from embedded state: {project_id}")
 
             if not user_message:
                 results.append({
@@ -961,12 +1139,13 @@ def handle_tool_calls(message: Dict) -> Dict:
 
             logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, action={action}")
 
-            # Call orchestrator (include from_phone for voice cache lookup)
+            # Call orchestrator (include from_phone for voice cache lookup, project_id from smart prompt)
             response_text = call_orchestrator(
                 message=user_message,
                 call_id=call_id,
                 credentials=credentials,
-                from_phone=from_phone
+                from_phone=from_phone,
+                project_id=project_id
             )
 
             logger.info(f"[VAPI] Tool call result: {response_text[:200] if response_text else 'empty'}")
@@ -1054,23 +1233,37 @@ def authenticate_caller(from_phone: str, to_phone: str) -> Optional[Dict]:
         return None
 
 
-def call_orchestrator(message: str, call_id: str, credentials: Dict, from_phone: str = '') -> str:
+def call_orchestrator(message: str, call_id: str, credentials: Dict, from_phone: str = '', project_id: str = '') -> str:
     """
     Call the orchestrator Lambda with the user's message.
+
+    Args:
+        message: The user's message
+        call_id: VAPI call ID
+        credentials: Auth credentials from phone_auth
+        from_phone: Caller's phone number for voice cache lookup
+        project_id: Optional project ID from GPT-4o's embedded state (smart prompt)
     """
     try:
         # Build orchestrator payload
+        body_data = {
+            'message': message,
+            'session_id': f"vapi-{call_id}",
+            'pf_token': credentials.get('bearer_token', ''),
+            'pf_client_id': credentials.get('client_id', ''),
+            'pf_user_id': credentials.get('user_id', ''),
+            'pf_user_name': credentials.get('user_name', ''),
+            'channel': 'voice',
+            'from_phone': from_phone  # For voice cache lookup in scheduling-actions
+        }
+
+        # Include project_id if provided by GPT-4o from embedded state
+        if project_id:
+            body_data['project_id'] = project_id
+            logger.info(f"[VAPI] Including project_id from smart prompt: {project_id}")
+
         payload = {
-            'body': json.dumps({
-                'message': message,
-                'session_id': f"vapi-{call_id}",
-                'pf_token': credentials.get('bearer_token', ''),
-                'pf_client_id': credentials.get('client_id', ''),
-                'pf_user_id': credentials.get('user_id', ''),
-                'pf_user_name': credentials.get('user_name', ''),
-                'channel': 'voice',
-                'from_phone': from_phone  # For voice cache lookup in scheduling-actions
-            })
+            'body': json.dumps(body_data)
         }
 
         logger.info(f"[VAPI] Calling orchestrator: {ORCHESTRATOR_LAMBDA}, from_phone={'***'+from_phone[-4:] if from_phone else 'empty'}")
