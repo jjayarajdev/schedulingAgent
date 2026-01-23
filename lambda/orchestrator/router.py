@@ -1809,6 +1809,22 @@ def route_request(
     if needs_intelligent_orchestration:
         logger.info(f"[SONNET] INTELLIGENT ORCHESTRATION: Using Sonnet 3.7 for workflow decisions")
 
+        # CHECK FOR "THIS DATE" REFERENCE: If user says "book this date" after asking calendar question
+        msg_lower = message.lower()
+        if ('this date' in msg_lower or 'that date' in msg_lower) and any(word in msg_lower for word in ['book', 'schedule', 'appointment']):
+            from workflow_state import get_state_manager
+            state_manager = get_state_manager()
+            current_state = state_manager.get_state(session_id) or {}
+            context = current_state.get('context', {})
+            last_calendar_date = context.get('last_calendar_date')
+            last_calendar_display = context.get('last_calendar_date_display')
+
+            if last_calendar_date:
+                logger.info(f"[DATE-REF] Detected 'this date' reference - resolving to {last_calendar_date} ({last_calendar_display})")
+                # Replace "this date"/"that date" with the actual date in the message
+                resolved_message = msg_lower.replace('this date', last_calendar_display).replace('that date', last_calendar_display)
+                logger.info(f"[DATE-REF] Resolved message: {resolved_message}")
+
         try:
             from intelligent_orchestrator import orchestrate_intelligent_workflow
 
@@ -1921,7 +1937,19 @@ def route_request(
                 if target_date:
                     day_name = target_date.strftime("%A")
                     formatted_date = target_date.strftime("%B %d, %Y")
+                    date_iso = target_date.strftime("%Y-%m-%d")
                     response_text = f"{formatted_date} is a {day_name}."
+
+                    # Save the date to workflow state so "book this date" can reference it
+                    from workflow_state import get_state_manager
+                    state_manager = get_state_manager()
+                    current_state = state_manager.get_state(session_id) or {}
+                    if 'context' not in current_state:
+                        current_state['context'] = {}
+                    current_state['context']['last_calendar_date'] = date_iso
+                    current_state['context']['last_calendar_date_display'] = formatted_date
+                    state_manager.save_state(session_id, current_state)
+                    logger.info(f"[CALENDAR-INFO] Saved {date_iso} to context for 'this date' references")
                 else:
                     response_text = "I couldn't understand that date. Could you please say it again, like 'September 14th'?"
 
