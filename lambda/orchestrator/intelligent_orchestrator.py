@@ -5558,9 +5558,11 @@ What would you like to do?"""
                         project_info = ctx_mapping.get(str(project_id_to_check), {})
                         project_status = project_info.get('status', '')
 
-                # Check if scheduled (matches SCHEDULED_STATUSES)
+                # Check if project is schedulable, already scheduled, or not allowed
                 if project_status:
-                    scheduled_statuses = ['Scheduled', 'Customer Scheduled']
+                    scheduled_statuses = ['Scheduled', 'Customer Scheduled', 'Tentatively Scheduled']
+                    schedulable_statuses = ['New', 'Ready To Schedule']
+
                     if project_status in scheduled_statuses:
                         logger.info(f"[AUTO-RESCHEDULE] Project {project_id_to_check} is already scheduled (status='{project_status}')")
                         logger.info(f"[AUTO-RESCHEDULE] Converting get_available_dates -> reschedule_appointment")
@@ -5568,8 +5570,21 @@ What would you like to do?"""
                         decision['lambda_action'] = 'reschedule_appointment'
                         is_reschedule = True
                         is_new_reschedule_request = True
-                    else:
+                    elif project_status in schedulable_statuses:
                         logger.info(f"[SCHEDULE-CHECK] Project {project_id_to_check} status='{project_status}' - proceeding with get_available_dates")
+                    else:
+                        # Status not schedulable (e.g., Ready for Quote, Completed, etc.)
+                        logger.warning(f"[SCHEDULE-CHECK] Project {project_id_to_check} status='{project_status}' is NOT schedulable")
+                        timing['total'] = time.time() - start_time
+                        return {
+                            'response': f"This project can't be scheduled right now. The status is '{project_status}'. Please contact our office for assistance.",
+                            'intent': 'scheduling',
+                            'action': 'schedule_not_allowed',
+                            'agent_name': 'Intelligent Orchestrator (Schedule Check)',
+                            'direct_call': True,
+                            'timing': timing,
+                            'pf_http_status_code': 400
+                        }
 
         logger.info(f"[LAMBDA] Calling Lambda: {lambda_action} with params: {lambda_params}")
         lambda_start = time.time()
