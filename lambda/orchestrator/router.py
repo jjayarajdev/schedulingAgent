@@ -1875,6 +1875,67 @@ def route_request(
                     'routing_method': 'static_greeting'
                 }
 
+            # CALENDAR INFO: What day is [date]? - Use Python datetime for accurate answers
+            if action == 'calendar_info':
+                logger.info(f"[CALENDAR-INFO] Handling day-of-week question")
+                from datetime import datetime as dt
+                import re as regex
+
+                # Month name mapping
+                months = {
+                    'january': 1, 'jan': 1, 'february': 2, 'feb': 2, 'march': 3, 'mar': 3,
+                    'april': 4, 'apr': 4, 'may': 5, 'june': 6, 'jun': 6,
+                    'july': 7, 'jul': 7, 'august': 8, 'aug': 8, 'september': 9, 'sep': 9, 'sept': 9,
+                    'october': 10, 'oct': 10, 'november': 11, 'nov': 11, 'december': 12, 'dec': 12
+                }
+
+                target_date = None
+                current_date = dt.now()
+                date_param = merged_params.get('date', '')
+
+                # Try YYYY-MM-DD format first (from LLM)
+                if date_param:
+                    try:
+                        target_date = dt.strptime(date_param, "%Y-%m-%d")
+                    except ValueError:
+                        pass
+
+                # Fallback: parse natural language from message
+                if not target_date:
+                    msg_lower = message.lower()
+                    date_match = regex.search(r'(\w+)\s+(\d+)(?:st|nd|rd|th)?', msg_lower)
+                    if date_match:
+                        month_str = date_match.group(1).lower()
+                        day = int(date_match.group(2))
+                        month = months.get(month_str)
+                        if month:
+                            year = current_date.year
+                            try:
+                                target_date = dt(year, month, day)
+                                if target_date < current_date:
+                                    year += 1
+                                    target_date = dt(year, month, day)
+                            except ValueError:
+                                pass
+
+                if target_date:
+                    day_name = target_date.strftime("%A")
+                    formatted_date = target_date.strftime("%B %d, %Y")
+                    response_text = f"{formatted_date} is a {day_name}."
+                else:
+                    response_text = "I couldn't understand that date. Could you please say it again, like 'September 14th'?"
+
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': response_text,
+                    'agent_name': 'calendar',
+                    'intent': 'information',
+                    'action': 'calendar_info',
+                    'direct_call': True,
+                    'timing': timing,
+                    'routing_method': 'calendar_info_handler'
+                }
+
             # CHITCHAT ACTIONS: Always pass the message so chitchat Lambda can do its own intent detection
             chitchat_actions = ['help', 'general', 'chitchat']  # 'greet' handled above
             if action in chitchat_actions:
