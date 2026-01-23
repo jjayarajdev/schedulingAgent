@@ -342,6 +342,14 @@ def _is_json(text: str) -> bool:
         return False
 
 
+def _format_type_naturally(project_type: str) -> str:
+    """Format project type with natural article (a/an)."""
+    if not project_type:
+        return ""
+    article = "an" if project_type[0].lower() in 'aeiou' else "a"
+    return f", it's {article} {project_type}"
+
+
 def _format_projects_for_voice(data: Dict) -> str:
     """Format project list - conversational with SSML breaks."""
     projects = data.get('projects', [])
@@ -353,21 +361,36 @@ def _format_projects_for_voice(data: Dict) -> str:
     if count == 1:
         p = projects[0]
         category = p.get('category', 'project')
+        project_type = p.get('projectType', '')
         status = p.get('status', '')
-        return f"{_get_opener('list_projects')} one {category} project for you,{_ssml_break(200)} and it's {status.lower()}."
+        type_phrase = _format_type_naturally(project_type)
+        return f"{_get_opener('list_projects')} one {category} project for you{type_phrase},{_ssml_break(200)} and it's {status.lower()}."
 
-    # Multiple - conversational with pauses between categories
+    # Multiple - conversational with pauses between categories and types
     result = f"{_get_opener('list_projects')} {count} projects for you.{_ssml_break(300)} "
 
-    # Group by category
-    categories = {}
+    # Group by category with type info
+    cat_type_info = {}
     for p in projects:
         cat = p.get('category', 'Other')
-        categories[cat] = categories.get(cat, 0) + 1
+        ptype = p.get('projectType', '')
+        if cat not in cat_type_info:
+            cat_type_info[cat] = {'count': 0, 'types': set()}
+        cat_type_info[cat]['count'] += 1
+        if ptype:
+            cat_type_info[cat]['types'].add(ptype)
 
     cat_parts = []
-    for cat, num in list(categories.items())[:3]:
-        cat_parts.append(f"{num} {cat}" if num > 1 else f"one {cat}")
+    for cat, info in list(cat_type_info.items())[:3]:
+        num = info['count']
+        types = list(info['types'])
+        if num > 1:
+            cat_parts.append(f"{num} {cat}")
+        elif types:
+            # Single project with type - mention it naturally
+            cat_parts.append(f"one {cat}, {'an' if types[0][0].lower() in 'aeiou' else 'a'} {types[0]}")
+        else:
+            cat_parts.append(f"one {cat}")
 
     if cat_parts:
         result += "That includes " + f",{_ssml_break(200)} ".join(cat_parts) + f".{_ssml_break(300)} "
@@ -382,6 +405,7 @@ def _format_project_details_for_voice(data: Dict) -> str:
 
     status = project.get('status', 'unknown')
     category = project.get('category', 'project')
+    project_type = project.get('projectType', '')
     scheduled_date = project.get('scheduledDate')
 
     # Technician
@@ -389,9 +413,12 @@ def _format_project_details_for_voice(data: Dict) -> str:
     technician = project.get('technician', {})
     tech_name = technician.get('name') or installer_info.get('name', '')
 
+    # Format type naturally
+    type_phrase = _format_type_naturally(project_type)
+
     # Build conversational response with SSML
     result = f"{_get_opener('project_details')}{_ssml_break(200)} "
-    result += f"Your {category} project is {status}"
+    result += f"Your {category} project{type_phrase} is {status}"
 
     if scheduled_date:
         # Use connector and slow down for the date - critical info
@@ -686,8 +713,10 @@ def format_projects_summary_for_voice(projects: List[Dict], voice_context: Optio
         if total == 1:
             project = projects[0]
             category = project.get('category', 'project')
+            project_type = project.get('projectType', '')
             status = (project.get('status') or '').lower()
-            return f"You have one {category} project, and it's {status}."
+            type_phrase = _format_type_naturally(project_type)
+            return f"You have one {category} project{type_phrase}, and it's {status}."
 
         # Build intelligent summary
         result = f"You have {total} projects.{_ssml_break(200)} "

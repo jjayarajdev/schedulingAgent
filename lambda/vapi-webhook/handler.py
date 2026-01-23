@@ -132,11 +132,13 @@ This customer has NO projects in the system.
     for p in projects:
         status = (p.get('status') or '').lower()
         category = p.get('category', 'Unknown')
+        project_type = p.get('projectType', '')
         project_id = p.get('project_id') or p.get('id', '')
         scheduled_date = p.get('scheduled_date', '')
 
         project_info = {
             'category': category,
+            'project_type': project_type,
             'project_id': project_id,
             'status': status,
             'scheduled_date': scheduled_date,
@@ -155,24 +157,33 @@ This customer has NO projects in the system.
     context_parts = ["\n\n## YOUR CUSTOMER'S PROJECTS (EMBEDDED STATE - RESPOND WITHOUT TOOL CALL)\n"]
     context_parts.append(f"Total projects: {len(projects)}\n")
 
+    # Helper to format type naturally
+    def format_type(ptype):
+        if ptype:
+            return f" (it's {'an' if ptype[0].lower() in 'aeiou' else 'a'} {ptype})"
+        return ""
+
     # Scheduled projects
     if scheduled_projects:
         context_parts.append(f"\n**ALREADY SCHEDULED ({len(scheduled_projects)}):**")
         for i, p in enumerate(scheduled_projects, 1):
             date_str = p['scheduled_date'] if p['scheduled_date'] else 'date TBD'
-            context_parts.append(f"  {i}. {p['category']} - {date_str} (ID: {p['project_id']})")
+            type_str = f", Type: {p['project_type']}" if p['project_type'] else ""
+            context_parts.append(f"  {i}. {p['category']}{type_str} - {date_str} (ID: {p['project_id']})")
 
     # Schedulable projects
     if schedulable_projects:
         context_parts.append(f"\n**READY TO SCHEDULE ({len(schedulable_projects)}):**")
         for i, p in enumerate(schedulable_projects, 1):
-            context_parts.append(f"  {i}. {p['category']} - status: {p['status']} (ID: {p['project_id']})")
+            type_str = f", Type: {p['project_type']}" if p['project_type'] else ""
+            context_parts.append(f"  {i}. {p['category']}{type_str} - status: {p['status']} (ID: {p['project_id']})")
 
     # Other projects
     if other_projects:
         context_parts.append(f"\n**OTHER ({len(other_projects)}):**")
         for i, p in enumerate(other_projects, 1):
-            context_parts.append(f"  {i}. {p['category']} - status: {p['status']} (ID: {p['project_id']})")
+            type_str = f", Type: {p['project_type']}" if p['project_type'] else ""
+            context_parts.append(f"  {i}. {p['category']}{type_str} - status: {p['status']} (ID: {p['project_id']})")
 
     # Add response guidance
     context_parts.append("\n\n**SMART RESPONSES (NO TOOL CALL NEEDED):**")
@@ -181,16 +192,18 @@ This customer has NO projects in the system.
     if len(projects) == 1:
         p = projects[0]
         status = (p.get('status') or '').lower()
+        ptype = p.get('projectType', '')
+        type_phrase = f", it's {'an' if ptype and ptype[0].lower() in 'aeiou' else 'a'} {ptype}" if ptype else ""
         if status in ['scheduled', 'customer scheduled']:
             date = p.get('scheduled_date', '')
             context_parts.append(f'''
 - "Show my projects" / "What projects do I have?" →
-  Say: "You have one project - {p.get('category')}. It's already scheduled for {date}. Would you like to reschedule, or check the appointment details?"
+  Say: "You have one project - {p.get('category')}{type_phrase}. It's already scheduled for {date}. Would you like to reschedule, or check the appointment details?"
   (No tool call needed - you have the info!)''')
         else:
             context_parts.append(f'''
 - "Show my projects" / "What projects do I have?" →
-  Say: "You have one project - {p.get('category')}. It's ready to schedule. Would you like me to check available dates?"
+  Say: "You have one project - {p.get('category')}{type_phrase}. It's ready to schedule. Would you like me to check available dates?"
   (No tool call needed!)''')
     else:
         # Multiple projects
@@ -212,22 +225,33 @@ This customer has NO projects in the system.
     # Guide for "schedule appointment" / "schedule a project"
     if len(schedulable_projects) == 0 and len(scheduled_projects) > 0:
         p = scheduled_projects[0]
+        ptype = p.get('project_type', '')
+        type_phrase = f", it's {'an' if ptype and ptype[0].lower() in 'aeiou' else 'a'} {ptype}" if ptype else ""
         context_parts.append(f'''
 - "Schedule appointment" / "I want to schedule" / "Reschedule" →
-  Say: "Your {p['category']} is already scheduled for {p['scheduled_date']}. Would you like to reschedule, or check the details?"
+  Say: "Your {p['category']} project{type_phrase} is already scheduled for {p['scheduled_date']}. Would you like to reschedule, or check the details?"
   If they say YES/RESCHEDULE → call tool: action=reschedule_appointment, project_id={p['project_id']}, message: "user's words"
   (IMPORTANT: Use reschedule_appointment for already-scheduled projects, NOT get_available_dates!)''')
     elif len(schedulable_projects) == 1:
         p = schedulable_projects[0]
+        ptype = p.get('project_type', '')
+        type_phrase = f", it's {'an' if ptype and ptype[0].lower() in 'aeiou' else 'a'} {ptype}" if ptype else ""
         context_parts.append(f'''
 - "Schedule appointment" / "Schedule a project" →
-  You can offer: "I see your {p['category']} project is ready. Would you like me to check available dates?"
+  You can offer: "I see your {p['category']} project{type_phrase} is ready. Would you like me to check available dates?"
   If they say YES → call tool: action=get_available_dates, project_id={p['project_id']}''')
     elif len(schedulable_projects) > 1:
-        categories = [p['category'] for p in schedulable_projects[:3]]
+        # For multiple projects, list category and type together
+        cat_types = []
+        for p in schedulable_projects[:3]:
+            ptype = p.get('project_type', '')
+            if ptype:
+                cat_types.append(f"{p['category']} ({ptype})")
+            else:
+                cat_types.append(p['category'])
         context_parts.append(f'''
 - "Schedule appointment" →
-  Say: "I see {len(schedulable_projects)} projects ready to schedule: {', '.join(categories)}. Which one?"
+  Say: "I see {len(schedulable_projects)} projects ready to schedule: {', '.join(cat_types)}. Which one?"
   (No tool call needed to list them!)''')
 
     # Note about when to use tools
