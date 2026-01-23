@@ -620,6 +620,11 @@ For **Project_Information_Request** (specific project details): Use EXACT catego
 - Extract date mentions: "Nov 14", "tomorrow", "next Tuesday"
 - Convert SPECIFIC dates to YYYY-MM-DD format using TODAY'S DATE for year context
 - If a date is in the past this year, assume NEXT YEAR
+- **DATE REFERENCES ("this date", "that date"):**
+  - When user says "this date", "that date", "for this date" - look in CONVERSATION CONTEXT
+  - Find the most recently mentioned specific date in conversation history
+  - Resolve to that date in YYYY-MM-DD format
+  - Example: If context shows "March 17, 2026 is a Tuesday" and user says "book this date" → date="2026-03-17"
 - CRITICAL: KEEP these relative expressions AS-IS (do NOT convert to specific date):
   - "next week" → date="next week"
   - "this week" → date="this week"
