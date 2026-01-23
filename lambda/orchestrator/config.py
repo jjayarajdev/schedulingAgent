@@ -18,6 +18,10 @@ class Config:
     """Configuration for Orchestrator Lambda"""
 
     def __init__(self):
+        # Resource naming configuration
+        self.resource_prefix = RESOURCE_PREFIX
+        self.environment = ENVIRONMENT
+
         # AWS Configuration
         # Default to us-east-2 (CORE_REGION) where orchestrator and core services run
         self.region = os.environ.get('REGION', os.environ.get('AWS_REGION', 'us-east-2'))

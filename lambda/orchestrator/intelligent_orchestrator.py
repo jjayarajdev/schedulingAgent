@@ -717,12 +717,13 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
 
         if is_reschedule and selected_project_id:
             project_info = project_mapping.get(str(selected_project_id), {})
-            logger.info(f"[CONTINUATION] RESCHEDULE CONFIRM: User wants to reschedule project {selected_project_id} - going to get_available_dates")
+            logger.info(f"[CONTINUATION] RESCHEDULE CONFIRM: User confirmed reschedule for project {selected_project_id} - calling reschedule_appointment with confirmed=True")
             return {
                 'continue_workflow': True,
-                'action': 'get_available_dates',
+                'action': 'reschedule_appointment',  # Call directly with confirmed=True (user already consented)
                 'params': {
-                    'project_id': str(selected_project_id)
+                    'project_id': str(selected_project_id),
+                    'confirmed': True  # User consent obtained - cancel existing and fetch dates
                 },
                 'next_stage': 'awaiting_date_selection',
                 'preserve_context': {
@@ -908,7 +909,47 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                 'abort_message': "Okay, I'll keep your appointment. Anything else I can help with?"
             }
 
-    # Stage: Cancelled, waiting for user to confirm fetching dates (two-step reschedule)
+    # Stage: Waiting for user to CONFIRM they want to reschedule (appointment NOT cancelled yet)
+    if current_stage == 'awaiting_reschedule_confirm' and workflow_type == 'reschedule_appointment':
+        confirm_patterns = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'reschedule', 'change', 'proceed', 'go ahead']
+        deny_patterns = ['no', 'nope', 'never', 'cancel', 'stop', 'don\'t', 'dont', 'keep']
+        message_lower = message.lower().strip()
+        is_confirmation = any(pattern in message_lower for pattern in confirm_patterns)
+        is_deny = any(pattern in message_lower for pattern in deny_patterns) and not is_confirmation
+
+        if is_confirmation:
+            logger.info(f"[CONTINUATION] User CONFIRMED reschedule at stage '{current_stage}' - now cancelling and fetching dates")
+            return {
+                'continue_workflow': True,
+                'action': 'reschedule_appointment',
+                'params': {
+                    'project_id': context.get('project_id'),
+                    'confirmed': True  # User consent obtained - now cancel and fetch dates
+                },
+                'next_stage': 'awaiting_date_selection',
+                'preserve_context': {
+                    'project_id': context.get('project_id'),
+                    'category': context.get('category'),
+                    'project_type': context.get('project_type'),
+                    'city': context.get('city'),
+                    'state': context.get('state')
+                },
+                'workflow_type': workflow_type
+            }
+        elif is_deny:
+            logger.info(f"[CONTINUATION] User DECLINED reschedule at stage '{current_stage}' - keeping existing appointment")
+            return {
+                'continue_workflow': True,
+                'action': 'abort_workflow',
+                'params': {},
+                'next_stage': 'aborted',
+                'preserve_context': {},
+                'workflow_type': workflow_type,
+                'abort_message': "No problem, I'll keep your existing appointment. Is there anything else I can help you with?"
+            }
+
+    # Stage: Cancelled, waiting for user to confirm fetching dates (legacy two-step reschedule)
+    # NOTE: This is kept for backward compatibility - new flow uses awaiting_reschedule_confirm
     if current_stage == 'cancelled_awaiting_dates':
         # Check if user confirms with yes/show dates/continue etc.
         confirm_patterns = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'show', 'dates', 'continue', 'proceed', 'go ahead']
@@ -922,7 +963,7 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                 'action': 'reschedule_appointment',
                 'params': {
                     'project_id': context.get('project_id'),
-                    'fetch_dates': True  # Signal to fetch dates (Step 2)
+                    'confirmed': True  # Appointment already cancelled, just fetch dates
                 },
                 'next_stage': 'awaiting_date_selection',
                 'preserve_context': {
@@ -3102,14 +3143,16 @@ def orchestrate_intelligent_workflow(
                     cat = proj.get('category', 'project')
                     voice_response = f"I see you have a {cat} project ready to schedule. Would you like me to show you the available dates?"
                     next_stage = 'awaiting_schedule_confirm'
-                elif len(schedulable_projects) <= 3:
-                    # 2-3 projects - list them
+                elif len(schedulable_projects) <= 5:
+                    # 2-5 projects - list them all
                     categories = [p.get('category', 'project') for p in schedulable_projects]
                     voice_response = f"You have {len(schedulable_projects)} projects ready to schedule: " + ", ".join(categories) + ". Which one would you like to schedule?"
                     next_stage = 'awaiting_project_selection'
                 else:
-                    # Many projects - summarize
-                    voice_response = f"You have {len(schedulable_projects)} projects ready to schedule. Which one would you like to start with?"
+                    # Many projects (6+) - list first 5 and mention there are more
+                    first_five = [p.get('category', 'project') for p in schedulable_projects[:5]]
+                    remaining = len(schedulable_projects) - 5
+                    voice_response = f"You have {len(schedulable_projects)} projects ready to schedule, including: " + ", ".join(first_five) + f", and {remaining} more. Which one would you like to schedule?"
                     next_stage = 'awaiting_project_selection'
 
                 # Save workflow state for next turn
@@ -6037,11 +6080,12 @@ What would you like to do?"""
                     'timing': timing
                 }
 
-            # HANDLE TWO-STEP RESCHEDULE WORKFLOW: When reschedule returns cancelled_awaiting_dates, set workflow state
-            if lambda_action == 'reschedule_appointment' and response_body.get('status') == 'cancelled_awaiting_dates':
+            # HANDLE TWO-STEP RESCHEDULE WORKFLOW: When reschedule returns awaiting_reschedule_confirm, set workflow state
+            # NOTE: At this stage, the appointment has NOT been cancelled yet - we're waiting for user consent
+            if lambda_action == 'reschedule_appointment' and response_body.get('status') == 'awaiting_reschedule_confirm':
                 project_id = response_body.get('project_id') or lambda_params.get('project_id')
 
-                logger.info(f"[RESCHEDULE] Setting cancelled_awaiting_dates workflow state for project {project_id}")
+                logger.info(f"[RESCHEDULE] Setting awaiting_reschedule_confirm workflow state for project {project_id}")
 
                 # Get project details from workflow state or response
                 project_category = workflow_state.get('context', {}).get('category', '') if workflow_state else ''
@@ -6051,10 +6095,10 @@ What would you like to do?"""
 
                 # Preserve project_mapping from existing state
                 existing_mapping = workflow_state.get('project_mapping', {}) if workflow_state else {}
-                # Save workflow state for Step 2 (fetching dates when user confirms)
+                # Save workflow state - user must confirm before we cancel
                 state_manager.save_state(session_id, {
                     'workflow_type': 'reschedule_appointment',
-                    'current_stage': 'cancelled_awaiting_dates',
+                    'current_stage': 'awaiting_reschedule_confirm',
                     'context': {
                         'project_id': project_id,
                         'category': project_category,
@@ -6064,7 +6108,7 @@ What would you like to do?"""
                         'project_mapping': existing_mapping
                     },
                     'project_mapping': existing_mapping,
-                    'conversation_summary': f"User reschedule for project #{project_id} - cancelled existing appointment, awaiting user confirmation to fetch available dates"
+                    'conversation_summary': f"User asked about scheduled project #{project_id} - awaiting confirmation to reschedule (appointment NOT cancelled yet)"
                 })
 
                 timing['total'] = time.time() - start_time
