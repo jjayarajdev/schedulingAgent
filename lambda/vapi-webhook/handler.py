@@ -279,14 +279,14 @@ def get_tool_messages():
     Generate tool messages for VAPI tool calls.
 
     Strategy:
-    - Filler at start: "One moment."
+    - Filler at start: "Sure, let me check."
     - Failure message for errors
     - No delayed filler - responses should be fast enough now
     """
     return [
         {
             'type': 'request-start',
-            'content': "One moment."
+            'content': "Sure, let me check."
         },
         {
             'type': 'request-failed',
@@ -519,7 +519,7 @@ def create_assistant_config_response(first_message: str, support_number: str = '
                 'type': 'function',
                 'function': {
                     'name': 'projectforce_api',
-                    'description': 'Say ONE brief phrase like "One moment." then call SILENTLY. NO multiple fillers. Pass user EXACT words as message. Include project_id when you know which project.',
+                    'description': 'Say ONE brief phrase like "Sure, let me check." then call SILENTLY. NO multiple fillers. Pass user EXACT words as message. Include project_id when you know which project.',
                     'parameters': {
                         'type': 'object',
                         'required': ['message', 'action'],
