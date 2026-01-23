@@ -418,14 +418,20 @@ def _format_project_details_for_voice(data: Dict) -> str:
 
     # Build conversational response with SSML
     result = f"{_get_opener('project_details')}{_ssml_break(200)} "
-    result += f"Your {category} project{type_phrase} is {status}"
+    result += f"Your {category} project{type_phrase}"
 
-    if scheduled_date:
+    # Only show scheduled date if status indicates it's actually scheduled
+    status_lower = status.lower() if status else ''
+    is_scheduled = status_lower in ['scheduled', 'customer scheduled', 'tentatively scheduled']
+
+    if is_scheduled and scheduled_date:
         # Use connector and slow down for the date - critical info
         date_str = _format_date_naturally(scheduled_date)
-        result += f", and it's scheduled for {_ssml_slow(date_str)}."
+        result += f" is scheduled for {_ssml_slow(date_str)}."
+    elif status_lower in ['ready to schedule', 'new', 'ready']:
+        result += " is ready to schedule."
     else:
-        result += ", but it's not scheduled yet."
+        result += f" is {status}."
 
     if tech_name:
         result += f"{_ssml_break(200)} Your technician will be {tech_name}."

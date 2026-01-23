@@ -948,6 +948,51 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                 'abort_message': "No problem, I'll keep your existing appointment. Is there anything else I can help you with?"
             }
 
+    # Stage: AWAITING APPOINTMENT CONFIRM - User selected date/time, must confirm before finalizing
+    if current_stage == 'awaiting_appointment_confirm':
+        confirm_patterns = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'confirm', 'book', 'schedule', 'proceed', 'go ahead', 'sounds good', 'perfect', 'that works']
+        deny_patterns = ['no', 'nope', 'never', 'cancel', 'stop', 'don\'t', 'dont', 'wait', 'hold on', 'change', 'different']
+        message_lower = message.lower().strip()
+        is_confirmation = any(pattern in message_lower for pattern in confirm_patterns)
+        is_deny = any(pattern in message_lower for pattern in deny_patterns) and not is_confirmation
+
+        if is_confirmation:
+            logger.info(f"[CONTINUATION] User CONFIRMED appointment at stage '{current_stage}' - finalizing booking")
+            return {
+                'continue_workflow': True,
+                'action': 'confirm_appointment',
+                'params': {
+                    'project_id': context.get('project_id'),
+                    'date': context.get('date'),
+                    'time': context.get('time'),
+                    'request_id': context.get('request_id'),
+                    'category': context.get('category'),
+                    'confirmed': True  # User consent obtained - finalize the appointment
+                },
+                'next_stage': 'complete',
+                'preserve_context': {
+                    'project_id': context.get('project_id'),
+                    'category': context.get('category'),
+                    'date': context.get('date'),
+                    'time': context.get('time')
+                },
+                'workflow_type': workflow_type
+            }
+        elif is_deny:
+            logger.info(f"[CONTINUATION] User DECLINED appointment confirmation at stage '{current_stage}'")
+            return {
+                'continue_workflow': True,
+                'action': 'abort_workflow',
+                'params': {},
+                'next_stage': 'aborted',
+                'preserve_context': {
+                    'project_id': context.get('project_id'),
+                    'category': context.get('category')
+                },
+                'workflow_type': workflow_type,
+                'abort_message': "No problem. Would you like to pick a different date or time?"
+            }
+
     # Stage: Cancelled, waiting for user to confirm fetching dates (legacy two-step reschedule)
     # NOTE: This is kept for backward compatibility - new flow uses awaiting_reschedule_confirm
     if current_stage == 'cancelled_awaiting_dates':
@@ -6116,6 +6161,49 @@ What would you like to do?"""
                     'response': response_text,
                     'intent': 'scheduling',
                     'action': 'reschedule_appointment',
+                    'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                    'direct_call': True,
+                    'timing': timing
+                }
+
+            # HANDLE TWO-STEP CONFIRM WORKFLOW: When confirm_appointment returns awaiting_confirmation
+            # User must say "yes" before we actually confirm the appointment
+            if lambda_action == 'confirm_appointment' and response_body.get('status') == 'awaiting_confirmation':
+                project_id = response_body.get('project_id') or lambda_params.get('project_id')
+                date = response_body.get('date') or lambda_params.get('date')
+                time_slot = response_body.get('time') or lambda_params.get('time')
+                request_id = response_body.get('request_id') or lambda_params.get('request_id')
+                category = response_body.get('category') or (workflow_state.get('context', {}).get('category', '') if workflow_state else '')
+
+                logger.info(f"[CONFIRM] Setting awaiting_appointment_confirm workflow state for project {project_id}")
+
+                # Preserve project_mapping from existing state
+                existing_mapping = workflow_state.get('project_mapping', {}) if workflow_state else {}
+                existing_context = workflow_state.get('context', {}) if workflow_state else {}
+
+                # Save workflow state - user must confirm before we finalize
+                state_manager.save_state(session_id, {
+                    'workflow_type': 'confirm_appointment',
+                    'current_stage': 'awaiting_appointment_confirm',
+                    'context': {
+                        'project_id': project_id,
+                        'date': date,
+                        'time': time_slot,
+                        'request_id': request_id,
+                        'category': category,
+                        'project_mapping': existing_mapping,
+                        'address': existing_context.get('address', ''),
+                        'project_type': existing_context.get('project_type', '')
+                    },
+                    'project_mapping': existing_mapping,
+                    'conversation_summary': f"User selected {date} at {time_slot} for project #{project_id} - awaiting final confirmation"
+                })
+
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': response_text,
+                    'intent': 'scheduling',
+                    'action': 'confirm_appointment',
                     'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
                     'direct_call': True,
                     'timing': timing

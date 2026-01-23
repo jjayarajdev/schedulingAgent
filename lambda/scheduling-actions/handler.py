@@ -2082,7 +2082,16 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
 def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
     """
     Action: confirm_appointment
-    Confirms/schedules an appointment for a project
+    Confirms/schedules an appointment for a project using TWO-STEP flow:
+
+    Step 1 (Initial - no confirmed param):
+        - Return appointment details for user to confirm
+        - Status: "awaiting_confirmation"
+        - DO NOT call the API yet
+
+    Step 2 (User confirms - confirmed=True):
+        - Actually call the API to confirm the appointment
+        - Status: "confirmed"
 
     Real API Endpoint: POST /scheduler/client/{client_id}/project/{project_id}/schedule
     Request Body:
@@ -2099,12 +2108,52 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
     request_id = params.get('request_id')
     client_id = params.get('client_id')  # Extract client_id from parameters
     customer_id = params.get('customer_id')
+    category = params.get('category', '')  # Project category for confirmation message
+
+    # Check if user has confirmed
+    confirmed_raw = params.get('confirmed', False)
+    confirmed = confirmed_raw in [True, 'True', 'true', '1']
 
     # Track PF API HTTP status code
     pf_http_status_code = 200  # Default for mock/success
 
     if not all([project_id, date, time, request_id]):
         raise ValueError("Missing required parameters: project_id, date, time, request_id")
+
+    # STEP 1: If not confirmed, return details for user to confirm
+    if not confirmed:
+        logger.info(f"[CONFIRM STEP 1] Returning appointment details for confirmation: project={project_id}, date={date}, time={time}")
+
+        # Format date and time for display
+        try:
+            from datetime import datetime
+            date_obj = datetime.strptime(date, "%Y-%m-%d")
+            formatted_date = date_obj.strftime("%B %d")  # e.g., "February 04"
+            day_of_week = date_obj.strftime("%A")  # e.g., "Tuesday"
+        except:
+            formatted_date = date
+            day_of_week = ""
+
+        # Build confirmation message
+        category_str = f" for your {category} project" if category else ""
+        date_display = f"{day_of_week}, {formatted_date}" if day_of_week else formatted_date
+
+        return {
+            "action": "confirm_appointment",
+            "status": "awaiting_confirmation",
+            "project_id": project_id,
+            "date": date,
+            "time": time,
+            "request_id": request_id,
+            "formatted_date": formatted_date,
+            "day_of_week": day_of_week,
+            "category": category,
+            "message": f"I have {date_display} at {time}{category_str}. Should I confirm this appointment?",
+            "mock_mode": USE_MOCK_API
+        }
+
+    # STEP 2: User confirmed - proceed with actual API call
+    logger.info(f"[CONFIRM STEP 2] User confirmed - calling API to schedule: project={project_id}, date={date}, time={time}")
 
     # Resolve Order Number to internal ID if needed (scheduler API requires internal ID)
     if not str(project_id).isdigit() and not USE_MOCK_API and customer_id and client_id:
