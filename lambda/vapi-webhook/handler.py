@@ -146,7 +146,8 @@ This customer has NO projects in the system.
         }
 
         # Determine bucket
-        if status in ['scheduled', 'customer scheduled']:
+        # Include tentatively scheduled as scheduled (has a date, awaiting confirmation)
+        if status in ['scheduled', 'customer scheduled', 'tentatively scheduled']:
             scheduled_projects.append(project_info)
         elif status in ['ready to schedule', 'new', 'ready']:
             schedulable_projects.append(project_info)
@@ -194,8 +195,9 @@ This customer has NO projects in the system.
         status = (p.get('status') or '').lower()
         ptype = p.get('projectType', '')
         type_phrase = f", it's {'an' if ptype and ptype[0].lower() in 'aeiou' else 'a'} {ptype}" if ptype else ""
-        if status in ['scheduled', 'customer scheduled']:
-            date = p.get('scheduled_date', '')
+        # Include tentatively scheduled as scheduled
+        if status in ['scheduled', 'customer scheduled', 'tentatively scheduled']:
+            date = p.get('scheduled_date', '') or 'an upcoming date'
             context_parts.append(f'''
 - "Show my projects" / "What projects do I have?" →
   Say: "You have one project - {p.get('category')}{type_phrase}. It's already scheduled for {date}. Would you like to reschedule, or check the appointment details?"
@@ -227,9 +229,11 @@ This customer has NO projects in the system.
         p = scheduled_projects[0]
         ptype = p.get('project_type', '')
         type_phrase = f", it's {'an' if ptype and ptype[0].lower() in 'aeiou' else 'a'} {ptype}" if ptype else ""
+        # Handle empty scheduled_date - say "an upcoming date" if date is missing
+        date_display = p['scheduled_date'] if p.get('scheduled_date') else "an upcoming date"
         context_parts.append(f'''
 - "Schedule appointment" / "I want to schedule" / "Reschedule" →
-  Say: "Your {p['category']} project{type_phrase} is already scheduled for {p['scheduled_date']}. Would you like to reschedule, or check the details?"
+  Say: "Your {p['category']} project{type_phrase} is already scheduled for {date_display}. Would you like to reschedule, or check the details?"
   If they say YES/RESCHEDULE → call tool: action=reschedule_appointment, project_id={p['project_id']}, message: "user's words"
   (IMPORTANT: Use reschedule_appointment for already-scheduled projects, NOT get_available_dates!)''')
     elif len(schedulable_projects) == 1:

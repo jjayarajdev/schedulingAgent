@@ -443,8 +443,17 @@ def _format_dates_for_voice(data: Dict) -> str:
     """Format available dates - conversational with SSML prosody for dates."""
     dates = data.get('available_dates', [])
     count = len(dates)
+    auto_expanded = data.get('auto_expanded', False)
+    circuit_breaker = data.get('circuit_breaker_triggered', False)
 
     if count == 0:
+        # Priority 1: Circuit breaker triggered (repeated "no dates" in same session)
+        if circuit_breaker:
+            return "Our schedule is quite full right now. Would you like me to check a specific date you have in mind, or would you prefer to call our office to speak with someone who can help?"
+        # Priority 2: Auto-expansion already tried (checked 14 days)
+        if auto_expanded:
+            return "I'm sorry, our schedule is quite full for the next two weeks. Would you like me to check a specific date you have in mind, or would you prefer to speak with someone from our scheduling team?"
+        # First time - generic message (auto-expand will happen on backend)
         return "I'm sorry, there aren't any dates available right now."
 
     if count <= 3:

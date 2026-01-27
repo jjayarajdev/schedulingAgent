@@ -363,6 +363,25 @@ def extract_date_from_message(message: str) -> Optional[str]:
     return None
 
 
+def extract_month_reference(message: str) -> Optional[str]:
+    """
+    Extract month-only reference from message (e.g., "February", "March").
+    Returns the month name as-is for the scheduler LLM interpreter to handle.
+    """
+    msg = message.lower().strip()
+
+    # Full month names
+    months = ['january', 'february', 'march', 'april', 'may', 'june',
+              'july', 'august', 'september', 'october', 'november', 'december']
+
+    for month in months:
+        # Check for full month name or 3-letter abbreviation as standalone word
+        if month in msg or re.search(rf'\b{month[:3]}\b', msg):
+            return month
+
+    return None
+
+
 def extract_ordinal_project_reference(message: str) -> Optional[int]:
     """
     Extract ordinal project reference from message.
@@ -833,6 +852,76 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
             }
 
     # ========================================================================
+    # SMART PROMPT CONTEXT HANDLER (Voice channel)
+    # GPT-4o may respond using embedded project state WITHOUT calling a tool.
+    # Example: "Your blinds project is already scheduled. Would you like to reschedule?"
+    # When user says "yes" or "reschedule", this handler routes to reschedule_appointment
+    # using the project_id from the smart prompt context.
+    #
+    # This handler is triggered when:
+    # 1. workflow_type is 'smart_prompt_context' (created when project_id is passed from voice)
+    # 2. OR workflow_type is 'project_list' (from welcome) and project_id is in context
+    # 3. AND current_stage is 'initial' or 'projects_displayed' (haven't started a workflow yet)
+    # ========================================================================
+    is_smart_prompt_eligible = (
+        workflow_type in ['smart_prompt_context', 'project_list'] and
+        current_stage in ['initial', 'projects_displayed'] and
+        context.get('project_id')  # project_id was injected from smart prompt
+    )
+
+    if is_smart_prompt_eligible:
+        project_id_from_context = context.get('project_id')
+
+        # Check for reschedule confirmation
+        reschedule_phrases = ['yes', 'yeah', 'sure', 'ok', 'okay', 'yep', 'yup', 'please', 'reschedule',
+                              'change', 'different date', 'another date', 'move it', 'new date',
+                              'go ahead', 'do it', 'proceed', 'i want to reschedule', 'i\'d like to reschedule',
+                              'like to reschedule', 'want to reschedule']
+        is_reschedule = any(phrase in message_lower for phrase in reschedule_phrases)
+
+        # Check for schedule confirmation (not just reschedule)
+        schedule_phrases = ['schedule', 'book', 'available dates', 'when can']
+        is_schedule = any(phrase in message_lower for phrase in schedule_phrases)
+
+        if is_reschedule or is_schedule:
+            logger.info(f"[CONTINUATION] SMART-PROMPT RESCHEDULE: User confirmed reschedule for project {project_id_from_context} (from GPT-4o embedded state, workflow_type={workflow_type})")
+            return {
+                'continue_workflow': True,
+                'action': 'reschedule_appointment',
+                'params': {
+                    'project_id': str(project_id_from_context),
+                    'confirmed': True  # User consent already obtained via GPT-4o conversation
+                },
+                'next_stage': 'awaiting_date_selection',
+                'preserve_context': {
+                    'project_id': str(project_id_from_context),
+                    'project_ids': context.get('project_ids', [project_id_from_context]),
+                    'is_reschedule': True
+                },
+                'workflow_type': 'reschedule_appointment'
+            }
+
+        # Check for details request
+        details_phrases = ['details', 'check', 'appointment', 'when is', 'what time', 'what date', 'info', 'tell me about']
+        is_details = any(phrase in message_lower for phrase in details_phrases)
+
+        if is_details:
+            logger.info(f"[CONTINUATION] SMART-PROMPT DETAILS: User wants details for project {project_id_from_context} (workflow_type={workflow_type})")
+            return {
+                'continue_workflow': True,
+                'action': 'get_project_details',
+                'params': {
+                    'project_id': str(project_id_from_context)
+                },
+                'next_stage': 'showing_details',
+                'preserve_context': {
+                    'project_id': str(project_id_from_context),
+                    'project_ids': context.get('project_ids', [project_id_from_context])
+                },
+                'workflow_type': 'view_project'
+            }
+
+    # ========================================================================
     # Stage: SHOWING SCHEDULABLE PROJECTS - User selects a project to schedule
     # When user names a project by category, ordinal, or project number after
     # seeing schedulable projects, go directly to get_available_dates
@@ -1141,6 +1230,29 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                         'current_index': context.get('current_index'),
                         'total_projects': context.get('total_projects'),
                         'completed_projects': context.get('completed_projects')
+                    },
+                    'workflow_type': workflow_type
+                }
+
+            # Check for month-only reference (e.g., "February", "March", "how about feb")
+            # This calls get_available_dates with the month name for the LLM interpreter
+            month_ref = extract_month_reference(message)
+            if month_ref:
+                logger.info(f"[CONTINUATION] User provided month reference '{month_ref}' at stage '{current_stage}' - calling get_available_dates")
+                return {
+                    'continue_workflow': True,
+                    'action': 'get_available_dates',
+                    'params': {
+                        'project_id': context.get('project_id'),
+                        'date': month_ref  # Pass month name as-is for LLM interpreter
+                    },
+                    'next_stage': 'awaiting_date_selection',  # Stay in date selection
+                    'preserve_context': {
+                        'project_id': context.get('project_id'),
+                        'category': context.get('category'),
+                        'project_type': context.get('project_type'),
+                        'city': context.get('city'),
+                        'state': context.get('state')
                     },
                     'workflow_type': workflow_type
                 }
@@ -2641,7 +2753,48 @@ def orchestrate_intelligent_workflow(
                     if 'No technician found' in error_msg:
                         user_error = "Sorry, no technician is available for that time slot. Please select a different time."
                     elif 'already booked' in error_msg or 'conflict' in error_msg.lower():
-                        user_error = "That time slot was just booked. Please select a different time."
+                        # ================================================================
+                        # ENHANCED UX: Fetch available slots when requested slot is booked
+                        # Instead of just "select a different time", show what's available
+                        # ================================================================
+                        user_error = "That time slot was just booked."
+                        try:
+                            # Get context for re-fetching slots
+                            ctx = workflow_state.get('context', {}) if workflow_state else {}
+                            slot_project_id = ctx.get('project_id') or pending.get('preview', {}).get('project_id')
+                            slot_date = ctx.get('date') or pending.get('preview', {}).get('date_raw')
+
+                            if slot_project_id and slot_date:
+                                logger.info(f"[BOOKED-RETRY] Fetching fresh slots for project {slot_project_id} on {slot_date}")
+                                slot_params = {
+                                    'project_id': slot_project_id,
+                                    'date': slot_date,
+                                    'client_id': client_id,
+                                    'customer_id': customer_id,
+                                    'pf_bearer_token': pf_bearer_token
+                                }
+                                slot_response = call_lambda_directly('get_time_slots', slot_params)
+                                slot_data = slot_response.get('response', {}).get('functionResponse', {}).get('responseBody', {}).get('TEXT', {}).get('body', '{}')
+                                if isinstance(slot_data, str):
+                                    slot_body = json.loads(slot_data)
+                                else:
+                                    slot_body = slot_data
+                                fresh_slots = slot_body.get('time_slots', [])
+
+                                if fresh_slots:
+                                    # Format available slots for voice
+                                    if channel == 'voice':
+                                        slot_list = ', '.join(fresh_slots[:4])
+                                        user_error = f"That time slot was just booked. But I found these other times available: {slot_list}. Which one works for you?"
+                                    else:
+                                        slot_list = ', '.join(fresh_slots[:5])
+                                        user_error = f"That time slot was just booked. Here are the available times: {slot_list}. Which would you prefer?"
+                                    logger.info(f"[BOOKED-RETRY] Found {len(fresh_slots)} alternative slots")
+                                else:
+                                    user_error = "That time slot was just booked and there are no other slots available for this date. Would you like to try a different date?"
+                        except Exception as retry_err:
+                            logger.warning(f"[BOOKED-RETRY] Failed to fetch fresh slots: {retry_err}")
+                            user_error = "That time slot was just booked. Please select a different time."
                     elif 'SESSION_EXPIRED' in error_msg or '401' in error_msg or '403' in error_msg:
                         user_error = "Your session has expired. Please log out and log back in."
                     else:
@@ -5888,7 +6041,48 @@ What would you like to do?"""
                 if 'No technician found' in error_msg:
                     user_error = "Sorry, no technician is available for that time slot. Please select a different time."
                 elif 'already booked' in error_msg or 'conflict' in error_msg.lower():
-                    user_error = "That time slot was just booked. Please select a different time."
+                    # ================================================================
+                    # ENHANCED UX: Fetch available slots when requested slot is booked
+                    # Instead of just "select a different time", show what's available
+                    # ================================================================
+                    user_error = "That time slot was just booked."
+                    try:
+                        # Get context for re-fetching slots
+                        ctx = workflow_state.get('context', {}) if workflow_state else {}
+                        slot_project_id = ctx.get('project_id') or lambda_params.get('project_id')
+                        slot_date = ctx.get('date') or lambda_params.get('date')
+
+                        if slot_project_id and slot_date:
+                            logger.info(f"[BOOKED-RETRY] Fetching fresh slots for project {slot_project_id} on {slot_date}")
+                            slot_params = {
+                                'project_id': slot_project_id,
+                                'date': slot_date,
+                                'client_id': client_id,
+                                'customer_id': customer_id,
+                                'pf_bearer_token': pf_bearer_token
+                            }
+                            slot_response = call_lambda_directly('get_time_slots', slot_params)
+                            slot_data = slot_response.get('response', {}).get('functionResponse', {}).get('responseBody', {}).get('TEXT', {}).get('body', '{}')
+                            if isinstance(slot_data, str):
+                                slot_body = json.loads(slot_data)
+                            else:
+                                slot_body = slot_data
+                            fresh_slots = slot_body.get('time_slots', [])
+
+                            if fresh_slots:
+                                # Format available slots for voice
+                                if channel == 'voice':
+                                    slot_list = ', '.join(fresh_slots[:4])
+                                    user_error = f"That time slot was just booked. But I found these other times available: {slot_list}. Which one works for you?"
+                                else:
+                                    slot_list = ', '.join(fresh_slots[:5])
+                                    user_error = f"That time slot was just booked. Here are the available times: {slot_list}. Which would you prefer?"
+                                logger.info(f"[BOOKED-RETRY] Found {len(fresh_slots)} alternative slots")
+                            else:
+                                user_error = "That time slot was just booked and there are no other slots available for this date. Would you like to try a different date?"
+                    except Exception as retry_err:
+                        logger.warning(f"[BOOKED-RETRY] Failed to fetch fresh slots: {retry_err}")
+                        user_error = "That time slot was just booked. Please select a different time."
                 elif 'SESSION_EXPIRED' in error_msg or '401' in error_msg or '403' in error_msg:
                     user_error = "Your session has expired. Please log out and log back in."
                 elif 'Invalid' in error_msg:
@@ -6420,6 +6614,38 @@ What would you like to do?"""
                 if response_body.get('start_date'):
                     decision['update_workflow_state']['context']['start_date'] = response_body['start_date']
                     logger.info(f"[DATES] Saved start_date/base_date: {response_body['start_date']}")
+
+            # ========================================================================
+            # CIRCUIT BREAKER: Track "no dates available" responses to prevent loops
+            # After 2 empty date responses in a session, offer alternative paths.
+            # This prevents the frustrating loop seen in Amy's call (11 "booked up" messages)
+            # ========================================================================
+            if lambda_action in ['get_available_dates', 'reschedule_appointment'] and response_body.get('dateCount', len(response_body.get('available_dates', []))) == 0:
+                # Get current no_dates_count from workflow state
+                existing_context = workflow_state.get('context', {}) if workflow_state else {}
+                no_dates_count = existing_context.get('no_dates_count', 0) + 1
+
+                logger.info(f"[CIRCUIT-BREAKER] No dates available (count: {no_dates_count})")
+
+                # Ensure we have workflow state to save the counter
+                if not decision.get('update_workflow_state'):
+                    decision['update_workflow_state'] = {
+                        'workflow_type': workflow_state.get('workflow_type', 'schedule_appointment') if workflow_state else 'schedule_appointment',
+                        'current_stage': 'awaiting_date_selection',
+                        'context': {}
+                    }
+                if 'context' not in decision['update_workflow_state']:
+                    decision['update_workflow_state']['context'] = {}
+
+                decision['update_workflow_state']['context']['no_dates_count'] = no_dates_count
+
+                # After 2 "no dates" responses, trigger circuit breaker
+                if no_dates_count >= 2:
+                    logger.info(f"[CIRCUIT-BREAKER] Triggered after {no_dates_count} empty responses - offering alternatives")
+                    response_body['circuit_breaker_triggered'] = True
+                    response_body['circuit_breaker_count'] = no_dates_count
+                    # Add message for voice formatter to use
+                    response_body['message'] = "Our schedule is quite full right now. Would you like me to check a specific date you have in mind, or would you prefer to call our office to speak with someone who can help?"
 
             # SAVE PROJECT_IDS AND PROJECT_MAPPING: Save to workflow state when listing projects
             # This enables ordinal references like "last project", "first project", "2nd project"

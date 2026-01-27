@@ -1854,6 +1854,44 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
 
     # Track original count before filtering for logging
     original_count = len(raw_dates)
+    auto_expanded = False
+
+    # ========================================================================
+    # AUTO-EXPAND DATE RANGE: If no dates found in default 5-day window,
+    # automatically expand to 14 days before returning "no dates available"
+    # This prevents "booked up" dead ends that frustrate customers.
+    # Only applies to default queries (not explicit date ranges or specific days)
+    # ========================================================================
+    if (len(raw_dates) == 0 and
+        not USE_MOCK_API and
+        days_to_fetch == 5 and
+        date_strategy not in ['date_range', 'specific_day', 'week_past']):
+
+        logger.info(f"[AUTO-EXPAND] No dates in 5-day window, expanding to 14 days")
+
+        # Re-calculate end_date for 14-day range
+        expanded_days = 14
+        expanded_end_date = (start_dt + timedelta(days=expanded_days - 1)).strftime("%Y-%m-%d")
+
+        # Construct expanded URL
+        expanded_url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/startDate/{start_date}/endDate/{expanded_end_date}/slotsChatbot"
+        logger.info(f"[AUTO-EXPAND] GET {expanded_url}")
+
+        try:
+            expanded_res = make_api_request_with_retry("GET", expanded_url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
+            pf_http_status_code = expanded_res.status_code
+            expanded_response = expanded_res.json()
+            expanded_data = expanded_response.get("data", {})
+            raw_dates = sorted(expanded_data.get("dates", []))
+            original_count = len(raw_dates)
+            auto_expanded = True
+
+            if raw_dates:
+                logger.info(f"[AUTO-EXPAND] Found {len(raw_dates)} dates in 14-day window: {raw_dates[:5]}...")
+            else:
+                logger.info(f"[AUTO-EXPAND] Still no dates in 14-day window - truly booked up")
+        except Exception as e:
+            logger.warning(f"[AUTO-EXPAND] Failed to fetch expanded range: {e}")
 
     # SMART DATE LIMITING: Filter dates based on user's request strategy
     # This reduces response payload and focuses on relevant dates
@@ -1900,7 +1938,7 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
                 "formatted": date_str
             })
 
-    return {
+    result = {
         "action": "get_available_dates",
         "project_id": project_id,
         "available_dates": raw_dates,  # Keep original for compatibility
@@ -1913,6 +1951,16 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
         "mock_mode": USE_MOCK_API,
         "pf_http_status_code": pf_http_status_code
     }
+
+    # Include auto-expand info if we expanded the search
+    if auto_expanded:
+        result["auto_expanded"] = True
+        result["expanded_from_days"] = 5
+        result["expanded_to_days"] = 14
+        if len(raw_dates) == 0:
+            result["message"] = "No appointments available in the next 2 weeks. Would you like me to check further out?"
+
+    return result
 
 def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
     """
