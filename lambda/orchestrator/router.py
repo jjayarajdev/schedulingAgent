@@ -1766,7 +1766,8 @@ def route_request(
         logger.info(f"[ENTITIES] Resolved entities: {resolved_entities}")
 
     # Use resolved message for classification
-    classification = classify_intent_and_action(resolved_message, conversation_history)
+    # Pass session_id to include workflow state context (e.g., last_calendar_date for "this date" references)
+    classification = classify_intent_and_action(resolved_message, conversation_history, session_id)
     intent = classification.get('intent', 'chitchat')
     action = classification.get('action')
     can_call_direct = classification.get('can_call_direct', False)

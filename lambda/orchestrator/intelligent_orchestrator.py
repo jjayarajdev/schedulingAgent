@@ -1182,6 +1182,59 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
             ]
             if any(pattern in message_lower for pattern in implicit_schedule_patterns):
                 logger.info(f"[CONTINUATION] IMPLICIT SCHEDULE: Detected scheduling request with context project {context_project_id}")
+
+                # Priority 1: Check if user provided a date in their message (e.g., "schedule the project for 01/27")
+                message_date = extract_date_from_message(message)
+                if message_date:
+                    logger.info(f"[CONTINUATION] Using date from user's message: {message_date}")
+                    return {
+                        'continue_workflow': True,
+                        'action': 'get_time_slots',
+                        'params': {
+                            'project_id': context_project_id,
+                            'date': message_date,
+                            'request_id': context.get('request_id')
+                        },
+                        'next_stage': 'awaiting_time_selection',
+                        'preserve_context': {
+                            'project_id': context_project_id,
+                            'date': message_date,
+                            'request_id': context.get('request_id'),
+                            'category': context.get('category'),
+                            'project_type': context.get('project_type'),
+                            'city': context.get('city'),
+                            'state': context.get('state')
+                        },
+                        'workflow_type': 'schedule_appointment'
+                    }
+
+                # Priority 2: Check if user has a calendar date in context (from "what day is X" query)
+                last_calendar_date = context.get('last_calendar_date')
+                last_calendar_display = context.get('last_calendar_date_display')
+                if last_calendar_date:
+                    logger.info(f"[CONTINUATION] Using last_calendar_date from context: {last_calendar_date} ({last_calendar_display})")
+                    return {
+                        'continue_workflow': True,
+                        'action': 'get_time_slots',
+                        'params': {
+                            'project_id': context_project_id,
+                            'date': last_calendar_date,
+                            'request_id': context.get('request_id')
+                        },
+                        'next_stage': 'awaiting_time_selection',
+                        'preserve_context': {
+                            'project_id': context_project_id,
+                            'date': last_calendar_date,
+                            'request_id': context.get('request_id'),
+                            'category': context.get('category'),
+                            'project_type': context.get('project_type'),
+                            'city': context.get('city'),
+                            'state': context.get('state')
+                        },
+                        'workflow_type': 'schedule_appointment'
+                    }
+
+                # Priority 3: No date provided - show available dates
                 return {
                     'continue_workflow': True,
                     'action': 'get_available_dates',

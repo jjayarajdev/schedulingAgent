@@ -665,7 +665,7 @@ Respond with JSON only."""
 # MAIN CLASSIFIER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def classify_intent_and_action(message: str, conversation_history: Optional[List[Dict]] = None) -> Dict:
+def classify_intent_and_action(message: str, conversation_history: Optional[List[Dict]] = None, session_id: Optional[str] = None) -> Dict:
     """
     NLU-style intent classification with structured parameter extraction.
 
@@ -687,10 +687,30 @@ def classify_intent_and_action(message: str, conversation_history: Optional[List
     cfg = get_config()
     context_str, project_ids = _summarize_history(conversation_history or [])
 
+    # Fetch workflow state context (for "this date" references from calendar queries)
+    workflow_context = ""
+    if session_id:
+        try:
+            from workflow_state import get_state_manager
+            state_manager = get_state_manager()
+            current_state = state_manager.get_state(session_id) or {}
+            state_context = current_state.get('context', {})
+
+            # Include last_calendar_date if available (from "what day is [date]" queries)
+            last_calendar_date = state_context.get('last_calendar_date')
+            last_calendar_display = state_context.get('last_calendar_date_display')
+            if last_calendar_date and last_calendar_display:
+                workflow_context = f"\n**IMPORTANT - Recently queried calendar date: {last_calendar_display} ({last_calendar_date})**\nIf user says 'this date', 'that date', or 'schedule for this date', use this date: {last_calendar_date}"
+                logger.info(f"[NLU] Including last_calendar_date from workflow state: {last_calendar_date}")
+        except Exception as e:
+            logger.debug(f"[NLU] Could not fetch workflow state: {e}")
+
     # Build context section for prompt
     context_section = ""
     if context_str:
         context_section = f"\n## CONVERSATION CONTEXT\n{context_str}"
+    if workflow_context:
+        context_section += workflow_context
     if project_ids:
         context_section += f"\nProject IDs from context (for ordinal resolution): [{', '.join(project_ids[:10])}]"
 
