@@ -135,11 +135,15 @@ User message: "{message}"
 Known projects:
 {project_list}
 
+Currently discussed project (for pronoun resolution): {current_project_id}
+
 Extract:
-- project_id: If user mentions a specific project ID
+- project_id: If user mentions a specific project ID OR uses a pronoun referring to current project
 - category: If user mentions a category (e.g., "dishwasher", "deck")
 - location: If user mentions a location (e.g., "North Loop", "Chicago Ave")
 - ordinal: If user uses position (e.g., "first", "2nd", "last")
+
+IMPORTANT: Pronouns like "it", "that", "that one", "this one", "this project" refer to the CURRENTLY DISCUSSED project.
 
 Examples:
 - "the dishwasher project" → {{"category": "Dishwasher"}}
@@ -148,6 +152,10 @@ Examples:
 - "the first one" → {{"ordinal": 0}}
 - "the second project" → {{"ordinal": 1}}
 - "the last one" → {{"ordinal": -1}}
+- "reschedule it" (current=8503762) → {{"project_id": "8503762"}}
+- "schedule that one" (current=8503762) → {{"project_id": "8503762"}}
+- "cancel this project" (current=1234567) → {{"project_id": "1234567"}}
+- "what about it" (current=8175908) → {{"project_id": "8175908"}}
 
 Return ONLY valid JSON.""",
 
@@ -325,7 +333,13 @@ def _extract_slot_selection(message: str, context: Dict) -> Dict[str, Any]:
 def _extract_project_reference(message: str, context: Dict) -> Dict[str, Any]:
     """Extract project reference (ID, category, location, ordinal) - enhanced with DSPy"""
     workflow_state = context.get('workflow_state', {})
-    project_mapping = workflow_state.get('context', {}).get('project_mapping', {})
+    workflow_context = workflow_state.get('context', {})
+    project_mapping = workflow_context.get('project_mapping', {})
+
+    # Get current project_id for pronoun resolution ("it", "that one", etc.)
+    current_project_id = workflow_context.get('project_id', '')
+    if current_project_id:
+        logger.info(f"[ENRICHER] Current project for pronoun resolution: {current_project_id}")
 
     # Format project list
     project_lines = []
@@ -333,13 +347,16 @@ def _extract_project_reference(message: str, context: Dict) -> Dict[str, Any]:
         cat = info.get('category', 'Unknown')
         addr = info.get('address', '')
         status = info.get('status', '')
-        project_lines.append(f"- #{pid}: {cat} at {addr} ({status})")
+        # Mark current project in the list
+        marker = " (CURRENT)" if str(pid) == str(current_project_id) else ""
+        project_lines.append(f"- #{pid}: {cat} at {addr} ({status}){marker}")
 
     project_list = "\n".join(project_lines) if project_lines else "No projects in context"
 
     prompt = PROMPTS['resolve_project'].format(
         message=message,
-        project_list=project_list
+        project_list=project_list,
+        current_project_id=current_project_id or "None"
     )
 
     # Enhance with DSPy-learned context resolution examples
@@ -459,8 +476,8 @@ def needs_enrichment(action: str, existing_entities: Dict) -> bool:
         return 'slot_id' not in existing_entities and 'time' not in existing_entities
 
     elif action in ['get_project_details', 'get_available_dates', 'cancel_appointment', 'reschedule_appointment']:
-        # Need project_id or way to resolve it
-        return 'project_id' not in existing_entities
+        # Need project_id or way to resolve it - check key exists AND has a value
+        return 'project_id' not in existing_entities or existing_entities.get('project_id') is None
 
     # Default: enrich to be safe
     return True

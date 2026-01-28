@@ -129,6 +129,10 @@ This customer has NO projects in the system.
     schedulable_projects = []
     other_projects = []
 
+    # Statuses to exclude from listing (not actionable by voice assistant)
+    excluded_statuses = ['closed', 'cancelled', 'completed', 'work complete', 'done', 'archived',
+                         'completed-archived', 'cancelled/surge', 'ready to cancel']
+
     for p in projects:
         status = (p.get('status') or '').lower()
         category = p.get('category', 'Unknown')
@@ -136,23 +140,37 @@ This customer has NO projects in the system.
         project_id = p.get('project_id') or p.get('id', '')
         scheduled_date = p.get('scheduled_date', '')
 
+        # Skip closed/cancelled/completed projects - not actionable
+        if status in excluded_statuses:
+            logger.info(f"[SMART-PROMPT] Project {project_id} ({category}) status='{status}' → EXCLUDED (not actionable)")
+            continue
+
+        project_number = p.get('projectNumber', '')
         project_info = {
             'category': category,
             'project_type': project_type,
             'project_id': project_id,
+            'project_number': project_number,  # Customer-facing order number
             'status': status,
             'scheduled_date': scheduled_date,
             'address': p.get('address', ''),
+            'date_sold': p.get('dateSold', ''),
         }
 
         # Determine bucket
         # Include tentatively scheduled as scheduled (has a date, awaiting confirmation)
         if status in ['scheduled', 'customer scheduled', 'tentatively scheduled']:
             scheduled_projects.append(project_info)
+            logger.info(f"[SMART-PROMPT] Project {project_id} ({category}) status='{status}' → SCHEDULED bucket")
         elif status in ['ready to schedule', 'new', 'ready']:
             schedulable_projects.append(project_info)
+            logger.info(f"[SMART-PROMPT] Project {project_id} ({category}) status='{status}' → SCHEDULABLE bucket")
         else:
             other_projects.append(project_info)
+            logger.info(f"[SMART-PROMPT] Project {project_id} ({category}) status='{status}' → OTHER bucket")
+
+    # Log summary for debugging
+    logger.info(f"[SMART-PROMPT] Categorization: scheduled={len(scheduled_projects)}, schedulable={len(schedulable_projects)}, other={len(other_projects)}")
 
     # Build context string
     context_parts = ["\n\n## YOUR CUSTOMER'S PROJECTS (EMBEDDED STATE - RESPOND WITHOUT TOOL CALL)\n"]
@@ -164,27 +182,45 @@ This customer has NO projects in the system.
             return f" (it's {'an' if ptype[0].lower() in 'aeiou' else 'a'} {ptype})"
         return ""
 
+    # Helper to format project display (voice-friendly - no internal IDs)
+    def format_project_display(p, show_date=False, show_status=False):
+        """
+        Format project for display - VOICE OPTIMIZED.
+
+        CRITICAL: Do NOT include:
+        - Order numbers (e.g., "21076-19PF6W-xxx") - read as "2 1 0 7 6 p f" by TTS
+        - HTML comments (e.g., "<!-- project_id=xxx -->") - also read aloud by TTS
+
+        Only show: category, type, date/status
+        GPT-4o uses the project mapping in the system prompt to resolve category/type to project_id.
+        """
+        parts = [p['category']]
+        if p['project_type']:
+            parts.append(f"({p['project_type']})")
+        if show_date and p.get('scheduled_date'):
+            parts.append(f"- scheduled {p['scheduled_date']}")
+        elif show_status:
+            parts.append(f"- {p['status']}")
+        # NO order numbers or hidden project_id references - TTS reads them aloud!
+        return " ".join(parts)
+
     # Scheduled projects
     if scheduled_projects:
         context_parts.append(f"\n**ALREADY SCHEDULED ({len(scheduled_projects)}):**")
         for i, p in enumerate(scheduled_projects, 1):
-            date_str = p['scheduled_date'] if p['scheduled_date'] else 'date TBD'
-            type_str = f", Type: {p['project_type']}" if p['project_type'] else ""
-            context_parts.append(f"  {i}. {p['category']}{type_str} - {date_str} (ID: {p['project_id']})")
+            context_parts.append(f"  {i}. {format_project_display(p, show_date=True)}")
 
     # Schedulable projects
     if schedulable_projects:
         context_parts.append(f"\n**READY TO SCHEDULE ({len(schedulable_projects)}):**")
         for i, p in enumerate(schedulable_projects, 1):
-            type_str = f", Type: {p['project_type']}" if p['project_type'] else ""
-            context_parts.append(f"  {i}. {p['category']}{type_str} - status: {p['status']} (ID: {p['project_id']})")
+            context_parts.append(f"  {i}. {format_project_display(p, show_status=True)}")
 
     # Other projects
     if other_projects:
         context_parts.append(f"\n**OTHER ({len(other_projects)}):**")
         for i, p in enumerate(other_projects, 1):
-            type_str = f", Type: {p['project_type']}" if p['project_type'] else ""
-            context_parts.append(f"  {i}. {p['category']}{type_str} - status: {p['status']} (ID: {p['project_id']})")
+            context_parts.append(f"  {i}. {format_project_display(p, show_status=True)}")
 
     # Add response guidance
     context_parts.append("\n\n**SMART RESPONSES (NO TOOL CALL NEEDED):**")
@@ -231,6 +267,7 @@ This customer has NO projects in the system.
         type_phrase = f", it's {'an' if ptype and ptype[0].lower() in 'aeiou' else 'a'} {ptype}" if ptype else ""
         # Handle empty scheduled_date - say "an upcoming date" if date is missing
         date_display = p['scheduled_date'] if p.get('scheduled_date') else "an upcoming date"
+        logger.info(f"[SMART-PROMPT] Scheduling guidance: ALREADY_SCHEDULED - '{p['category']}' scheduled for {date_display}")
         context_parts.append(f'''
 - "Schedule appointment" / "I want to schedule" / "Reschedule" →
   Say: "Your {p['category']} project{type_phrase} is already scheduled for {date_display}. Would you like to reschedule, or check the details?"
@@ -240,26 +277,92 @@ This customer has NO projects in the system.
         p = schedulable_projects[0]
         ptype = p.get('project_type', '')
         type_phrase = f", it's {'an' if ptype and ptype[0].lower() in 'aeiou' else 'a'} {ptype}" if ptype else ""
+        logger.info(f"[SMART-PROMPT] Scheduling guidance: READY_TO_SCHEDULE - '{p['category']}' (ID: {p['project_id']})")
         context_parts.append(f'''
 - "Schedule appointment" / "Schedule a project" →
   You can offer: "I see your {p['category']} project{type_phrase} is ready. Would you like me to check available dates?"
   If they say YES → call tool: action=get_available_dates, project_id={p['project_id']}''')
     elif len(schedulable_projects) > 1:
-        # For multiple projects, list category and type together
+        # Differentiate projects: Type → Type+Address → Type+Store → Type+DateSold → Ordinals
+        # Only use ordinals for actual duplicates, not ALL projects
         cat_types = []
-        for p in schedulable_projects[:3]:
+        seen_names = set()
+
+        for i, p in enumerate(schedulable_projects[:5]):
+            cat = p['category']
             ptype = p.get('project_type', '')
-            if ptype:
-                cat_types.append(f"{p['category']} ({ptype})")
+            addr = p.get('address', '')
+            store_name = ''
+            date_sold = p.get('date_sold', '')
+
+            # Extract address string
+            if isinstance(addr, dict):
+                addr_str = addr.get('address1', '') or addr.get('city', '')
+            elif addr:
+                addr_str = str(addr).split(',')[0][:20]
             else:
-                cat_types.append(p['category'])
+                addr_str = ''
+
+            # Build name with best available differentiator
+            if ptype:
+                name = f"{cat} {ptype}"
+            elif addr_str:
+                name = f"{cat} at {addr_str}"
+            else:
+                name = cat
+
+            # If duplicate, try adding more context
+            if name in seen_names:
+                if addr_str and ptype:
+                    name = f"{cat} {ptype} at {addr_str}"
+                if name in seen_names and date_sold:
+                    try:
+                        from datetime import datetime as dt_cls
+                        ds = dt_cls.fromisoformat(date_sold.replace('Z', '+00:00'))
+                        name = f"{cat} {ptype} sold {ds.strftime('%B %Y')}" if ptype else f"{cat} sold {ds.strftime('%B %Y')}"
+                    except:
+                        pass
+                # Final fallback: ordinal (only for THIS duplicate, not all)
+                if name in seen_names:
+                    ordinal = ["first", "second", "third", "fourth", "fifth"][i]
+                    name = f"the {ordinal} {cat} {ptype}" if ptype else f"the {ordinal} {cat}"
+
+            seen_names.add(name)
+            cat_types.append(name)
+
+        logger.info(f"[SMART-PROMPT] Scheduling names: {cat_types}")
         context_parts.append(f'''
 - "Schedule appointment" →
   Say: "I see {len(schedulable_projects)} projects ready to schedule: {', '.join(cat_types)}. Which one?"
   (No tool call needed to list them!)''')
 
-    # Note about when to use tools
-    context_parts.append('''
+    # Build project ID lookup mapping (GPT-4o can use category/type/address to find project_id)
+    # CRITICAL: Put SCHEDULABLE projects FIRST so ordinals match voice guidance
+    # Voice says "first Blinds, second Blinds" referring to SCHEDULABLE projects
+    # So "first" in the mapping must also point to the first SCHEDULABLE project
+    all_projects = schedulable_projects + scheduled_projects + other_projects
+    mapping_lines = []
+    for i, p in enumerate(all_projects, 1):
+        cat = p['category']
+        ptype = p.get('project_type', '')
+        addr = p.get('address', '')
+        addr_str = str(addr) if addr else ''
+        addr_short = addr_str.split(',')[0] if ',' in addr_str else addr_str[:20] if addr_str else ''
+
+        if ptype:
+            mapping_lines.append(f"  - {cat} ({ptype}): project_id={p['project_id']}")
+        elif addr_short:
+            # Include address for projects without type (helps match "Blinds at Main Street")
+            mapping_lines.append(f"  - {cat} at {addr_short}: project_id={p['project_id']}")
+        else:
+            # Fallback: use ordinal position
+            ordinal = ["first", "second", "third", "fourth", "fifth"][i-1] if i <= 5 else f"#{i}"
+            mapping_lines.append(f"  - {ordinal} {cat}: project_id={p['project_id']}")
+
+    context_parts.append(f'''
+**PROJECT ID LOOKUP (for tool calls only - NEVER read these aloud):**
+{chr(10).join(mapping_lines)}
+
 **WHEN TO USE THE TOOL:**
 - get_available_dates: For projects NOT yet scheduled (status: Ready To Schedule, New)
 - reschedule_appointment: For projects ALREADY scheduled (status: Scheduled, Customer Scheduled)
@@ -268,11 +371,13 @@ This customer has NO projects in the system.
 - get_time_slots: When user picks a date and needs time slots
 - schedule_project: When user confirms date AND time
 - get_project_details: When user asks for details you don't have (technician, exact time, etc.)
-- ALWAYS include project_id when you know which project (from the IDs above)
+- ALWAYS include project_id from the lookup table above when calling tools
 
-**CRITICAL:** When calling the tool, include the project_id from above:
-  - For NEW scheduling: action=get_available_dates, project_id: [ID], message: "user's words"
-  - For RESCHEDULING: action=reschedule_appointment, project_id: [ID], message: "user's words"
+**CRITICAL - PROJECT IDENTIFICATION:**
+- When speaking: Refer to projects by CATEGORY (e.g., "your Blinds project", "your Decking project")
+- When speaking: If there are multiple projects of the same category, use TYPE (e.g., "Blinds Installation", "Blinds Measurement")
+- NEVER read out project IDs, order numbers, or any alphanumeric codes - they sound terrible when spoken
+- When calling tools: Look up the project_id from the table above using category (and type if needed)
 ''')
 
     return '\n'.join(context_parts)
@@ -530,8 +635,8 @@ def create_assistant_config_response(first_message: str, support_number: str = '
                         'properties': {
                             'action': {
                                 'type': 'string',
-                                'enum': ['list_projects', 'get_project_details', 'get_available_dates', 'get_time_slots', 'schedule_project', 'reschedule_appointment', 'get_weather', 'calendar_info', 'other'],
-                                'description': 'The type of action requested. Use calendar_info for "what day is X date" questions.'
+                                'enum': ['list_projects', 'get_project_details', 'get_available_dates', 'get_time_slots', 'schedule_project', 'confirm_appointment', 'reschedule_appointment', 'get_weather', 'calendar_info', 'other'],
+                                'description': 'The type of action requested. Use calendar_info for "what day is X date" questions. Use confirm_appointment after user says "yes" to finalize booking.'
                             },
                             'message': {
                                 'type': 'string',
@@ -540,6 +645,14 @@ def create_assistant_config_response(first_message: str, support_number: str = '
                             'project_id': {
                                 'type': 'string',
                                 'description': 'The project ID from embedded state. Include when you know which project (from YOUR CUSTOMER\'S PROJECTS section).'
+                            },
+                            'project_status': {
+                                'type': 'string',
+                                'description': 'The project status from embedded state (e.g., "scheduled", "ready to schedule"). Include along with project_id.'
+                            },
+                            'confirmed': {
+                                'type': 'boolean',
+                                'description': 'Set to true ONLY after user explicitly confirms the appointment preview. Required for Step 2 of booking.'
                             }
                         }
                     }
@@ -700,6 +813,13 @@ You MUST call `projectforce_api` for ANY project-related request. Never make up 
 - "Today, help me schedule" → CALL TOOL: action: list_projects, message: "help me schedule"
 - ANY variation with "schedule" or "appointment" → CALL TOOL: action: list_projects
 
+⚠️ COMMON TRANSCRIPTION ERRORS (these sound like "schedule" - treat as scheduling requests):
+- "Scale" / "Scale up" / "Scale a" → CALL TOOL: action: list_projects (misheard "schedule")
+- "Settle" / "Settle up" → CALL TOOL: action: list_projects (misheard "schedule")
+- "Scaling" → CALL TOOL: action: list_projects (misheard "scheduling")
+- "Set up" / "Setting up" → CALL TOOL: action: list_projects (misheard "scheduling")
+- If user says something that sounds SIMILAR to "schedule" or "appointment", treat it as a scheduling request.
+
 ❌ WRONG: Responding "Want to see your projects or schedule something new?" (this is chitchat - NEVER do this)
 ✅ RIGHT: Immediately call list_projects tool with the user's message
 
@@ -779,6 +899,23 @@ When scheduling, follow this exact flow - NO premature confirmations:
 
 ONLY confirm ONCE - after BOTH date AND time are selected. Never confirm after just the date.
 
+### TWO-STEP APPOINTMENT CONFIRMATION (CRITICAL)
+⚠️ MANDATORY: The appointment booking requires TWO tool calls to complete!
+
+**STEP 1 - Preview:** When user selects a time and you call the tool, you will receive a PREVIEW response with `status: awaiting_confirmation`. This is NOT the final booking. Speak the preview to the user.
+
+**STEP 2 - Finalize:** When the user says "yes", "confirm", "book it", "sounds good", or any affirmative response:
+- You MUST call the `projectforce_api` tool AGAIN with:
+  - action: "schedule_project"
+  - message: "confirm appointment" or "yes confirm"
+  - The backend will finalize the booking with `confirmed=true`
+
+❌ WRONG: User says "yes" → You say "Great, you're all set!" (WITHOUT calling tool)
+✅ RIGHT: User says "yes" → Call tool with message="confirm appointment" → THEN say "Great, you're all set!"
+
+**The appointment is NOT booked until you receive a SUCCESS response after the user confirms.**
+Never assume the appointment is booked after Step 1. Always make the second tool call.
+
 ### After Successful Actions
 - Confirm what was done: "Done! Your [project] is now scheduled for [date] at [time]."
 - Offer next steps: "Is there anything else I can help you with?"
@@ -835,7 +972,20 @@ If tool returns no projects and customer insists they were told to call:
 2. STOP SPEAKING. Say NOTHING while waiting.
 3. Next words = the actual answer.
 
-NEVER say: "Hold on", "Just a sec", "Still working", "Give me a moment"''' + build_smart_project_context(projects_data)
+NEVER say: "Hold on", "Just a sec", "Still working", "Give me a moment"
+
+### REPETITION DETECTION (CRITICAL - AVOID LOOPS)
+If you notice you're giving the SAME response multiple times in a conversation (e.g., "no dates available" twice):
+- DO NOT repeat the same response a third time
+- Instead, escalate: "It looks like our schedule is quite full right now. Let me give you our office number - they may have more options available. Would that help?"
+- If customer keeps trying: "I understand you'd like to schedule soon. Unfortunately, I'm not finding any openings right now. The office team has direct access to the installer schedules and may be able to help. Would you like that number?"
+
+**Examples of loops to break:**
+- "No dates available" → "No dates available" → STOP, offer office number
+- "I don't see any projects" → "I don't see any projects" → STOP, suggest calling back later
+- Same error message twice → STOP, acknowledge the issue and offer alternative
+
+The goal is NEVER to frustrate the customer with repetitive responses. When stuck, always offer a human alternative.''' + build_smart_project_context(projects_data)
             }]
         },
         'transcriber': {
@@ -1043,9 +1193,10 @@ def handle_function_call(message: Dict) -> Dict:
         user_message = parameters.get('message', '')
         action = parameters.get('action', 'other')
         project_id = parameters.get('project_id', '')  # From smart prompt embedded state
+        project_status = parameters.get('project_status', '')  # From smart prompt embedded state
 
         if project_id:
-            logger.info(f"[VAPI] GPT-4o passed project_id from embedded state: {project_id}")
+            logger.info(f"[VAPI] GPT-4o passed project_id from embedded state: {project_id}, status: {project_status}")
 
         if not user_message:
             return create_function_response({
@@ -1065,13 +1216,14 @@ def handle_function_call(message: Dict) -> Dict:
 
         logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, action={action}")
 
-        # Call orchestrator with the user's message (include from_phone for voice cache lookup, project_id from smart prompt)
+        # Call orchestrator with the user's message (include from_phone for voice cache lookup, project_id/status from smart prompt)
         response_text = call_orchestrator(
             message=user_message,
             call_id=call_id,
             credentials=credentials,
             from_phone=from_phone,
-            project_id=project_id
+            project_id=project_id,
+            project_status=project_status
         )
 
         return create_function_response({
@@ -1147,9 +1299,13 @@ def handle_tool_calls(message: Dict) -> Dict:
             user_message = arguments.get('message', '')
             action = arguments.get('action', 'other')
             project_id = arguments.get('project_id', '')  # From smart prompt embedded state
+            project_status = arguments.get('project_status', '')  # From smart prompt embedded state
+            confirmed = arguments.get('confirmed', False)  # For two-step appointment confirmation
 
             if project_id:
-                logger.info(f"[VAPI] GPT-4o passed project_id from embedded state: {project_id}")
+                logger.info(f"[VAPI] GPT-4o passed project_id from embedded state: {project_id}, status: {project_status}")
+            if confirmed:
+                logger.info(f"[VAPI] GPT-4o passed confirmed=True for final appointment booking")
 
             if not user_message:
                 results.append({
@@ -1177,13 +1333,15 @@ def handle_tool_calls(message: Dict) -> Dict:
 
             logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, action={action}")
 
-            # Call orchestrator (include from_phone for voice cache lookup, project_id from smart prompt)
+            # Call orchestrator (include from_phone for voice cache lookup, project_id/status from smart prompt)
             response_text = call_orchestrator(
                 message=user_message,
                 call_id=call_id,
                 credentials=credentials,
                 from_phone=from_phone,
-                project_id=project_id
+                project_id=project_id,
+                project_status=project_status,
+                confirmed=confirmed
             )
 
             logger.info(f"[VAPI] Tool call result: {response_text[:200] if response_text else 'empty'}")
@@ -1271,7 +1429,7 @@ def authenticate_caller(from_phone: str, to_phone: str) -> Optional[Dict]:
         return None
 
 
-def call_orchestrator(message: str, call_id: str, credentials: Dict, from_phone: str = '', project_id: str = '') -> str:
+def call_orchestrator(message: str, call_id: str, credentials: Dict, from_phone: str = '', project_id: str = '', project_status: str = '', confirmed: bool = False) -> str:
     """
     Call the orchestrator Lambda with the user's message.
 
@@ -1281,6 +1439,8 @@ def call_orchestrator(message: str, call_id: str, credentials: Dict, from_phone:
         credentials: Auth credentials from phone_auth
         from_phone: Caller's phone number for voice cache lookup
         project_id: Optional project ID from GPT-4o's embedded state (smart prompt)
+        project_status: Optional project status from GPT-4o's embedded state (smart prompt)
+        confirmed: True when user explicitly confirms appointment (Step 2 of two-step booking)
     """
     try:
         # Build orchestrator payload
@@ -1295,10 +1455,16 @@ def call_orchestrator(message: str, call_id: str, credentials: Dict, from_phone:
             'from_phone': from_phone  # For voice cache lookup in scheduling-actions
         }
 
-        # Include project_id if provided by GPT-4o from embedded state
+        # Include project_id and project_status if provided by GPT-4o from embedded state
         if project_id:
             body_data['project_id'] = project_id
             logger.info(f"[VAPI] Including project_id from smart prompt: {project_id}")
+        if project_status:
+            body_data['project_status'] = project_status
+            logger.info(f"[VAPI] Including project_status from smart prompt: {project_status}")
+        if confirmed:
+            body_data['confirmed'] = True
+            logger.info(f"[VAPI] Including confirmed=True for Step 2 appointment booking")
 
         payload = {
             'body': json.dumps(body_data)
@@ -1358,18 +1524,23 @@ def format_for_voice(text: str) -> str:
     """
     Format text for voice output.
 
-    - Strip Amazon Polly-specific SSML (Cartesia doesn't support it)
-    - Keep <speak>, <prosody>, <break> which Cartesia supports
+    - Strip ALL SSML tags (Claude and some TTS don't handle them well)
     - Remove markdown
     - Clean up formatting
     - Keep it concise
     """
     import re
 
-    # Strip Amazon Polly-specific tags (Cartesia doesn't support these)
-    # Keep <speak>, <prosody>, <break> which Cartesia supports
+    # Strip ALL SSML tags - Claude and many TTS providers don't handle them well
+    # This makes the response clean text that any LLM/TTS can handle
     text = re.sub(r'<amazon:domain[^>]*>', '', text)
     text = re.sub(r'</amazon:domain>', '', text)
+    text = re.sub(r'<speak>', '', text)
+    text = re.sub(r'</speak>', '', text)
+    text = re.sub(r'<prosody[^>]*>', '', text)
+    text = re.sub(r'</prosody>', '', text)
+    text = re.sub(r'<break[^>]*/>', '', text)
+    text = re.sub(r'<break[^>]*>', '', text)
 
     # Remove markdown formatting
     text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # **bold**

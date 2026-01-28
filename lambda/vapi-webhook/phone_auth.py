@@ -48,7 +48,8 @@ CREDENTIALS_TABLE = os.environ.get('VOICE_CREDENTIALS_TABLE', f'pf-syn-phone-cre
 AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
 
 # Token refresh buffer - refresh if less than this many seconds remaining
-TOKEN_REFRESH_BUFFER_SECONDS = 120
+# Keep low (30s) to avoid synchronous refresh during assistant-request which can timeout VAPI
+TOKEN_REFRESH_BUFFER_SECONDS = 30
 
 
 class AuthenticationError(Exception):

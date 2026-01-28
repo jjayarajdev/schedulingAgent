@@ -59,6 +59,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         caller_phone = body.get('caller_phone', '')  # For Vapi voice calls
         from_phone = body.get('from_phone', '')  # For voice cache lookup in scheduling-actions
         project_id = body.get('project_id', '')  # From GPT-4o smart prompt embedded state
+        project_status = body.get('project_status', '')  # From GPT-4o smart prompt embedded state
+        confirmed = body.get('confirmed', False)  # For two-step appointment confirmation (Step 2)
 
         # Validate required parameters
         if not message:
@@ -142,7 +144,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             conversation_history=conversation_history,
             channel=channel,
             from_phone=from_phone,  # For voice cache lookup in scheduling-actions
-            project_id=project_id  # From GPT-4o smart prompt embedded state
+            project_id=project_id,  # From GPT-4o smart prompt embedded state
+            project_status=project_status,  # From GPT-4o smart prompt embedded state
+            confirmed=confirmed  # For two-step appointment confirmation (Step 2)
         )
 
         # Extract response components

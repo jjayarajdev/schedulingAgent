@@ -872,8 +872,22 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     return conversational
                 return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
+            # Handle "awaiting_reschedule_confirm" status - Step 1: Ask user to confirm they want to reschedule
+            if response_body.get('status') == 'awaiting_reschedule_confirm':
+                project_id = response_body.get('project_id', '')
+                result = {
+                    "message": response_body.get('message', f"This project already has a scheduled appointment. Would you like to reschedule it?"),
+                    "project_id": project_id,
+                    "status": "awaiting_reschedule_confirm",
+                    "action_type": "reschedule",
+                    "requires_confirmation": True
+                }
+                conversational = generate_conversational_response(action, user_message, result, channel)
+                if channel == 'voice':
+                    return conversational
+                return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
+
             # Handle "cancelled_awaiting_dates" status - Step 1 of reschedule complete, waiting for user to confirm
-            if response_body.get('status') == 'cancelled_awaiting_dates':
                 project_id = response_body.get('project_id', '')
                 result = {
                     "message": response_body.get('message', f"I've cancelled your existing appointment for project #{project_id}. Would you like me to show you the available dates for rescheduling?"),
@@ -1652,7 +1666,9 @@ def route_request(
     conversation_history: Optional[list] = None,
     channel: str = 'chat',
     from_phone: str = '',
-    project_id: str = ''
+    project_id: str = '',
+    project_status: str = '',
+    confirmed: bool = False
 ) -> Dict[str, Any]:
     """
     Route request to either Direct Lambda or Bedrock Agent
@@ -1668,6 +1684,8 @@ def route_request(
         channel: Channel type ('voice' or 'chat') - determines response formatting
         from_phone: Caller phone number for voice cache lookup
         project_id: Optional project_id from GPT-4o smart prompt embedded state
+        project_status: Optional project_status from GPT-4o smart prompt embedded state
+        confirmed: True when user explicitly confirms appointment (Step 2 of two-step booking)
 
     Returns:
         Dictionary with:
@@ -1730,7 +1748,9 @@ def route_request(
                 conversation_history=conversation_history,
                 channel=channel,
                 from_phone=from_phone,
-                project_id=project_id  # From GPT-4o smart prompt embedded state
+                project_id=project_id,  # From GPT-4o smart prompt embedded state
+                project_status=project_status,  # From GPT-4o smart prompt embedded state
+                confirmed=confirmed  # For two-step appointment confirmation (Step 2)
             )
 
             # VOICE ADAPTATION: For voice channel, format the response
@@ -1822,7 +1842,9 @@ def route_request(
                 conversation_history=conversation_history,
                 channel=channel,  # Pass channel for voice-specific handling
                 from_phone=from_phone,
-                project_id=project_id  # From GPT-4o smart prompt embedded state
+                project_id=project_id,  # From GPT-4o smart prompt embedded state
+                project_status=project_status,  # From GPT-4o smart prompt embedded state
+                confirmed=confirmed  # For two-step appointment confirmation (Step 2)
             )
 
             # VOICE ADAPTATION: For voice channel, format the response

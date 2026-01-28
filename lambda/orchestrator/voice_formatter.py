@@ -385,7 +385,17 @@ def _format_projects_for_voice(data: Dict) -> str:
         num = info['count']
         types = list(info['types'])
         if num > 1:
-            cat_parts.append(f"{num} {cat}")
+            # Multiple projects with same category - differentiate by type if available
+            if len(types) > 1:
+                # Different types - list them to differentiate
+                type_list = " and ".join(types[:2])
+                cat_parts.append(f"{num} {cat}, {'an' if types[0][0].lower() in 'aeiou' else 'a'} {type_list}")
+            elif len(types) == 1:
+                # Same type - just mention the type once
+                cat_parts.append(f"{num} {cat}, both {'an' if types[0][0].lower() in 'aeiou' else 'a'} {types[0]}")
+            else:
+                # No type info - just say the count and ask user to pick by number
+                cat_parts.append(f"{num} {cat} projects")
         elif types:
             # Single project with type - mention it naturally
             cat_parts.append(f"one {cat}, {'an' if types[0][0].lower() in 'aeiou' else 'a'} {types[0]}")
@@ -449,12 +459,12 @@ def _format_dates_for_voice(data: Dict) -> str:
     if count == 0:
         # Priority 1: Circuit breaker triggered (repeated "no dates" in same session)
         if circuit_breaker:
-            return "Our schedule is quite full right now. Would you like me to check a specific date you have in mind, or would you prefer to call our office to speak with someone who can help?"
+            return "Our schedule is quite full right now. I'd recommend calling our office directly so they can find a time that works for you. Is there anything else I can help you with today?"
         # Priority 2: Auto-expansion already tried (checked 14 days)
         if auto_expanded:
-            return "I'm sorry, our schedule is quite full for the next two weeks. Would you like me to check a specific date you have in mind, or would you prefer to speak with someone from our scheduling team?"
-        # First time - generic message (auto-expand will happen on backend)
-        return "I'm sorry, there aren't any dates available right now."
+            return "I'm sorry, our schedule is quite full for the next two weeks. I'd recommend calling our office directly - they can check further out or put you on a waitlist. Is there anything else I can help with?"
+        # First time - graceful message with next steps
+        return "I'm sorry, there aren't any dates showing right now for this project. Our office can help find availability - would you like me to help with anything else, or shall we end here?"
 
     if count <= 3:
         # List them all with slow prosody for each date

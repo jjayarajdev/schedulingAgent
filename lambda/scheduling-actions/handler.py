@@ -185,7 +185,7 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
     today = datetime.now()
     date_lower = date_str.lower().strip()
     strategy = 'month'  # Default strategy
-    days_to_fetch = 5  # Default: 5 days
+    days_to_fetch = 10  # Default: 10 days for better availability
 
     # Already in YYYY-MM-DD format? Pass through - treat as specific day
     if re.match(r'^\d{4}-\d{2}-\d{2}$', date_str):
@@ -208,7 +208,7 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
             result = f"{year}-{month:02d}-01"
             logger.info(f"[DATE] Converted '{date_str}' (YYYY-MM) -> {result}")
         if return_strategy:
-            return (result, 'week', 5)  # Month format = 5 days
+            return (result, 'week', 10)  # Month format = 10 days
         return result
 
     # "this month" - first day of current month (or tomorrow if we're at start of month)
@@ -219,7 +219,7 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
         result = tomorrow.strftime("%Y-%m-%d")
         logger.info(f"[DATE] Converted 'this month' -> {result} (tomorrow)")
         if return_strategy:
-            return (result, 'week', 5)  # "this month" = show 5 days
+            return (result, 'week', 10)  # "this month" = show 10 days
         return result
 
     # "next month" - first day of next month
@@ -230,7 +230,7 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
             result = f"{today.year}-{today.month + 1:02d}-01"
         logger.info(f"[DATE] Converted 'next month' -> {result}")
         if return_strategy:
-            return (result, 'week', 5)  # "next month" = show 5 days
+            return (result, 'week', 10)  # "next month" = show 10 days
         return result
 
     # "next week" - next Monday
@@ -242,7 +242,7 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
         result = next_monday.strftime("%Y-%m-%d")
         logger.info(f"[DATE] Converted 'next week' -> {result}")
         if return_strategy:
-            return (result, 'week', 5)  # "next week" = show 5 days
+            return (result, 'week', 7)  # "next week" = show 7 days (full week)
         return result
 
     # "last week of [month]" - dynamically calculate based on days in month
@@ -260,7 +260,7 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
             result = f"{year}-{month_num:02d}-{start_day:02d}"
             logger.info(f"[DATE] Converted 'last week of {month_name}' -> {result} (month has {days_in_month} days)")
             if return_strategy:
-                return (result, 'week', 5)
+                return (result, 'week', 7)  # Last week = 7 days
             return result
 
     # Ordinal week of month: "1st week of/for", "2nd week of/for", "3rd week of/for", etc.
@@ -353,13 +353,13 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
         if month_name in months_map:
             month_num = months_map[month_name]
             year = today.year if month_num >= today.month else today.year + 1
-            # Dynamic calculation: last 5 days of month
+            # Dynamic calculation: last 7 days of month
             days_in_month = calendar.monthrange(year, month_num)[1]
-            start_day = days_in_month - 4  # Last 5 days
+            start_day = days_in_month - 6  # Last 7 days
             result = f"{year}-{month_num:02d}-{start_day:02d}"
             logger.info(f"[DATE] Converted 'end of {month_name}' -> {result} (month has {days_in_month} days)")
             if return_strategy:
-                return (result, 'week', 5)
+                return (result, 'week', 7)  # End of month = 7 days
             return result
 
     # Month names: "january", "feb", etc. with optional day number
@@ -389,7 +389,7 @@ def convert_natural_date(date_str: str, return_strategy: bool = False) -> Option
                 # If we're already in that month, start from tomorrow
                 # If it's a future month, start from the first day of that month
                 strategy = 'day'
-                days_to_fetch = 5  # Default: 5 days
+                days_to_fetch = 10  # Default: 10 days for better availability
                 if num == today.month:
                     # Same month - start from tomorrow
                     from datetime import timedelta
@@ -723,12 +723,20 @@ def extract_project_minimal(item: Dict) -> Dict[str, Any]:
     Extracts 15+ fields (vs previous 9) while keeping payload minimal
     """
     # Core fields (always present)
+    # Try multiple field names for project type (API may use different names per client)
+    project_type = (
+        safe_get(item, "project_type_project_type", default="") or
+        safe_get(item, "project_type", default="") or
+        safe_get(item, "projectType", default="") or
+        safe_get(item, "work_type", default="") or
+        safe_get(item, "workType", default="")
+    )
     project = {
         "id": str(safe_get(item, "project_project_id", default="")),
         "projectNumber": safe_get(item, "project_project_number", default=""),
         "status": safe_get(item, "status_info_status", default=""),
         "category": safe_get(item, "project_category_category", default=""),
-        "projectType": safe_get(item, "project_type_project_type", default=""),
+        "projectType": project_type,
     }
 
     # Conditional fields - only add if present
@@ -1013,7 +1021,7 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
             logger.info(f"API call took {api_duration:.2f}ms")
             logger.info(f"Response status: {pf_http_status_code}")
             logger.info(f"Response headers: {dict(res.headers)}")
-            logger.info(f"Response text (first 500 chars): {res.text[:500]}")
+            logger.info(f"Response text (first 2000 chars): {res.text[:2000]}")
             response = res.json()
         except requests.HTTPError as e:
             api_duration = (time.time() - api_start) * 1000
@@ -1037,9 +1045,21 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
         first_item = raw_data[0]
         installer_fields = {k: v for k, v in first_item.items() if 'user' in k.lower() or 'installer' in k.lower()}
         logger.info(f"[DEBUG] First project installer-related fields: {installer_fields}")
+        # DEBUG: Log all type-related fields
+        type_fields = {k: v for k, v in first_item.items() if 'type' in k.lower()}
+        logger.info(f"[DEBUG] First project type-related fields: {type_fields}")
 
     # Extract comprehensive fields from each project (fast iteration)
     projects = [extract_project_minimal(item) for item in raw_data]
+
+    # Filter out closed/cancelled/completed projects (not actionable via any channel)
+    # This applies to ALL channels: voice, SMS, chat
+    excluded_statuses = ['closed', 'cancelled', 'completed', 'work complete', 'done', 'archived',
+                         'completed-archived', 'cancelled/surge', 'ready to cancel']
+    original_count = len(projects)
+    projects = [p for p in projects if p.get('status', '').lower() not in excluded_statuses]
+    if original_count != len(projects):
+        logger.info(f"[FILTER] Excluded {original_count - len(projects)} closed/cancelled/completed projects from {original_count} total")
 
     # Apply filters if provided (case-insensitive matching)
     if filter_status or filter_category or filter_project_type or filter_scheduled_month or filter_scheduled_date:
@@ -1696,7 +1716,7 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
     start_date = params.get('start_date')
     explicit_end_date = params.get('end_date')  # User-provided end date for range queries
     date_strategy = None
-    days_to_fetch = 5  # Default: 5 days
+    days_to_fetch = 10  # Default: 10 days for better availability
 
     if not start_date:
         # Check if 'date' parameter has a natural language value (e.g., "next month")
@@ -1745,7 +1765,7 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
                     else:
                         start_date = None
                         date_strategy = None
-                        days_to_fetch = 5
+                        days_to_fetch = 10
 
     # Handle week_past strategy - the entire requested week is in the past
     if date_strategy == 'week_past':
@@ -1764,7 +1784,7 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
         from datetime import timedelta
         start_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
         date_strategy = 'day'
-        days_to_fetch = 5
+        days_to_fetch = 10  # Check 10 days for better availability
         logger.info(f"[DATE] Using tomorrow as start_date: {start_date}, strategy={date_strategy}")
 
     if USE_MOCK_API:
@@ -1848,6 +1868,13 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
 
     data = response.get("data", {})
     raw_dates = data.get("dates", [])
+    raw_slots = data.get("slots", [])
+
+    # NOTE: Don't filter dates based on slots count here
+    # The correct flow is: show dates → user picks date → fetch time slots for that date
+    # The slots array at this stage may be empty/incomplete - real slots come from get_time_slots
+    if raw_dates:
+        logger.info(f"[DATES] API returned {len(raw_dates)} dates, {len(raw_slots)} slots preview")
 
     # Sort dates chronologically
     raw_dates = sorted(raw_dates)
@@ -1857,20 +1884,20 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
     auto_expanded = False
 
     # ========================================================================
-    # AUTO-EXPAND DATE RANGE: If no dates found in default 5-day window,
-    # automatically expand to 14 days before returning "no dates available"
+    # AUTO-EXPAND DATE RANGE: If no dates found in default 10-day window,
+    # automatically expand to 21 days before returning "no dates available"
     # This prevents "booked up" dead ends that frustrate customers.
     # Only applies to default queries (not explicit date ranges or specific days)
     # ========================================================================
     if (len(raw_dates) == 0 and
         not USE_MOCK_API and
-        days_to_fetch == 5 and
+        days_to_fetch == 10 and
         date_strategy not in ['date_range', 'specific_day', 'week_past']):
 
-        logger.info(f"[AUTO-EXPAND] No dates in 5-day window, expanding to 14 days")
+        logger.info(f"[AUTO-EXPAND] No dates in 10-day window, expanding to 21 days")
 
-        # Re-calculate end_date for 14-day range
-        expanded_days = 14
+        # Re-calculate end_date for 21-day range
+        expanded_days = 21
         expanded_end_date = (start_dt + timedelta(days=expanded_days - 1)).strftime("%Y-%m-%d")
 
         # Construct expanded URL
@@ -1882,7 +1909,13 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
             pf_http_status_code = expanded_res.status_code
             expanded_response = expanded_res.json()
             expanded_data = expanded_response.get("data", {})
-            raw_dates = sorted(expanded_data.get("dates", []))
+            expanded_dates = sorted(expanded_data.get("dates", []))
+            expanded_slots = expanded_data.get("slots", [])
+
+            # NOTE: Don't filter dates based on slots - show dates, let user pick, then fetch slots
+            logger.info(f"[AUTO-EXPAND] API returned {len(expanded_dates)} dates, {len(expanded_slots)} slots preview")
+
+            raw_dates = expanded_dates
             original_count = len(raw_dates)
             auto_expanded = True
 
@@ -2074,6 +2107,85 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
     new_request_id = data.get("request_id") or request_id
     logger.info(f"Time slots API returned request_id: {new_request_id} (input was: {request_id})")
 
+    # ========================================================================
+    # STALE DATE REFRESH: If selected date has 0 slots, re-fetch available dates
+    # This handles the case where dates become unavailable between when user
+    # first saw them and when they tried to select a time slot.
+    # ========================================================================
+    if len(raw_slots) == 0 and not USE_MOCK_API and client_id:
+        logger.info(f"[STALE-REFRESH] Selected date {selected_date} has 0 slots - refreshing available dates")
+
+        try:
+            # Re-fetch available dates for next 14 days
+            from datetime import timedelta
+            refresh_start = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+            refresh_end = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
+
+            refresh_url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/startDate/{refresh_start}/endDate/{refresh_end}/slotsChatbot"
+            logger.info(f"[STALE-REFRESH] GET {refresh_url}")
+
+            refresh_res = make_api_request_with_retry("GET", refresh_url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
+            refresh_data = refresh_res.json().get("data", {})
+            fresh_dates = sorted(refresh_data.get("dates", []))
+            fresh_request_id = refresh_data.get("request_id")
+
+            if fresh_dates:
+                # Format fresh dates for display
+                formatted_fresh_dates = []
+                for date_str in fresh_dates[:5]:  # Limit to first 5 dates
+                    try:
+                        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                        formatted_fresh_dates.append({
+                            "date": date_str,
+                            "displayDate": date_obj.strftime("%m/%d/%Y"),
+                            "dayName": date_obj.strftime("%A"),
+                            "dayShort": date_obj.strftime("%a"),
+                            "monthDay": date_obj.strftime("%m/%d"),
+                            "formatted": date_obj.strftime("%a %m/%d/%Y")
+                        })
+                    except:
+                        formatted_fresh_dates.append({"date": date_str, "formatted": date_str})
+
+                logger.info(f"[STALE-REFRESH] Found {len(fresh_dates)} fresh dates: {fresh_dates[:5]}")
+
+                return {
+                    "action": "get_time_slots",
+                    "project_id": project_id,
+                    "date": selected_date,
+                    "available_slots": [],
+                    "timeSlots": [],
+                    "slotCount": 0,
+                    "date_no_longer_available": True,
+                    "message": f"Sorry, {selected_date} is no longer available. Here are the current available dates:",
+                    "fresh_dates": fresh_dates[:5],
+                    "fresh_dates_formatted": formatted_fresh_dates,
+                    "fresh_date_count": len(fresh_dates),
+                    "request_id": fresh_request_id,
+                    "start_date": refresh_start,
+                    "mock_mode": USE_MOCK_API,
+                    "pf_http_status_code": pf_http_status_code
+                }
+            else:
+                logger.info(f"[STALE-REFRESH] No dates available in next 14 days")
+                return {
+                    "action": "get_time_slots",
+                    "project_id": project_id,
+                    "date": selected_date,
+                    "available_slots": [],
+                    "timeSlots": [],
+                    "slotCount": 0,
+                    "date_no_longer_available": True,
+                    "message": f"Sorry, {selected_date} is no longer available and there are no other dates available in the next 2 weeks. Please try again later or contact us for assistance.",
+                    "fresh_dates": [],
+                    "fresh_date_count": 0,
+                    "mock_mode": USE_MOCK_API,
+                    "pf_http_status_code": pf_http_status_code
+                }
+
+        except Exception as e:
+            logger.warning(f"[STALE-REFRESH] Failed to refresh dates: {e}")
+            # Fall through to return normal 0-slots response
+
     # Group time slots by time of day for better UI rendering
     morning_slots = []  # 6 AM - 11:59 AM
     afternoon_slots = []  # 12 PM - 4:59 PM
@@ -2165,10 +2277,11 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
     # Track PF API HTTP status code
     pf_http_status_code = 200  # Default for mock/success
 
-    if not all([project_id, date, time, request_id]):
-        raise ValueError("Missing required parameters: project_id, date, time, request_id")
+    if not all([project_id, date, time]):
+        raise ValueError("Missing required parameters: project_id, date, time")
 
     # STEP 1: If not confirmed, return details for user to confirm
+    # request_id is only needed for Step 2 (actual API call), not for Step 1 (preview)
     if not confirmed:
         logger.info(f"[CONFIRM STEP 1] Returning appointment details for confirmation: project={project_id}, date={date}, time={time}")
 
@@ -2201,7 +2314,11 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
         }
 
     # STEP 2: User confirmed - proceed with actual API call
-    logger.info(f"[CONFIRM STEP 2] User confirmed - calling API to schedule: project={project_id}, date={date}, time={time}")
+    # request_id is required for the actual scheduling API call
+    if not request_id:
+        raise ValueError("Missing request_id - cannot confirm appointment without a valid time slot request_id from get_available_dates")
+
+    logger.info(f"[CONFIRM STEP 2] User confirmed - calling API to schedule: project={project_id}, date={date}, time={time}, request_id={request_id}")
 
     # Resolve Order Number to internal ID if needed (scheduler API requires internal ID)
     if not str(project_id).isdigit() and not USE_MOCK_API and customer_id and client_id:

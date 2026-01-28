@@ -884,22 +884,53 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
         is_schedule = any(phrase in message_lower for phrase in schedule_phrases)
 
         if is_reschedule or is_schedule:
-            logger.info(f"[CONTINUATION] SMART-PROMPT RESCHEDULE: User confirmed reschedule for project {project_id_from_context} (from GPT-4o embedded state, workflow_type={workflow_type})")
-            return {
-                'continue_workflow': True,
-                'action': 'reschedule_appointment',
-                'params': {
-                    'project_id': str(project_id_from_context),
-                    'confirmed': True  # User consent already obtained via GPT-4o conversation
-                },
-                'next_stage': 'awaiting_date_selection',
-                'preserve_context': {
-                    'project_id': str(project_id_from_context),
-                    'project_ids': context.get('project_ids', [project_id_from_context]),
-                    'is_reschedule': True
-                },
-                'workflow_type': 'reschedule_appointment'
-            }
+            # Determine if this is a reschedule or new schedule based on project status
+            project_status = context.get('project_status', '').lower()
+            project_mapping = context.get('project_mapping', {})
+
+            # Try to get status from project_mapping if not in context
+            if not project_status and project_mapping:
+                project_info = project_mapping.get(str(project_id_from_context), {})
+                project_status = project_info.get('status', '').lower()
+
+            scheduled_statuses = ['scheduled', 'customer scheduled', 'tentatively scheduled']
+            is_already_scheduled = project_status in scheduled_statuses
+
+            if is_already_scheduled:
+                # Project is scheduled - use reschedule_appointment
+                logger.info(f"[CONTINUATION] SMART-PROMPT RESCHEDULE: Project {project_id_from_context} is scheduled (status={project_status}) - calling reschedule_appointment")
+                return {
+                    'continue_workflow': True,
+                    'action': 'reschedule_appointment',
+                    'params': {
+                        'project_id': str(project_id_from_context),
+                        'confirmed': True  # User consent already obtained via GPT-4o conversation
+                    },
+                    'next_stage': 'awaiting_date_selection',
+                    'preserve_context': {
+                        'project_id': str(project_id_from_context),
+                        'project_ids': context.get('project_ids', [project_id_from_context]),
+                        'is_reschedule': True
+                    },
+                    'workflow_type': 'reschedule_appointment'
+                }
+            else:
+                # Project is not scheduled - use get_available_dates for new scheduling
+                logger.info(f"[CONTINUATION] SMART-PROMPT SCHEDULE: Project {project_id_from_context} is not scheduled (status={project_status}) - calling get_available_dates")
+                return {
+                    'continue_workflow': True,
+                    'action': 'get_available_dates',
+                    'params': {
+                        'project_id': str(project_id_from_context)
+                    },
+                    'next_stage': 'awaiting_date_selection',
+                    'preserve_context': {
+                        'project_id': str(project_id_from_context),
+                        'project_ids': context.get('project_ids', [project_id_from_context]),
+                        'is_reschedule': False
+                    },
+                    'workflow_type': 'schedule_appointment'
+                }
 
         # Check for details request
         details_phrases = ['details', 'check', 'appointment', 'when is', 'what time', 'what date', 'info', 'tell me about']
@@ -2637,7 +2668,9 @@ def orchestrate_intelligent_workflow(
     conversation_history: List[Dict],
     channel: str = 'chat',  # 'chat' or 'voice' - for channel-specific handling
     from_phone: str = '',  # For voice cache lookup
-    project_id: str = ''  # From GPT-4o smart prompt embedded state (voice)
+    project_id: str = '',  # From GPT-4o smart prompt embedded state (voice)
+    project_status: str = '',  # From GPT-4o smart prompt embedded state (voice)
+    confirmed: bool = False  # From GPT-4o: True when user confirms appointment (Step 2)
 ) -> Dict[str, Any]:
     """
     Main intelligent orchestration function
@@ -2653,6 +2686,8 @@ def orchestrate_intelligent_workflow(
         channel: 'chat' or 'voice'
         from_phone: Caller phone number for voice cache lookup
         project_id: Optional project_id from GPT-4o smart prompt (voice fast path)
+        project_status: Optional project_status from GPT-4o smart prompt (voice fast path)
+        confirmed: True when GPT-4o indicates user confirmed appointment (Step 2 of two-step booking)
 
     Returns:
         Response dictionary with text, intent, action, timing
@@ -2672,7 +2707,7 @@ def orchestrate_intelligent_workflow(
     # Use it as a fallback when workflow state doesn't have project context
     # ========================================================================
     if project_id and channel == 'voice':
-        logger.info(f"[SMART-PROMPT] project_id passed from GPT-4o: {project_id}")
+        logger.info(f"[SMART-PROMPT] project_id passed from GPT-4o: {project_id}, status: {project_status}")
         # If workflow state exists but lacks project_id in context, inject it
         context = workflow_state.get('context', {}) if workflow_state else {}
         if workflow_state and not context.get('project_id'):
@@ -2680,6 +2715,8 @@ def orchestrate_intelligent_workflow(
             if 'context' not in workflow_state:
                 workflow_state['context'] = {}
             workflow_state['context']['project_id'] = project_id
+            if project_status:
+                workflow_state['context']['project_status'] = project_status
             # Also add to project_ids list if not present
             project_ids = workflow_state['context'].get('project_ids', [])
             if project_id not in project_ids:
@@ -2687,17 +2724,105 @@ def orchestrate_intelligent_workflow(
             state_manager.save_state(session_id, workflow_state)
             logger.info(f"[SMART-PROMPT] Workflow state updated with smart prompt project_id")
         elif not workflow_state:
-            # No workflow state at all - create minimal state with project_id
-            logger.info(f"[SMART-PROMPT] No workflow state - creating minimal state with project_id")
+            # No workflow state at all - create minimal state with project_id and status
+            logger.info(f"[SMART-PROMPT] No workflow state - creating minimal state with project_id and status")
             workflow_state = {
                 'workflow_type': 'smart_prompt_context',
                 'current_stage': 'initial',
                 'context': {
                     'project_id': project_id,
-                    'project_ids': [project_id]
+                    'project_ids': [project_id],
+                    'project_status': project_status  # Store status for continuation handler
                 }
             }
             state_manager.save_state(session_id, workflow_state)
+
+    # ========================================================================
+    # GPT-4O CONFIRMED FLAG HANDLER (Voice Step 2)
+    # When GPT-4o passes confirmed=True, finalize the appointment booking
+    # This handles the two-step confirmation flow for voice
+    # ========================================================================
+    if confirmed and channel == 'voice':
+        logger.info(f"[VOICE-CONFIRM] GPT-4o passed confirmed=True - finalizing appointment")
+
+        # Check if we're in awaiting_appointment_confirm stage
+        current_stage = workflow_state.get('current_stage', '') if workflow_state else ''
+        context = workflow_state.get('context', {}) if workflow_state else {}
+
+        if current_stage == 'awaiting_appointment_confirm' or context.get('project_id'):
+            # Get booking details from workflow context
+            booking_project_id = context.get('project_id') or project_id
+            booking_date = context.get('date')
+            booking_time = context.get('time')
+            booking_request_id = context.get('request_id')
+
+            if booking_project_id and booking_date and booking_time and booking_request_id:
+                logger.info(f"[VOICE-CONFIRM] Executing Step 2: project={booking_project_id}, date={booking_date}, time={booking_time}")
+
+                try:
+                    confirm_params = {
+                        'project_id': booking_project_id,
+                        'date': booking_date,
+                        'time': booking_time,
+                        'request_id': booking_request_id,
+                        'customer_id': customer_id,
+                        'client_id': client_id,
+                        'pf_bearer_token': pf_bearer_token,
+                        'from_phone': from_phone,
+                        'confirmed': True  # CRITICAL: Step 2 - actually book the appointment
+                    }
+
+                    lambda_response = call_lambda_directly('confirm_appointment', confirm_params)
+                    logger.info(f"[VOICE-CONFIRM] Lambda response received")
+
+                    # Extract response
+                    response_data = lambda_response.get('response', {})
+                    function_response = response_data.get('functionResponse', {})
+                    response_body_wrapper = function_response.get('responseBody', {})
+                    text_wrapper = response_body_wrapper.get('TEXT', {})
+                    response_body_str = text_wrapper.get('body', '{}')
+
+                    if isinstance(response_body_str, str):
+                        response_body = json.loads(response_body_str)
+                    else:
+                        response_body = response_body_str
+
+                    if response_body.get('error'):
+                        error_msg = response_body.get('error', 'Unknown error')
+                        logger.error(f"[VOICE-CONFIRM] Booking failed: {error_msg}")
+                        response_text = f"I'm sorry, I couldn't complete the booking. {error_msg}"
+                    else:
+                        # Success! Appointment booked
+                        logger.info(f"[VOICE-CONFIRM] Appointment booked successfully!")
+                        response_text = response_body.get('message', f"Your appointment is confirmed for {booking_date} at {booking_time}.")
+
+                        # Clear workflow state
+                        state_manager.reset_workflow_state(session_id)
+
+                    timing['total'] = time.time() - start_time
+                    return {
+                        'response': response_text,
+                        'intent': 'scheduling',
+                        'action': 'confirm_appointment',
+                        'agent_name': 'Intelligent Orchestrator (Voice Confirm Step 2)',
+                        'direct_call': True,
+                        'timing': timing,
+                        'pf_http_status_code': response_body.get('pf_http_status_code', 200)
+                    }
+
+                except Exception as e:
+                    logger.error(f"[VOICE-CONFIRM] Error in Step 2 booking: {e}", exc_info=True)
+                    timing['total'] = time.time() - start_time
+                    return {
+                        'response': "I'm sorry, I had trouble completing that booking. Please try again.",
+                        'intent': 'scheduling',
+                        'action': 'confirm_appointment',
+                        'agent_name': 'Intelligent Orchestrator (Voice Confirm Error)',
+                        'direct_call': True,
+                        'timing': timing
+                    }
+            else:
+                logger.warning(f"[VOICE-CONFIRM] Missing booking details: project_id={booking_project_id}, date={booking_date}, time={booking_time}, request_id={booking_request_id}")
 
     # ========================================================================
     # PENDING CONFIRMATION HANDLER (Chat/SMS only)
@@ -2709,7 +2834,8 @@ def orchestrate_intelligent_workflow(
     logger.info(f"[CONFIRM-CHECK] pending_action in context: {pending_action_data is not None}, channel: {channel}")
     # pending_action_data can be a dict (from confirm flow) or string (from vague_prompts like "schedule a project")
     # Only process as confirmation if it's a dict with 'action' key
-    if workflow_state and pending_action_data and isinstance(pending_action_data, dict) and channel != 'voice':
+    # NOTE: Voice channel now included - GPT-4o will pass "yes"/"confirm" which we handle here
+    if workflow_state and pending_action_data and isinstance(pending_action_data, dict):
         pending = pending_action_data
         pending_action = pending.get('action')
         message_lower = message.lower().strip()
@@ -2728,6 +2854,7 @@ def orchestrate_intelligent_workflow(
             pending_params['customer_id'] = customer_id
             pending_params['client_id'] = client_id
             pending_params['pf_bearer_token'] = pf_bearer_token
+            pending_params['confirmed'] = True  # CRITICAL: Tell Lambda to actually book the appointment
 
             try:
                 lambda_response = call_lambda_directly('confirm_appointment', pending_params)
@@ -3176,6 +3303,47 @@ def orchestrate_intelligent_workflow(
             # Format the response
             response_text = format_lambda_response(action, response_body, message, channel)
 
+            # HANDLE TWO-STEP CONFIRM: When confirm_appointment returns awaiting_confirmation (Step 1)
+            # User must say "yes" before we actually confirm - DON'T reset the workflow!
+            if action == 'confirm_appointment' and response_body.get('status') == 'awaiting_confirmation':
+                project_id = response_body.get('project_id') or params.get('project_id')
+                date = response_body.get('date') or params.get('date')
+                time_slot = response_body.get('time') or params.get('time')
+                request_id = response_body.get('request_id') or params.get('request_id')
+                category = response_body.get('category') or preserve_context.get('category', '')
+
+                logger.info(f"[CONTINUATION] TWO-STEP CONFIRM: Setting awaiting_appointment_confirm for project {project_id}")
+
+                # Preserve project_mapping from existing state
+                existing_mapping = workflow_state.get('project_mapping', {}) if workflow_state else {}
+
+                # Save workflow state - user must confirm before we finalize
+                state_manager.save_state(session_id, {
+                    'workflow_type': 'confirm_appointment',
+                    'current_stage': 'awaiting_appointment_confirm',
+                    'context': {
+                        'project_id': project_id,
+                        'date': date,
+                        'time': time_slot,
+                        'request_id': request_id,
+                        'category': category,
+                        'project_mapping': existing_mapping,
+                        'address': preserve_context.get('address', ''),
+                        'project_type': preserve_context.get('project_type', '')
+                    },
+                    'project_mapping': existing_mapping
+                })
+
+                timing['total'] = time.time() - start_time
+                return {
+                    'response': response_text,
+                    'intent': 'scheduling',
+                    'action': action,
+                    'agent_name': 'Intelligent Orchestrator (Stage-Driven Continuation)',
+                    'direct_call': True,
+                    'timing': timing
+                }
+
             # Update workflow state
             if next_stage == 'complete':
                 # VOICE ENHANCEMENT: Save action to context before clearing state
@@ -3462,24 +3630,118 @@ def orchestrate_intelligent_workflow(
                             'projectNumber': project_number,
                             'project_type': p.get('projectType', p.get('ProjectType', ''))
                         }
+                        # Also map by projectNumber (Order Number) for reverse lookup
+                        if project_number:
+                            project_mapping[project_number] = {
+                                'category': exact_category,
+                                'category_bucket': get_category_bucket(exact_category),
+                                'address': p.get('address', ''),
+                                'status': p.get('status', ''),
+                                'project_id': pid,  # Internal project ID for API calls
+                                'project_type': p.get('projectType', p.get('ProjectType', ''))
+                            }
 
                 # Format voice response for scheduling selection
+                # Helper to format project names with differentiation (Type → Address → Ordinals)
+                def format_project_names(projects_to_format):
+                    """Format project names with Type, Address, or Ordinals for differentiation."""
+                    # Debug: Log incoming project data
+                    for idx, p in enumerate(projects_to_format):
+                        pid = p.get('id', 'unknown')
+                        cat = p.get('category', '')
+                        ptype = p.get('projectType', p.get('ProjectType', ''))
+                        logger.info(f"[FORMAT-NAMES] Project {idx}: id={pid}, category='{cat}', projectType='{ptype}'")
+
+                    # First pass: check for duplicates when using category+type
+                    seen_keys = set()
+                    needs_address = False
+                    for p in projects_to_format:
+                        cat = p.get('category', 'project')
+                        ptype = p.get('projectType', p.get('ProjectType', ''))
+                        key = f"{cat}|{ptype}"
+                        if key in seen_keys:
+                            needs_address = True
+                            break
+                        seen_keys.add(key)
+
+                    logger.info(f"[FORMAT-NAMES] needs_address={needs_address}, seen_keys={seen_keys}")
+
+                    # Build names with appropriate differentiation
+                    # Fallback chain: Type → Type+Address → Type+Store → Type+DateSold → Ordinals
+                    names = []
+                    seen_names = set()
+                    for i, p in enumerate(projects_to_format):
+                        cat = p.get('category', 'project')
+                        ptype = p.get('projectType', p.get('ProjectType', ''))
+                        addr = p.get('address', {})
+
+                        # Extract address string
+                        if isinstance(addr, dict):
+                            addr_str = addr.get('address1', '') or addr.get('city', '')
+                        else:
+                            addr_str = str(addr).split(',')[0] if addr else ''
+
+                        # Extract store name
+                        store = p.get('store', {})
+                        store_name = store.get('storeName', '') if isinstance(store, dict) else ''
+
+                        # Extract date sold (month/year for voice)
+                        date_sold = p.get('dateSold', '')
+                        date_sold_str = ''
+                        if date_sold:
+                            try:
+                                from datetime import datetime as dt_cls
+                                ds = dt_cls.fromisoformat(date_sold.replace('Z', '+00:00'))
+                                date_sold_str = ds.strftime('%B %Y')  # e.g., "October 2024"
+                            except:
+                                pass
+
+                        # Build name: Category + Type, or Category + Address, or ordinal + Category
+                        if ptype:
+                            name = f"{cat} {ptype}"
+                        elif addr_str:
+                            name = f"{cat} at {addr_str[:25]}"
+                        else:
+                            name = cat
+
+                        # If still duplicate, try adding address/store/date
+                        if name in seen_names:
+                            if addr_str:
+                                name = f"{cat} {ptype} at {addr_str[:25]}" if ptype else f"{cat} at {addr_str[:25]}"
+                            if name in seen_names and store_name:
+                                name = f"{cat} {ptype} from {store_name}" if ptype else f"{cat} from {store_name}"
+                            if name in seen_names and date_sold_str:
+                                name = f"{cat} {ptype} sold {date_sold_str}" if ptype else f"{cat} sold {date_sold_str}"
+                            # Final fallback: ordinal
+                            if name in seen_names:
+                                ordinal = ["first", "second", "third", "fourth", "fifth"][i] if i < 5 else f"#{i+1}"
+                                name = f"the {ordinal} {cat} {ptype}" if ptype else f"the {ordinal} {cat}"
+
+                        seen_names.add(name)
+                        names.append(name)
+                        logger.info(f"[FORMAT-NAMES] Project {i}: built name='{name}'")
+
+                    logger.info(f"[FORMAT-NAMES] Final names: {names}")
+                    return names
+
                 if len(schedulable_projects) == 1:
                     # Single project - ask for confirmation
                     proj = schedulable_projects[0]
                     cat = proj.get('category', 'project')
-                    voice_response = f"I see you have a {cat} project ready to schedule. Would you like me to show you the available dates?"
+                    ptype = proj.get('projectType', proj.get('ProjectType', ''))
+                    display_name = f"{cat} {ptype}" if ptype else cat
+                    voice_response = f"I see you have a {display_name} project ready to schedule. Would you like me to show you the available dates?"
                     next_stage = 'awaiting_schedule_confirm'
                 elif len(schedulable_projects) <= 5:
-                    # 2-5 projects - list them all
-                    categories = [p.get('category', 'project') for p in schedulable_projects]
-                    voice_response = f"You have {len(schedulable_projects)} projects ready to schedule: " + ", ".join(categories) + ". Which one would you like to schedule?"
+                    # 2-5 projects - list them with differentiation
+                    names = format_project_names(schedulable_projects)
+                    voice_response = f"You have {len(schedulable_projects)} projects ready to schedule: " + ", ".join(names) + ". Which one would you like to schedule?"
                     next_stage = 'awaiting_project_selection'
                 else:
-                    # Many projects (6+) - list first 5 and mention there are more
-                    first_five = [p.get('category', 'project') for p in schedulable_projects[:5]]
+                    # Many projects (6+) - list first 5 with differentiation
+                    names = format_project_names(schedulable_projects[:5])
                     remaining = len(schedulable_projects) - 5
-                    voice_response = f"You have {len(schedulable_projects)} projects ready to schedule, including: " + ", ".join(first_five) + f", and {remaining} more. Which one would you like to schedule?"
+                    voice_response = f"You have {len(schedulable_projects)} projects ready to schedule, including: " + ", ".join(names) + f", and {remaining} more. Which one would you like to schedule?"
                     next_stage = 'awaiting_project_selection'
 
                 # Save workflow state for next turn
@@ -3717,7 +3979,8 @@ You can say something like:
                                 'category_bucket': get_category_bucket(exact_category),
                                 'address': p.get('address', ''),
                                 'status': p.get('status', ''),
-                                'project_id': pid
+                                'project_id': pid,
+                                'project_type': p.get('projectType', p.get('ProjectType', ''))
                             }
 
                 existing_state = state_manager.get_state(session_id) or {}
@@ -3814,11 +4077,26 @@ You can say something like:
                 for p in response_body['projects']:
                     pid = str(p.get('id', ''))
                     if pid:
+                        project_number = p.get('projectNumber', '')
+                        exact_category = p.get('category', '')
                         project_mapping[pid] = {
-                            'category': p.get('category', ''),
+                            'category': exact_category,
+                            'category_bucket': get_category_bucket(exact_category),
                             'address': p.get('address', ''),
-                            'status': p.get('status', '')
+                            'status': p.get('status', ''),
+                            'projectNumber': project_number,
+                            'project_type': p.get('projectType', p.get('ProjectType', ''))
                         }
+                        # Also map by projectNumber (Order Number) for reverse lookup
+                        if project_number:
+                            project_mapping[project_number] = {
+                                'category': exact_category,
+                                'category_bucket': get_category_bucket(exact_category),
+                                'address': p.get('address', ''),
+                                'status': p.get('status', ''),
+                                'project_id': pid,  # Internal project ID for API calls
+                                'project_type': p.get('projectType', p.get('ProjectType', ''))
+                            }
                 if project_ids:
                     state_manager.save_state(session_id, {
                         'workflow_type': 'project_list',
@@ -4095,6 +4373,26 @@ You can say something like:
                 except Exception as track_err:
                     logger.warning(f"[ORDINAL] Failed to track viewed project (non-critical): {track_err}")
 
+                # CRITICAL: Save current project_id to workflow_state for pronoun resolution
+                # When user says "reschedule it", "it" should refer to this project
+                try:
+                    existing_state = workflow_state or {}
+                    existing_mapping = existing_state.get('project_mapping', {}) or existing_state.get('context', {}).get('project_mapping', {})
+                    state_manager.save_state(session_id, {
+                        'workflow_type': 'project_details',
+                        'current_stage': 'viewed_details',
+                        'context': {
+                            'project_id': resolved_project_id,  # CURRENT project for pronoun resolution
+                            'category': project_data.get('category', ''),
+                            'status': project_data.get('status', ''),
+                            'project_mapping': existing_mapping
+                        },
+                        'project_mapping': existing_mapping
+                    })
+                    logger.info(f"[ORDINAL] Saved project_id {resolved_project_id} to workflow_state for pronoun resolution")
+                except Exception as save_err:
+                    logger.warning(f"[ORDINAL] Failed to save project_id to workflow_state: {save_err}")
+
                 timing['total'] = time.time() - start_time
                 return {
                     'response': response_text,
@@ -4108,6 +4406,18 @@ You can say something like:
 
             except IndexError:
                 logger.warning(f"[ORDINAL] Index {ordinal_index} out of range for {len(project_ids)} projects")
+                # FALLBACK: If GPT-4o passed a project_id, use it directly
+                # This handles the case where GPT-4o presented multiple projects but only passed one ID
+                fallback_project_id = (workflow_state or {}).get('context', {}).get('project_id')
+                if fallback_project_id and channel == 'voice':
+                    logger.info(f"[ORDINAL] Using GPT-4o fallback project_id: {fallback_project_id}")
+                    # Update context with resolved project_id and fall through to classification
+                    if workflow_state is None:
+                        workflow_state = {'context': {}}
+                    elif 'context' not in workflow_state:
+                        workflow_state['context'] = {}
+                    workflow_state['context']['resolved_project_id'] = fallback_project_id
+                    state_manager.save_state(session_id, workflow_state)
                 # Fall through to normal classification
             except Exception as ordinal_err:
                 # Check if this is our intentional action detection (not an error)
@@ -5150,14 +5460,28 @@ What would you like to do?"""
 
         if project_mapping:
             # Find matching project by category (case-insensitive, partial match)
+            # PRIORITY: Schedulable projects first, then any matching project
+            schedulable_statuses = ['new', 'ready to schedule']
             resolved_project_id = None
+            fallback_project_id = None  # Non-schedulable match for error message
+
             for pid, info in project_mapping.items():
                 cat = info.get('category', '').lower().strip()
+                status = info.get('status', '').lower().strip()
                 # Support partial matching: "kitchen" matches "Kitchen Sink", "storm door" matches "Storm Door"
                 if search_category in cat or cat in search_category:
-                    resolved_project_id = pid
-                    logger.info(f"[CATEGORY-RESOLVE] Matched '{search_category}' to project #{pid} (category: {info.get('category')})")
-                    break
+                    if status in schedulable_statuses:
+                        resolved_project_id = pid
+                        logger.info(f"[CATEGORY-RESOLVE] Matched '{search_category}' to SCHEDULABLE project #{pid} (status: {status})")
+                        break
+                    elif not fallback_project_id:
+                        fallback_project_id = pid
+                        logger.info(f"[CATEGORY-RESOLVE] Found non-schedulable '{search_category}' project #{pid} (status: {status}) - keeping as fallback")
+
+            # If no schedulable match, use fallback (will trigger helpful error later)
+            if not resolved_project_id and fallback_project_id:
+                resolved_project_id = fallback_project_id
+                logger.info(f"[CATEGORY-RESOLVE] No schedulable match, using fallback project #{fallback_project_id}")
 
             if resolved_project_id:
                 # Update classification with resolved project_id
@@ -5216,13 +5540,30 @@ What would you like to do?"""
                     logger.info(f"[CATEGORY-RESOLVE] Fetched {len(projects)} projects, searching for '{search_category}'")
 
                     # Now resolve category from fetched projects
+                    # PRIORITY: Schedulable projects first, then any matching project
+                    schedulable_statuses = ['new', 'ready to schedule']
                     resolved_project_id = None
+                    fallback_project_id = None  # Non-schedulable match for error message
+
                     for pid, info in fetched_mapping.items():
                         cat = info.get('category', '').lower().strip()
+                        status = info.get('status', '').lower().strip()
+
                         if search_category in cat or cat in search_category:
-                            resolved_project_id = pid
-                            logger.info(f"[CATEGORY-RESOLVE] Matched '{search_category}' to project #{pid} (category: {info.get('category')})")
-                            break
+                            # Check if schedulable
+                            if status in schedulable_statuses:
+                                resolved_project_id = pid
+                                logger.info(f"[CATEGORY-RESOLVE] Matched '{search_category}' to SCHEDULABLE project #{pid} (status: {status})")
+                                break
+                            elif not fallback_project_id:
+                                # Keep first non-schedulable match as fallback
+                                fallback_project_id = pid
+                                logger.info(f"[CATEGORY-RESOLVE] Found non-schedulable '{search_category}' project #{pid} (status: {status}) - keeping as fallback")
+
+                    # If no schedulable match, use fallback (will trigger helpful error later)
+                    if not resolved_project_id and fallback_project_id:
+                        resolved_project_id = fallback_project_id
+                        logger.info(f"[CATEGORY-RESOLVE] No schedulable match, using fallback project #{fallback_project_id}")
 
                     if resolved_project_id:
                         # Update classification with resolved project_id
@@ -5424,6 +5765,7 @@ What would you like to do?"""
         }
 
         new_workflow_type = None
+        forced_workflow_type = None  # Set when workflow switch detected - overrides Sonnet's workflow_type
         classified_action = classification.get('action', '')
 
         # Determine what workflow the NEW action belongs to
@@ -5457,6 +5799,7 @@ What would you like to do?"""
                 logger.info(f"[WORKFLOW SWITCH] Resetting old '{old_workflow_type}' state - user starting new '{new_workflow_type}' workflow")
                 state_manager.reset_workflow_state(session_id)
                 workflow_state = state_manager.get_state(session_id)  # Reload to get preserved project_mapping
+                forced_workflow_type = new_workflow_type  # Override Sonnet's workflow_type when saving state
             elif is_new_project and new_workflow_type in ['schedule_appointment', 'reschedule_appointment', 'cancel_appointment']:
                 logger.info(f"[WORKFLOW SWITCH] New project {new_project_id} detected (explicit workflow_type={classification.get('workflow_type')}) - resetting old workflow state for project {old_project_id}")
                 state_manager.reset_workflow_state(session_id)
@@ -5685,17 +6028,22 @@ What would you like to do?"""
                             project_status = p.get('status', '')
                             if pid:
                                 # Map by internal ID - include status for reschedule detection
+                                exact_category = p.get('category', '')
                                 project_mapping[pid] = {
                                     'projectNumber': project_number,
-                                    'category': p.get('category', ''),
-                                    'status': project_status
+                                    'category': exact_category,
+                                    'category_bucket': get_category_bucket(exact_category),
+                                    'status': project_status,
+                                    'project_type': p.get('projectType', p.get('ProjectType', ''))
                                 }
                                 # Also map by Order Number for reverse lookup
                                 if project_number:
                                     project_mapping[project_number] = {
                                         'project_id': pid,
-                                        'category': p.get('category', ''),
-                                        'status': project_status
+                                        'category': exact_category,
+                                        'category_bucket': get_category_bucket(exact_category),
+                                        'status': project_status,
+                                        'project_type': p.get('projectType', p.get('ProjectType', ''))
                                     }
                         logger.info(f"[ORDER-RESOLVE] Auto-fetched {len(list_body['projects'])} projects, mapping keys: {list(project_mapping.keys())[:10]}")
 
@@ -5883,7 +6231,8 @@ What would you like to do?"""
                             'project_type': project_type_val,
                             'city': project_city,
                             'state': project_state,
-                            'address': project_address
+                            'address': project_address,
+                            'project_id': project_id  # CRITICAL: Include project_id for pronoun resolution
                         })
 
                 except Exception as details_error:
@@ -6616,11 +6965,43 @@ What would you like to do?"""
                     logger.info(f"[DATES] Saved start_date/base_date: {response_body['start_date']}")
 
             # ========================================================================
+            # PAST DATE CLEANUP: When user requests a date that's entirely in the past,
+            # clear the date from context so it doesn't persist to subsequent requests
+            # ========================================================================
+            if lambda_action == 'get_available_dates' and response_body.get('week_in_past'):
+                logger.info(f"[DATE-CLEANUP] Week/date is in the past - clearing stale date from context")
+                # Ensure update_workflow_state exists
+                if not decision.get('update_workflow_state'):
+                    existing_context = workflow_state.get('context', {}) if workflow_state else {}
+                    decision['update_workflow_state'] = {
+                        'workflow_type': workflow_state.get('workflow_type', 'schedule_appointment') if workflow_state else 'schedule_appointment',
+                        'current_stage': 'awaiting_date_selection',
+                        'context': {
+                            'project_id': existing_context.get('project_id') or lambda_params.get('project_id'),
+                            'category': existing_context.get('category'),
+                            'city': existing_context.get('city'),
+                            'state': existing_context.get('state'),
+                            'project_mapping': existing_context.get('project_mapping', {})
+                        }
+                    }
+                if 'context' not in decision['update_workflow_state']:
+                    decision['update_workflow_state']['context'] = {}
+                # Clear date, start_date, and available_dates since they're stale
+                decision['update_workflow_state']['context']['date'] = None
+                decision['update_workflow_state']['context']['start_date'] = None
+                decision['update_workflow_state']['context']['available_dates'] = []
+                logger.info(f"[DATE-CLEANUP] Cleared date, start_date, available_dates from context")
+
+            # ========================================================================
             # CIRCUIT BREAKER: Track "no dates available" responses to prevent loops
             # After 2 empty date responses in a session, offer alternative paths.
             # This prevents the frustrating loop seen in Amy's call (11 "booked up" messages)
             # ========================================================================
-            if lambda_action in ['get_available_dates', 'reschedule_appointment'] and response_body.get('dateCount', len(response_body.get('available_dates', []))) == 0:
+            # Log circuit breaker check for debugging
+            date_count = response_body.get('dateCount', len(response_body.get('available_dates', [])))
+            logger.info(f"[CIRCUIT-BREAKER-CHECK] action={lambda_action}, dateCount={date_count}, available_dates={len(response_body.get('available_dates', []))}")
+
+            if lambda_action in ['get_available_dates', 'reschedule_appointment'] and date_count == 0:
                 # Get current no_dates_count from workflow state
                 existing_context = workflow_state.get('context', {}) if workflow_state else {}
                 no_dates_count = existing_context.get('no_dates_count', 0) + 1
@@ -6656,18 +7037,31 @@ What would you like to do?"""
 
                 # Build project_mapping: project_id -> {category, category_bucket, address, status, project_type}
                 # category_bucket enables "show kitchen projects" to match Dishwasher, Ovens, etc.
+                # Also map by projectNumber for lookup when user references by order number
                 project_mapping = {}
                 for p in projects_list:
                     pid = str(p.get('id', ''))
                     if pid:
                         exact_category = p.get('category', '')
+                        project_number = p.get('projectNumber', '')
                         project_mapping[pid] = {
                             'category': exact_category,
                             'category_bucket': get_category_bucket(exact_category),
                             'address': p.get('address', ''),
                             'status': p.get('status', ''),
+                            'projectNumber': project_number,
                             'project_type': p.get('projectType', p.get('ProjectType', ''))
                         }
+                        # Also map by projectNumber (Order Number) for reverse lookup
+                        if project_number:
+                            project_mapping[project_number] = {
+                                'category': exact_category,
+                                'category_bucket': get_category_bucket(exact_category),
+                                'address': p.get('address', ''),
+                                'status': p.get('status', ''),
+                                'project_id': pid,  # Internal project ID for API calls
+                                'project_type': p.get('projectType', p.get('ProjectType', ''))
+                            }
 
                 if project_ids:
                     logger.info(f"[PROJECTS] Saving {len(project_ids)} project_ids and project_mapping to workflow state (channel={channel})")
@@ -7087,6 +7481,14 @@ What would you like to do?"""
                 if not new_state['context'].get('project_mapping'):
                     new_state['context']['project_mapping'] = existing_mapping
                 logger.info(f"[STATE] Preserved project_mapping ({len(existing_mapping)} projects) in new_state")
+
+        # WORKFLOW SWITCH FIX: When user switches from reschedule to schedule (or vice versa),
+        # Sonnet's update_workflow_state may still have the OLD workflow_type from its context.
+        # Override with the correct new workflow type to prevent "schedule" using "reschedule" API.
+        if forced_workflow_type and new_state.get('workflow_type') != forced_workflow_type:
+            old_wf_type = new_state.get('workflow_type', 'unset')
+            new_state['workflow_type'] = forced_workflow_type
+            logger.info(f"[WORKFLOW SWITCH] Overriding Sonnet's workflow_type '{old_wf_type}' -> '{forced_workflow_type}'")
 
         state_manager.save_state(session_id, new_state)
 
