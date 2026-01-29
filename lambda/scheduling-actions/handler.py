@@ -1702,14 +1702,25 @@ Store: {store_display}
 def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str, Any]:
     """
     Action: get_available_dates
-    Returns available dates for scheduling a project
+    Returns available dates for scheduling or rescheduling a project
 
-    Real API Endpoint: GET /scheduler/client/{client_id}/project/{project_id}/startDate/{start_date}/endDate/{end_date}/slotsChatbot
-    (Returns both available dates and slots)
+    API Selection:
+    - is_reschedule=False (default): Uses slotsChatbot API for NEW scheduling
+    - is_reschedule=True: Uses get-rescheduler-slots API for RESCHEDULING
+      (ignores current status, shows alternative slots)
+
+    Real API Endpoints:
+    - New scheduling: GET /scheduler/.../slotsChatbot
+    - Rescheduling: GET /scheduler/.../get-rescheduler-slots
     """
     project_id = params.get('project_id')
     client_id = params.get('client_id')
     customer_id = params.get('customer_id')
+
+    # RESCHEDULE MODE: Use get-rescheduler-slots API (ignores current status)
+    is_reschedule = params.get('is_reschedule', False)
+    if isinstance(is_reschedule, str):
+        is_reschedule = is_reschedule.lower() in ['true', '1', 'yes']
 
     # Track PF API HTTP status code
     pf_http_status_code = 200  # Default for mock/success
@@ -1818,6 +1829,57 @@ def handle_get_available_dates(params: Dict, config: Dict, auth_headers: Dict) -
     if USE_MOCK_API:
         logger.info(f"[MOCK] Fetching available dates for project {project_id}")
         response = get_mock_available_dates(project_id)
+    # ========================================================================
+    # RESCHEDULE MODE: Use get-rescheduler-slots API as PRIMARY
+    # This API ignores current status and shows alternative slots for
+    # projects that are already scheduled.
+    # ========================================================================
+    elif is_reschedule:
+        if not client_id:
+            raise ValueError("Missing required parameter for rescheduler API: client_id")
+
+        logger.info(f"[RESCHEDULE] Using get-rescheduler-slots API for project {project_id}")
+
+        from datetime import timedelta
+        if not start_date:
+            start_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        resched_end_date = explicit_end_date or (start_dt + timedelta(days=21)).strftime('%Y-%m-%d')
+
+        try:
+            resched_result = handle_get_rescheduler_slots(
+                {
+                    'project_id': project_id,
+                    'client_id': client_id,
+                    'customer_id': customer_id,
+                    'date': start_date,
+                    'selected_date': resched_end_date
+                },
+                config,
+                auth_headers
+            )
+
+            resched_dates = resched_result.get('available_dates', [])
+            resched_formatted = resched_result.get('dates', [])
+
+            logger.info(f"[RESCHEDULE] Rescheduler API returned {len(resched_dates)} dates")
+
+            # Return rescheduler result directly with consistent format
+            return {
+                "action": "get_available_dates",
+                "project_id": project_id,
+                "available_dates": sorted(resched_dates) if resched_dates else [],
+                "dates": resched_formatted,
+                "dateCount": len(resched_dates),
+                "request_id": resched_result.get('request_id'),
+                "start_date": start_date,
+                "is_reschedule": True,
+                "mock_mode": False,
+                "pf_http_status_code": resched_result.get('pf_http_status_code', 200)
+            }
+        except Exception as e:
+            logger.error(f"[RESCHEDULE] Rescheduler API failed: {e}")
+            raise ValueError(f"Unable to fetch reschedule dates: {str(e)}")
     else:
         # Validate client_id is present for real API calls
         if not client_id:
@@ -2028,7 +2090,13 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
     Action: get_time_slots
     Returns available time slots for a specific date
 
-    Real API Endpoint: GET /scheduler/client/{client_id}/project/{project_id}/date/{base_date}/selected/{selected_date}/slots?request_id={request_id}
+    API Selection:
+    - is_reschedule=False (default): Uses slotsChatbot API for NEW scheduling
+    - is_reschedule=True: Uses get-rescheduler-slots API for RESCHEDULING
+
+    Real API Endpoints:
+    - New scheduling: GET /scheduler/.../slotsChatbot
+    - Rescheduling: GET /scheduler/client/{client_id}/project/{project_id}/date/{date}/selected/{date}/get-rescheduler-slots
 
     IMPORTANT: The 'date' param in URL must be the SAME base_date used in get_available_dates,
     while 'selected' is the user's chosen date. They are NOT the same!
@@ -2040,12 +2108,93 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
     request_id = params.get('request_id')
     customer_id = params.get('customer_id')
 
+    # RESCHEDULE MODE: Use get-rescheduler-slots API (works for already-scheduled projects)
+    is_reschedule = params.get('is_reschedule', False)
+    if isinstance(is_reschedule, str):
+        is_reschedule = is_reschedule.lower() in ['true', '1', 'yes']
+
     # Track PF API HTTP status code
     pf_http_status_code = 200  # Default for mock/success
 
     if not all([project_id, selected_date]):
         raise ValueError("Missing required parameters: project_id, date")
 
+    # ========================================================================
+    # RESCHEDULE MODE: Use get-rescheduler-slots API directly
+    # This API works for already-scheduled projects (slotsChatbot returns 400)
+    # ========================================================================
+    if is_reschedule and not USE_MOCK_API and client_id:
+        logger.info(f"[get_time_slots] RESCHEDULE MODE: Using get-rescheduler-slots API for project {project_id}, date {selected_date}")
+
+        # Rescheduler API endpoint - use selected_date for both date and selected_date to get slots for that specific day
+        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/date/{selected_date}/selected/{selected_date}/get-rescheduler-slots"
+        logger.info(f"[get_time_slots] GET {url}")
+
+        try:
+            res = make_api_request_with_retry("GET", url, auth_headers, client_id=client_id, user_id=customer_id, timeout=30)
+            pf_http_status_code = res.status_code
+            response = res.json()
+            data = response.get("data", {})
+            raw_slots = data.get("slots", [])
+            resched_request_id = data.get("request_id")
+            logger.info(f"[get_time_slots] Rescheduler API returned {len(raw_slots)} slots, request_id={resched_request_id}")
+
+            # Group time slots by time of day (same as regular flow)
+            morning_slots = []
+            afternoon_slots = []
+            evening_slots = []
+            for slot in raw_slots:
+                try:
+                    time_parts = slot.split(":")
+                    hour = int(time_parts[0])
+                    if 6 <= hour < 12:
+                        morning_slots.append(slot)
+                    elif 12 <= hour < 17:
+                        afternoon_slots.append(slot)
+                    elif 17 <= hour < 21:
+                        evening_slots.append(slot)
+                except:
+                    afternoon_slots.append(slot)
+
+            time_slots_grouped = {
+                "morning": {"label": "Morning (6 AM - 12 PM)", "slots": morning_slots, "count": len(morning_slots)},
+                "afternoon": {"label": "Afternoon (12 PM - 5 PM)", "slots": afternoon_slots, "count": len(afternoon_slots)},
+                "evening": {"label": "Evening (5 PM - 9 PM)", "slots": evening_slots, "count": len(evening_slots)}
+            }
+
+            return {
+                "action": "get_time_slots",
+                "project_id": project_id,
+                "date": selected_date,
+                "available_slots": raw_slots,
+                "timeSlots": raw_slots,
+                "timeSlotsGrouped": time_slots_grouped,
+                "slotCount": len(raw_slots),
+                "request_id": resched_request_id,
+                "is_reschedule": True,
+                "mock_mode": USE_MOCK_API,
+                "pf_http_status_code": pf_http_status_code
+            }
+        except requests.HTTPError as e:
+            status_code = e.response.status_code
+            pf_http_status_code = status_code
+            error_body = e.response.text
+            logger.error(f"[get_time_slots] Rescheduler API error HTTP {status_code}: {error_body}")
+            if status_code == 400:
+                raise ValueError(f"Invalid date or project: {error_body}")
+            elif status_code == 404:
+                raise ValueError("No time slots available for this date")
+            elif status_code in [401, 403]:
+                raise ValueError("SESSION_EXPIRED: Your session has expired. Please log out and log back in to continue.")
+            else:
+                raise ValueError(f"Failed to fetch time slots: HTTP {status_code}")
+        except requests.RequestException as e:
+            logger.error(f"[get_time_slots] Request error: {str(e)}")
+            raise ValueError(f"Unable to connect to scheduling API: {str(e)}")
+
+    # ========================================================================
+    # REGULAR MODE: Use slotsChatbot API (for NEW scheduling)
+    # ========================================================================
     # ALWAYS fetch fresh request_id to avoid stale request_id issues
     # This ensures direct slot queries work reliably
     if not USE_MOCK_API and client_id:
@@ -2314,8 +2463,9 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
         logger.info(f"[CONFIRM STEP 1] Returning appointment details for confirmation: project={project_id}, date={date}, time={time}")
 
         # Format date and time for display
+        # NOTE: Using module-level datetime import (line 24), NOT local import
+        # Local imports here caused "cannot access local variable 'datetime'" bug
         try:
-            from datetime import datetime
             date_obj = datetime.strptime(date, "%Y-%m-%d")
             formatted_date = date_obj.strftime("%B %d")  # e.g., "February 04"
             day_of_week = date_obj.strftime("%A")  # e.g., "Tuesday"
@@ -2574,11 +2724,18 @@ def handle_reschedule_appointment(params: Dict, config: Dict, auth_headers: Dict
         # CRITICAL: Fetch available dates FIRST (before cancelling)
         # Use rescheduler API which can get dates even for scheduled projects
         try:
+            # Calculate date range for rescheduler search (today + 12 days)
+            from datetime import datetime, timedelta
+            today = datetime.now().strftime('%Y-%m-%d')
+            end_date = (datetime.now() + timedelta(days=12)).strftime('%Y-%m-%d')
+
             dates_result = handle_get_rescheduler_slots(
                 {
                     'project_id': project_id,
                     'client_id': client_id,
-                    'customer_id': customer_id
+                    'customer_id': customer_id,
+                    'date': today,  # Start date of search range
+                    'selected_date': end_date  # End date of search range (12 days out)
                 },
                 config,
                 auth_headers

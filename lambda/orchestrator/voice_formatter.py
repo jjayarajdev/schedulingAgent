@@ -350,8 +350,29 @@ def _format_type_naturally(project_type: str) -> str:
     return f", it's {article} {project_type}"
 
 
+def _extract_short_address(address: str) -> str:
+    """Extract a short, speakable address (street name or city)."""
+    if not address:
+        return ''
+    # Try to get just the street name (first part before city)
+    # Common format: "123 Main Street, City, State ZIP"
+    parts = address.split(',')
+    if parts:
+        street = parts[0].strip()
+        # Remove house number for brevity (just keep street name)
+        street_words = street.split()
+        if len(street_words) > 1 and street_words[0].isdigit():
+            return ' '.join(street_words[1:])  # "Main Street"
+        return street
+    return address[:20]  # Fallback to truncated address
+
+
 def _format_projects_for_voice(data: Dict) -> str:
-    """Format project list - conversational with SSML breaks."""
+    """Format project list - conversational with SSML breaks.
+
+    CHAD FEEDBACK: Disambiguate duplicate project names using type or address.
+    When multiple projects have same category AND same type, use address to differentiate.
+    """
     projects = data.get('projects', [])
     count = len(projects)
 
@@ -366,46 +387,112 @@ def _format_projects_for_voice(data: Dict) -> str:
         type_phrase = _format_type_naturally(project_type)
         return f"{_get_opener('list_projects')} one {category} project for you{type_phrase},{_ssml_break(200)} and it's {status.lower()}."
 
-    # Multiple - conversational with pauses between categories and types
-    result = f"{_get_opener('list_projects')} {count} projects for you.{_ssml_break(300)} "
-
-    # Group by category with type info
-    cat_type_info = {}
+    # CHAD FEEDBACK FIX: Detect duplicates that need disambiguation
+    # Build detailed info for duplicate detection
+    cat_type_projects = {}  # Key: (category, type) -> list of projects
     for p in projects:
         cat = p.get('category', 'Other')
         ptype = p.get('projectType', '')
-        if cat not in cat_type_info:
-            cat_type_info[cat] = {'count': 0, 'types': set()}
-        cat_type_info[cat]['count'] += 1
-        if ptype:
-            cat_type_info[cat]['types'].add(ptype)
+        key = (cat, ptype)
+        if key not in cat_type_projects:
+            cat_type_projects[key] = []
+        cat_type_projects[key].append(p)
 
-    cat_parts = []
-    for cat, info in list(cat_type_info.items())[:3]:
-        num = info['count']
-        types = list(info['types'])
-        if num > 1:
-            # Multiple projects with same category - differentiate by type if available
-            if len(types) > 1:
-                # Different types - list them to differentiate
-                type_list = " and ".join(types[:2])
-                cat_parts.append(f"{num} {cat}, {'an' if types[0][0].lower() in 'aeiou' else 'a'} {type_list}")
-            elif len(types) == 1:
-                # Same type - just mention the type once
-                cat_parts.append(f"{num} {cat}, both {'an' if types[0][0].lower() in 'aeiou' else 'a'} {types[0]}")
+    # Check if we have duplicates that need address disambiguation
+    has_same_cat_type_duplicates = any(len(ps) > 1 for ps in cat_type_projects.values())
+
+    # If duplicates exist with same category AND type, list each with address or ordinal
+    if has_same_cat_type_duplicates and count <= 5:
+        result = f"{_get_opener('list_projects')} {count} projects for you.{_ssml_break(300)} "
+        project_parts = []
+        ordinals = ["first", "second", "third", "fourth", "fifth"]
+        seen_addresses = {}  # Track (cat, type, addr) to detect address duplicates too
+
+        for i, p in enumerate(projects[:5], 1):
+            cat = p.get('category', 'project')
+            ptype = p.get('projectType', '')
+            address = p.get('address', p.get('fullAddress', ''))
+            short_addr = _extract_short_address(address)
+
+            # Count how many projects share this category+type
+            key = (cat, ptype)
+            same_cat_type_count = len(cat_type_projects.get(key, []))
+
+            if same_cat_type_count > 1:
+                # Check if we can use address to disambiguate
+                addr_key = (cat, ptype, short_addr)
+                if short_addr and addr_key not in seen_addresses:
+                    # First project with this category+type+address combo - use address
+                    seen_addresses[addr_key] = True
+                    type_phrase = f", the {ptype}" if ptype else ""
+                    project_parts.append(f"a {cat}{type_phrase} on {short_addr}")
+                else:
+                    # Duplicate even with address - use ordinal ("first Blinds Installation")
+                    ordinal = ordinals[i-1] if i <= 5 else f"number {i}"
+                    type_phrase = f" {ptype}" if ptype else ""
+                    project_parts.append(f"the {ordinal} {cat}{type_phrase}")
+            elif ptype:
+                project_parts.append(f"a {cat} {ptype}")
             else:
-                # No type info - just say the count and ask user to pick by number
-                cat_parts.append(f"{num} {cat} projects")
-        elif types:
-            # Single project with type - mention it naturally
-            cat_parts.append(f"one {cat}, {'an' if types[0][0].lower() in 'aeiou' else 'a'} {types[0]}")
+                project_parts.append(f"a {cat}")
+
+        result += "That's " + f",{_ssml_break(200)} ".join(project_parts) + f".{_ssml_break(300)} "
+        result += _ssml_question("Which one would you like to schedule?")
+        return result
+
+    # Standard grouping - GROUP BY STATUS first, then by category
+    # This tells user which are scheduled vs ready to schedule
+    scheduled_statuses = ['scheduled', 'customer scheduled', 'tentatively scheduled']
+    scheduled_projects = []
+    ready_projects = []
+    other_projects = []
+
+    for p in projects:
+        status = (p.get('status') or '').lower()
+        if status in scheduled_statuses:
+            scheduled_projects.append(p)
+        elif status in ['ready to schedule', 'new', 'ready']:
+            ready_projects.append(p)
         else:
-            cat_parts.append(f"one {cat}")
+            other_projects.append(p)
 
-    if cat_parts:
-        result += "That includes " + f",{_ssml_break(200)} ".join(cat_parts) + f".{_ssml_break(300)} "
+    result = f"{_get_opener('list_projects')} {count} projects for you.{_ssml_break(300)} "
 
-    result += _ssml_question("Which one would you like to hear about?")
+    # Build status-grouped response
+    parts = []
+    if scheduled_projects:
+        sched_count = len(scheduled_projects)
+        if sched_count == 1:
+            p = scheduled_projects[0]
+            cat = p.get('category', 'project')
+            ptype = p.get('projectType', '')
+            type_phrase = f" {ptype}" if ptype else ""
+            parts.append(f"one {cat}{type_phrase} that's already scheduled")
+        else:
+            cats = [p.get('category', 'project') for p in scheduled_projects[:3]]
+            parts.append(f"{sched_count} already scheduled: {', '.join(cats)}")
+
+    if ready_projects:
+        ready_count = len(ready_projects)
+        if ready_count == 1:
+            p = ready_projects[0]
+            cat = p.get('category', 'project')
+            ptype = p.get('projectType', '')
+            type_phrase = f" {ptype}" if ptype else ""
+            parts.append(f"one {cat}{type_phrase} ready to schedule")
+        else:
+            cats = [p.get('category', 'project') for p in ready_projects[:3]]
+            parts.append(f"{ready_count} ready to schedule: {', '.join(cats)}")
+
+    if other_projects:
+        other_count = len(other_projects)
+        cats = [p.get('category', 'project') for p in other_projects[:2]]
+        parts.append(f"{other_count} other: {', '.join(cats)}")
+
+    if parts:
+        result += f",{_ssml_break(200)} ".join(parts) + f".{_ssml_break(300)} "
+
+    result += _ssml_question("Which one would you like to hear about or schedule?")
     return result
 
 
@@ -459,12 +546,12 @@ def _format_dates_for_voice(data: Dict) -> str:
     if count == 0:
         # Priority 1: Circuit breaker triggered (repeated "no dates" in same session)
         if circuit_breaker:
-            return "Our schedule is quite full right now. I'd recommend calling our office directly so they can find a time that works for you. Is there anything else I can help you with today?"
+            return "Our schedule is quite full right now. Would you like me to give you our office number so they can help you directly?"
         # Priority 2: Auto-expansion already tried (checked 14 days)
         if auto_expanded:
-            return "I'm sorry, our schedule is quite full for the next two weeks. I'd recommend calling our office directly - they can check further out or put you on a waitlist. Is there anything else I can help with?"
+            return "I'm sorry, our schedule is quite full for the next two weeks. Would you like me to give you our office number? They can check further out or put you on a waitlist."
         # First time - graceful message with next steps
-        return "I'm sorry, there aren't any dates showing right now for this project. Our office can help find availability - would you like me to help with anything else, or shall we end here?"
+        return "I'm sorry, there aren't any dates showing right now for this project. Would you like me to give you our office number so they can help find availability?"
 
     if count <= 3:
         # List them all with slow prosody for each date
@@ -484,7 +571,7 @@ def _format_time_slots_for_voice(data: Dict) -> str:
     count = len(slots)
 
     if count == 0:
-        return "I'm sorry, there aren't any time slots available for that date."
+        return "I'm sorry, there aren't any time slots available for that date. Would you like me to check a different date, or give you our office number?"
 
     # List them with slow prosody for times
     times = [_ssml_slow(_format_time_naturally(s)) for s in slots[:4]]

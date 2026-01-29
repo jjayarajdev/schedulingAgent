@@ -61,6 +61,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         project_id = body.get('project_id', '')  # From GPT-4o smart prompt embedded state
         project_status = body.get('project_status', '')  # From GPT-4o smart prompt embedded state
         confirmed = body.get('confirmed', False)  # For two-step appointment confirmation (Step 2)
+        gpt_action = body.get('gpt_action', '')  # CRITICAL: Action specified by GPT-4o - TRUST THIS!
+        gpt_date = body.get('date', '')  # From GPT-4o: selected date in YYYY-MM-DD format
+        gpt_time = body.get('time', '')  # From GPT-4o: selected time in HH:MM format
 
         # Validate required parameters
         if not message:
@@ -146,7 +149,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             from_phone=from_phone,  # For voice cache lookup in scheduling-actions
             project_id=project_id,  # From GPT-4o smart prompt embedded state
             project_status=project_status,  # From GPT-4o smart prompt embedded state
-            confirmed=confirmed  # For two-step appointment confirmation (Step 2)
+            confirmed=confirmed,  # For two-step appointment confirmation (Step 2)
+            gpt_action=gpt_action,  # CRITICAL: Action from GPT-4o - TRUST THIS!
+            gpt_date=gpt_date,  # From GPT-4o: selected date YYYY-MM-DD
+            gpt_time=gpt_time  # From GPT-4o: selected time HH:MM
         )
 
         # Extract response components

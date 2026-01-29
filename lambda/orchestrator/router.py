@@ -227,23 +227,24 @@ RULES:
 3. No project IDs or technical details
 4. Use contractions (you've, it's, there's)
 5. End with simple question if needed
+6. DISAMBIGUATION: If multiple projects have SAME category (e.g., 2 "Blinds" projects), use street name to differentiate: "Blinds on Main Street and Blinds on Oak Avenue"
 
 BANNED PHRASES:
 - "Let me check" / "One moment" / "I found"
 - "I'd be happy to" / "Sure thing"
-- Any address details (too long for voice)
+- Full addresses (just use street name for disambiguation)
 
 Examples:
 "You've got 3 projects: Plumbing, Solar, and Decking. Which one?"
+"You have 2 Blinds projects - one on Main Street, one on Oak Avenue. Which one?"
 "Your Solar project is scheduled for December fifteenth with Mike."
 "5 dates available. December tenth through the fifteenth. Which works?"
 "Got 3 morning slots: 8 AM, 9 AM, and 10 AM. Which time?"
-"It's 72 and sunny in Minneapolis. Great day for outdoor work."
 """
         user_prompt = f"""User asked: "{user_message}"
 Data: {json.dumps(structured_data, indent=2)}
 
-Give a 1-2 sentence voice response. NO addresses, NO project IDs. End with a simple question if user needs to choose."""
+Give a 1-2 sentence voice response. NO project IDs. If multiple projects have same category, use street name to tell them apart. End with a simple question if user needs to choose."""
 
         max_tokens = 150  # Much shorter for voice
     else:
@@ -882,20 +883,6 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     "message": response_body.get('message', f"This project already has a scheduled appointment. Would you like to reschedule it?"),
                     "project_id": project_id,
                     "status": "awaiting_reschedule_confirm",
-                    "action_type": "reschedule",
-                    "requires_confirmation": True
-                }
-                conversational = generate_conversational_response(action, user_message, result, channel)
-                if channel == 'voice':
-                    return conversational
-                return f"{conversational}\n\n```json\n{json.dumps(result, indent=2)}\n```"
-
-            # Handle "cancelled_awaiting_dates" status - Step 1 of reschedule complete, waiting for user to confirm
-                project_id = response_body.get('project_id', '')
-                result = {
-                    "message": response_body.get('message', f"I've cancelled your existing appointment for project #{project_id}. Would you like me to show you the available dates for rescheduling?"),
-                    "project_id": project_id,
-                    "status": "cancelled_awaiting_dates",
                     "action_type": "reschedule",
                     "requires_confirmation": True
                 }
@@ -1671,7 +1658,10 @@ def route_request(
     from_phone: str = '',
     project_id: str = '',
     project_status: str = '',
-    confirmed: bool = False
+    confirmed: bool = False,
+    gpt_action: str = '',  # CRITICAL: Action from GPT-4o - TRUST THIS!
+    gpt_date: str = '',  # From GPT-4o: selected date in YYYY-MM-DD format
+    gpt_time: str = ''  # From GPT-4o: selected time in HH:MM format
 ) -> Dict[str, Any]:
     """
     Route request to either Direct Lambda or Bedrock Agent
@@ -1689,6 +1679,9 @@ def route_request(
         project_id: Optional project_id from GPT-4o smart prompt embedded state
         project_status: Optional project_status from GPT-4o smart prompt embedded state
         confirmed: True when user explicitly confirms appointment (Step 2 of two-step booking)
+        gpt_action: Action specified by GPT-4o - TRUST THIS when provided!
+        gpt_date: Selected date from GPT-4o in YYYY-MM-DD format
+        gpt_time: Selected time from GPT-4o in HH:MM format
 
     Returns:
         Dictionary with:
@@ -1753,7 +1746,10 @@ def route_request(
                 from_phone=from_phone,
                 project_id=project_id,  # From GPT-4o smart prompt embedded state
                 project_status=project_status,  # From GPT-4o smart prompt embedded state
-                confirmed=confirmed  # For two-step appointment confirmation (Step 2)
+                confirmed=confirmed,  # For two-step appointment confirmation (Step 2)
+                gpt_action=gpt_action,  # CRITICAL: Action from GPT-4o - TRUST THIS!
+                gpt_date=gpt_date,  # From GPT-4o: selected date
+                gpt_time=gpt_time  # From GPT-4o: selected time
             )
 
             # VOICE ADAPTATION: For voice channel, format the response
@@ -1847,7 +1843,10 @@ def route_request(
                 from_phone=from_phone,
                 project_id=project_id,  # From GPT-4o smart prompt embedded state
                 project_status=project_status,  # From GPT-4o smart prompt embedded state
-                confirmed=confirmed  # For two-step appointment confirmation (Step 2)
+                confirmed=confirmed,  # For two-step appointment confirmation (Step 2)
+                gpt_action=gpt_action,  # CRITICAL: Action from GPT-4o - TRUST THIS!
+                gpt_date=gpt_date,  # From GPT-4o: selected date
+                gpt_time=gpt_time  # From GPT-4o: selected time
             )
 
             # VOICE ADAPTATION: For voice channel, format the response

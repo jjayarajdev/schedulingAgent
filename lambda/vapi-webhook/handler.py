@@ -552,13 +552,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return create_response(500, {"error": str(e)})
 
 
-def generate_dynamic_greeting(client_name: str, user_name: str = None) -> str:
+def generate_dynamic_greeting(client_name: str, user_name: str = None, projects_data: Optional[Dict] = None) -> str:
     """
-    Generate dynamic greeting with client-specific company name and user name.
+    Generate dynamic greeting with client-specific company name, user name, and project context.
 
     Args:
         client_name: Company name from auth API (e.g., "ProjectsForce Validation", "Window Universe")
         user_name: Optional user name for personalization
+        projects_data: Optional dict with 'projects' list for context-aware greeting
 
     Returns:
         SSML-formatted greeting string with pauses
@@ -570,21 +571,62 @@ def generate_dynamic_greeting(client_name: str, user_name: str = None) -> str:
     if user_name:
         first_name = user_name.split()[0] if user_name.strip() else ''
 
-    # Build greeting with customer name if available
-    if first_name:
-        greeting = (
-            f'<break time="3000ms"/> Hello {first_name}! <break time="300ms"/> '
-            f"I'm J, your AI assistant from {display_name}. <break time=\"3000ms\"/> "
-            f"I can help you view your projects, check available dates, or schedule appointments. <break time=\"3000ms\"/> "
-            f"What would you like to do today?"
+    # Analyze projects for smart greeting
+    schedulable_projects = []
+    scheduled_projects = []
+
+    if projects_data and projects_data.get('projects'):
+        for p in projects_data['projects']:
+            status = (p.get('status_info_status') or p.get('status') or '').lower()
+            category = p.get('project_category') or p.get('category') or 'project'
+
+            if status in ['new', 'ready to schedule']:
+                schedulable_projects.append(category)
+            elif status in ['scheduled', 'customer scheduled', 'tentatively scheduled']:
+                scheduled_projects.append(category)
+
+    # Build context-aware greeting
+    name_part = f"Hello {first_name}!" if first_name else "Hello!"
+    intro = f"I'm J, your AI assistant from {display_name}."
+
+    # Generate project-aware guidance
+    if schedulable_projects and scheduled_projects:
+        # Both types of projects
+        sched_count = len(schedulable_projects)
+        already_count = len(scheduled_projects)
+        sched_names = ', '.join(set(schedulable_projects[:2]))  # First 2 unique categories
+        guidance = (
+            f"I see you have {sched_count} project{'s' if sched_count > 1 else ''} ready to schedule, "
+            f"like your {sched_names}, and {already_count} already scheduled. "
+            f"Would you like to schedule a new appointment, or check on your existing ones?"
+        )
+    elif schedulable_projects:
+        # Only schedulable projects
+        sched_count = len(schedulable_projects)
+        sched_names = ', '.join(set(schedulable_projects[:2]))
+        guidance = (
+            f"I see you have {sched_count} project{'s' if sched_count > 1 else ''} ready to schedule, "
+            f"including your {sched_names}. Would you like to check available dates?"
+        )
+    elif scheduled_projects:
+        # Only scheduled projects
+        already_count = len(scheduled_projects)
+        guidance = (
+            f"I see you have {already_count} appointment{'s' if already_count > 1 else ''} already scheduled. "
+            f"Would you like to check on them, or reschedule?"
         )
     else:
-        greeting = (
-            f'<break time="3000ms"/> Hello! <break time="3000ms"/> '
-            f"I'm J, your AI assistant from {display_name}. <break time=\"3000ms\"/> "
-            f"I can help you view your projects, check available dates, or schedule appointments. <break time=\"3000ms\"/> "
-            f"What would you like to do today?"
+        # No projects or unknown
+        guidance = (
+            "I can help you view your projects, check available dates, or schedule appointments. "
+            "What would you like to do today?"
         )
+
+    greeting = (
+        f'<break time="3000ms"/> {name_part} <break time="300ms"/> '
+        f'{intro} <break time="500ms"/> '
+        f'{guidance}'
+    )
     return greeting
 
 
@@ -636,7 +678,7 @@ def create_assistant_config_response(first_message: str, support_number: str = '
                             'action': {
                                 'type': 'string',
                                 'enum': ['list_projects', 'get_project_details', 'get_available_dates', 'get_time_slots', 'schedule_project', 'confirm_appointment', 'reschedule_appointment', 'get_weather', 'calendar_info', 'other'],
-                                'description': 'The type of action requested. Use calendar_info for "what day is X date" questions. Use confirm_appointment after user says "yes" to finalize booking.'
+                                'description': 'The type of action requested. Use calendar_info for "what day is X date" questions. CRITICAL: Use confirm_appointment ONLY after user has selected BOTH a DATE and a TIME SLOT. Never call confirm_appointment with just a date - always get_time_slots first!'
                             },
                             'message': {
                                 'type': 'string',
@@ -653,6 +695,14 @@ def create_assistant_config_response(first_message: str, support_number: str = '
                             'confirmed': {
                                 'type': 'boolean',
                                 'description': 'Set to true ONLY after user explicitly confirms the appointment preview. Required for Step 2 of booking.'
+                            },
+                            'date': {
+                                'type': 'string',
+                                'description': 'Selected date in YYYY-MM-DD format. Extract from user speech (e.g., "January 31st" → "2026-01-31", "tomorrow" → calculate date). ALWAYS include when user mentions a date.'
+                            },
+                            'time': {
+                                'type': 'string',
+                                'description': 'Selected time in HH:MM format (24-hour). Extract from user speech (e.g., "8 AM" → "08:00", "2:30 PM" → "14:30"). ALWAYS include when user mentions a time.'
                             }
                         }
                     }
@@ -881,14 +931,48 @@ The backend will find scheduled projects and return the relevant appointment inf
 - "Details for the third project" → get_project_details, message: "details for the third project"
 - "The last one" → (pass exact words - backend resolves to last project)
 
-**TIME SLOT SELECTION:**
+**TIME SLOT SELECTION (CRITICAL FLOW):**
+⚠️ YOU MUST GET TIME SLOTS BEFORE CONFIRMING! Follow this exact sequence:
+1. User picks a DATE → call get_time_slots to show available times for that date
+2. User picks a TIME → THEN call confirm_appointment
+
+NEVER skip step 1! Even if user says "book it" or "confirm" after picking just a date, you MUST first call get_time_slots.
+
+Examples:
 - "Morning appointment" → get_time_slots, message: "morning appointment"
 - "Afternoon slot" → get_time_slots, message: "afternoon slot"
-- "10:30 AM" → confirm_appointment, message: "10:30 AM"
-- "The 1 PM slot" → confirm_appointment, message: "the 1 PM slot"
+- "10:30 AM" → confirm_appointment, message: "10:30 AM" (ONLY after time slots were shown!)
+- "The 1 PM slot" → confirm_appointment, message: "the 1 PM slot" (ONLY after time slots were shown!)
 - "Earlier time" → get_time_slots, message: "earlier time"
+- User selected date, then says "book it" → get_time_slots FIRST (they haven't picked a time yet!)
 
 **IMPORTANT:** Always pass the customer's EXACT words as the message. The backend has AI-powered context resolution that understands pronouns, ordinals, and references.
+
+**PARAMETER ACCUMULATION (CRITICAL FOR SPEED):**
+When calling tools, ALWAYS include accumulated context from the conversation:
+
+1. **DATE EXTRACTION** - When user mentions ANY date:
+   - "January 31st" / "the 31st" → date: "2026-01-31"
+   - "tomorrow" → calculate and pass as YYYY-MM-DD
+   - "next Friday" → calculate and pass as YYYY-MM-DD
+   - "the 30th" → date: "2026-01-30" (assume current/next month)
+
+2. **TIME EXTRACTION** - When user mentions ANY time:
+   - "8 AM" / "8 o'clock" → time: "08:00"
+   - "2:30 PM" → time: "14:30"
+   - "morning" → time: "08:00" (or earliest shown)
+   - "the first slot" → time: use the first time you showed them
+
+3. **ALWAYS PASS WHAT YOU KNOW:**
+   - If you know project_id → include it
+   - If user selected a date → include date parameter
+   - If user selected a time → include time parameter
+   - If confirming → include confirmed: true
+
+Example flow:
+- Turn 1: User says "Blinds" → action: get_available_dates, project_id: "8175908"
+- Turn 2: User says "January 31st" → action: get_time_slots, project_id: "8175908", date: "2026-01-31"
+- Turn 3: User says "8 AM" → action: confirm_appointment, project_id: "8175908", date: "2026-01-31", time: "08:00", confirmed: true
 
 ## Conversation Flow
 
@@ -1006,7 +1090,7 @@ The goal is NEVER to frustrate the customer with repetitive responses. When stuc
             'endpointing': 150
         },
         'firstMessage': first_message,
-        'endCallPhrases': ['goodbye', 'talk to you soon'],
+        'endCallPhrases': ['goodbye', 'talk to you soon', 'have a great day', 'have a good day', 'bye bye', 'bye now'],
         'startSpeakingPlan': {
             'waitSeconds': 0.4,
             'smartEndpointingEnabled': 'livekit'
@@ -1081,7 +1165,7 @@ def handle_assistant_request(message: Dict) -> Dict:
                     except Exception as e:
                         logger.warning(f"[VAPI] Preload failed (non-blocking): {e}")
 
-                greeting = generate_dynamic_greeting(client_name, user_name)
+                greeting = generate_dynamic_greeting(client_name, user_name, projects_data)
                 return create_assistant_config_response(greeting, support_number, client_name, projects_data)
             else:
                 # Auth failed - use default greeting
@@ -1205,9 +1289,14 @@ def handle_function_call(message: Dict) -> Dict:
         action = parameters.get('action', 'other')
         project_id = parameters.get('project_id', '')  # From smart prompt embedded state
         project_status = parameters.get('project_status', '')  # From smart prompt embedded state
+        gpt_date = parameters.get('date', '')  # From GPT-4o: selected date YYYY-MM-DD
+        gpt_time = parameters.get('time', '')  # From GPT-4o: selected time HH:MM
+        confirmed = parameters.get('confirmed', False)  # From GPT-4o: user confirmed appointment
 
         if project_id:
             logger.info(f"[VAPI] GPT-4o passed project_id from embedded state: {project_id}, status: {project_status}")
+        if gpt_date or gpt_time:
+            logger.info(f"[VAPI] GPT-4o passed date={gpt_date}, time={gpt_time}")
 
         # FALLBACK: If message is empty but action is provided, synthesize message from action
         # This handles cases where GPT-4o knows the intent (action) but doesn't provide message
@@ -1233,14 +1322,20 @@ def handle_function_call(message: Dict) -> Dict:
 
         logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, action={action}")
 
-        # Call orchestrator with the user's message (include from_phone for voice cache lookup, project_id/status from smart prompt)
+        # Call orchestrator with the user's message
+        # CRITICAL: Pass GPT-4o's action - the orchestrator should TRUST it!
+        # GPT-4o has full context via smart prompt and knows what action to take
         response_text = call_orchestrator(
             message=user_message,
             call_id=call_id,
             credentials=credentials,
             from_phone=from_phone,
             project_id=project_id,
-            project_status=project_status
+            project_status=project_status,
+            confirmed=confirmed,
+            gpt_action=action,  # TRUST GPT-4o's decision!
+            gpt_date=gpt_date,
+            gpt_time=gpt_time
         )
 
         return create_function_response({
@@ -1318,6 +1413,8 @@ def handle_tool_calls(message: Dict) -> Dict:
             project_id = arguments.get('project_id', '')  # From smart prompt embedded state
             project_status = arguments.get('project_status', '')  # From smart prompt embedded state
             confirmed = arguments.get('confirmed', False)  # For two-step appointment confirmation
+            gpt_date = arguments.get('date', '')  # From GPT-4o: selected date YYYY-MM-DD
+            gpt_time = arguments.get('time', '')  # From GPT-4o: selected time HH:MM
 
             # FALLBACK: If message is empty but action is provided, synthesize message from action
             # This handles cases where user says "Yes" and GPT-4o knows the intent but doesn't provide message
@@ -1327,6 +1424,8 @@ def handle_tool_calls(message: Dict) -> Dict:
 
             if project_id:
                 logger.info(f"[VAPI] GPT-4o passed project_id from embedded state: {project_id}, status: {project_status}")
+            if gpt_date or gpt_time:
+                logger.info(f"[VAPI] GPT-4o passed date={gpt_date}, time={gpt_time}")
             if confirmed:
                 logger.info(f"[VAPI] GPT-4o passed confirmed=True for final appointment booking")
 
@@ -1356,7 +1455,8 @@ def handle_tool_calls(message: Dict) -> Dict:
 
             logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, action={action}")
 
-            # Call orchestrator (include from_phone for voice cache lookup, project_id/status from smart prompt)
+            # Call orchestrator with GPT-4o's action - TRUST IT!
+            # GPT-4o has full context via smart prompt and knows what to do
             response_text = call_orchestrator(
                 message=user_message,
                 call_id=call_id,
@@ -1364,7 +1464,10 @@ def handle_tool_calls(message: Dict) -> Dict:
                 from_phone=from_phone,
                 project_id=project_id,
                 project_status=project_status,
-                confirmed=confirmed
+                confirmed=confirmed,
+                gpt_action=action,  # TRUST GPT-4o's decision!
+                gpt_date=gpt_date,
+                gpt_time=gpt_time
             )
 
             logger.info(f"[VAPI] Tool call result: {response_text[:200] if response_text else 'empty'}")
@@ -1452,7 +1555,7 @@ def authenticate_caller(from_phone: str, to_phone: str) -> Optional[Dict]:
         return None
 
 
-def call_orchestrator(message: str, call_id: str, credentials: Dict, from_phone: str = '', project_id: str = '', project_status: str = '', confirmed: bool = False) -> str:
+def call_orchestrator(message: str, call_id: str, credentials: Dict, from_phone: str = '', project_id: str = '', project_status: str = '', confirmed: bool = False, gpt_action: str = '', gpt_date: str = '', gpt_time: str = '') -> str:
     """
     Call the orchestrator Lambda with the user's message.
 
@@ -1464,6 +1567,9 @@ def call_orchestrator(message: str, call_id: str, credentials: Dict, from_phone:
         project_id: Optional project ID from GPT-4o's embedded state (smart prompt)
         project_status: Optional project status from GPT-4o's embedded state (smart prompt)
         confirmed: True when user explicitly confirms appointment (Step 2 of two-step booking)
+        gpt_action: Action specified by GPT-4o (e.g., 'get_available_dates', 'list_projects') - TRUST THIS!
+        gpt_date: Selected date from GPT-4o in YYYY-MM-DD format
+        gpt_time: Selected time from GPT-4o in HH:MM format
     """
     try:
         # Build orchestrator payload
@@ -1488,6 +1594,20 @@ def call_orchestrator(message: str, call_id: str, credentials: Dict, from_phone:
         if confirmed:
             body_data['confirmed'] = True
             logger.info(f"[VAPI] Including confirmed=True for Step 2 appointment booking")
+
+        # CRITICAL: Pass GPT-4o's action - orchestrator should TRUST this!
+        # GPT-4o has full context (smart prompt with all projects) and knows what action to take
+        if gpt_action and gpt_action != 'other':
+            body_data['gpt_action'] = gpt_action
+            logger.info(f"[VAPI] Including gpt_action={gpt_action} - ORCHESTRATOR SHOULD TRUST THIS!")
+
+        # Pass date and time from GPT-4o if provided
+        if gpt_date:
+            body_data['date'] = gpt_date
+            logger.info(f"[VAPI] Including date from GPT-4o: {gpt_date}")
+        if gpt_time:
+            body_data['time'] = gpt_time
+            logger.info(f"[VAPI] Including time from GPT-4o: {gpt_time}")
 
         payload = {
             'body': json.dumps(body_data)

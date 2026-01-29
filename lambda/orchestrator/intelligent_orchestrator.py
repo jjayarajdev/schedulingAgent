@@ -565,7 +565,7 @@ def format_time_12hr(time_str: str) -> str:
         return time_str
 
 
-def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[Dict]:
+def check_workflow_continuation(message: str, workflow_state: Dict, channel: str = 'chat') -> Optional[Dict]:
     """
     Check if user is providing what we're waiting for (date or time selection).
     If yes, return the next action directly (skip classification).
@@ -573,6 +573,11 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
 
     This prevents "5th Dec" from being interpreted as "5th project" when
     we're awaiting date selection.
+
+    Args:
+        message: User's message
+        workflow_state: Current workflow state
+        channel: 'chat' or 'voice' - for channel-specific handling
     """
     if not workflow_state:
         return None
@@ -777,13 +782,19 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
             # User confirmed - proceed to get_available_dates for the single project
             selected_project_id = project_ids[0]
             project_info = project_mapping.get(selected_project_id, {})
+            project_status = project_info.get('status', '').lower()
 
-            logger.info(f"[CONTINUATION] SCHEDULE CONFIRM: User confirmed single project {selected_project_id} - going to get_available_dates")
+            # Check if project is already scheduled - use rescheduler API
+            scheduled_statuses = ['scheduled', 'customer scheduled', 'tentatively scheduled']
+            is_reschedule = project_status in scheduled_statuses
+
+            logger.info(f"[CONTINUATION] SCHEDULE CONFIRM: User confirmed single project {selected_project_id} (status={project_status}, is_reschedule={is_reschedule}) - going to get_available_dates")
             return {
                 'continue_workflow': True,
                 'action': 'get_available_dates',
                 'params': {
-                    'project_id': str(selected_project_id)
+                    'project_id': str(selected_project_id),
+                    'is_reschedule': is_reschedule  # Use rescheduler API if already scheduled
                 },
                 'next_stage': 'awaiting_date_selection',
                 'preserve_context': {
@@ -791,9 +802,10 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                     'project_ids': project_ids,
                     'project_mapping': project_mapping,
                     'category': project_info.get('category', ''),
-                    'address': project_info.get('address', '')
+                    'address': project_info.get('address', ''),
+                    'is_reschedule': is_reschedule
                 },
-                'workflow_type': 'schedule_appointment'
+                'workflow_type': 'reschedule_appointment' if is_reschedule else 'schedule_appointment'
             }
 
     # ========================================================================
@@ -921,21 +933,30 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                     'workflow_type': 'reschedule_appointment'
                 }
             else:
-                # Project is not scheduled - use get_available_dates for new scheduling
-                logger.info(f"[CONTINUATION] SMART-PROMPT SCHEDULE: Project {project_id_from_context} is not scheduled (status={project_status}) - calling get_available_dates")
+                # Project status unknown or not scheduled
+                # If user said "reschedule", use rescheduler API even if status is unknown
+                # (rescheduler API works for both new scheduling and reschedule)
+                use_reschedule_api = is_reschedule or not project_status  # Unknown status + reschedule intent
+
+                if is_reschedule:
+                    logger.info(f"[CONTINUATION] SMART-PROMPT: User said 'reschedule' but status unknown ('{project_status}') - using rescheduler API")
+                else:
+                    logger.info(f"[CONTINUATION] SMART-PROMPT SCHEDULE: Project {project_id_from_context} is not scheduled (status={project_status}) - calling get_available_dates")
+
                 return {
                     'continue_workflow': True,
                     'action': 'get_available_dates',
                     'params': {
-                        'project_id': str(project_id_from_context)
+                        'project_id': str(project_id_from_context),
+                        'is_reschedule': use_reschedule_api  # Use rescheduler API if user said "reschedule"
                     },
                     'next_stage': 'awaiting_date_selection',
                     'preserve_context': {
                         'project_id': str(project_id_from_context),
                         'project_ids': context.get('project_ids', [project_id_from_context]),
-                        'is_reschedule': False
+                        'is_reschedule': use_reschedule_api
                     },
-                    'workflow_type': 'schedule_appointment'
+                    'workflow_type': 'reschedule_appointment' if use_reschedule_api else 'schedule_appointment'
                 }
 
         # Check for details request
@@ -976,7 +997,10 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                                          workflow_type == 'schedule_appointment' and
                                          not extract_date_from_message(message))  # Not providing a date
 
-    if (is_project_selection_stage or is_switching_project_during_dates) and (workflow_type == 'schedule_appointment' or is_scheduling_guided):
+    # Also allow smart_prompt_context, category_resolved, project_listing - any state where user has seen projects
+    is_valid_workflow = workflow_type in ['schedule_appointment', 'smart_prompt_context', 'category_resolved', 'project_listing'] or is_scheduling_guided
+
+    if (is_project_selection_stage or is_switching_project_during_dates) and is_valid_workflow:
         # Get project_ids and project_mapping from context (these ARE saved)
         project_ids = context.get('project_ids', [])
         project_mapping = context.get('project_mapping', {})
@@ -1011,44 +1035,121 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                     logger.info(f"[CONTINUATION] Ordinal '{word}' matched project {selected_project_id}")
                 break
 
+        # Check for project number: user says "45345" or "order 21076"
+        # Customers know their ORDER/PROJECT NUMBER, not internal IDs
+        if not selected_project_id:
+            # Extract numeric strings from message (re is imported globally at top of file)
+            numbers_in_message = re.findall(r'\b(\d{4,10})\b', message)  # 4-10 digit numbers
+            for num in numbers_in_message:
+                # Check project_number (customer-facing order number) - this is what customers know
+                for pid, pinfo in project_mapping.items():
+                    proj_num = str(pinfo.get('project_number', '') or pinfo.get('projectNumber', ''))
+                    if num in proj_num:
+                        selected_project_id = pid
+                        logger.info(f"[CONTINUATION] Project number '{num}' matched in '{proj_num}' → project {pid}")
+                        break
+                if selected_project_id:
+                    break
+
         # Check for category match: "washer dryer", "storm door", "decking", etc.
+        # EXPANDED: Added blinds, installation, measurement, and more common categories
         if not selected_project_id:
             category_keywords = [
+                # Window treatments
+                'blinds', 'shutters', 'shades', 'curtains', 'window treatment',
+                # Project types
+                'installation', 'measurement', 'repair', 'replacement', 'service',
+                # Appliances
                 'storm door', 'decking', 'dishwasher', 'sink', 'oven',
                 'washer dryer', 'washer', 'dryer', 'cooktop', 'exterior',
                 'electric', 'kitchen', 'windows', 'doors', 'faucet',
-                'refrigerator', 'fridge', 'microwave', 'range', 'garbage disposal'
+                'refrigerator', 'fridge', 'microwave', 'range', 'garbage disposal',
+                # HVAC & Plumbing
+                'plumbing', 'hvac', 'heating', 'cooling', 'air conditioning', 'ac unit',
+                # Outdoor
+                'fence', 'fencing', 'roofing', 'roof', 'siding', 'gutter', 'patio', 'balcony',
+                # Solar
+                'solar', 'panel', 'battery',
+                # Flooring
+                'flooring', 'carpet', 'tile', 'hardwood', 'laminate', 'vinyl'
             ]
+
+            # First, try to match type-specific keywords (e.g., "installation" vs "measurement")
+            # to filter down when there are multiple projects of same category
+            type_keywords = {'installation', 'measurement', 'repair', 'replacement', 'service'}
+            requested_type = None
+            for tk in type_keywords:
+                if tk in message_lower:
+                    requested_type = tk
+                    logger.info(f"[CONTINUATION] User specified project type: '{requested_type}'")
+                    break
+
             for kw in category_keywords:
                 if kw in message_lower:
                     # Find matching project by category using project_mapping
+                    # Prefer projects that also match the requested type (if specified)
+                    best_match = None
+                    best_match_has_type = False
+                    schedulable_statuses = ['new', 'ready to schedule']
+
                     for pid, pinfo in project_mapping.items():
                         proj_category = (pinfo.get('category') or '').lower()
                         proj_type = (pinfo.get('project_type') or '').lower()
+                        proj_status = (pinfo.get('status') or '').lower()
                         category_bucket = (pinfo.get('category_bucket') or '').lower()
+
                         if kw in proj_category or kw in proj_type or kw in category_bucket:
-                            selected_project_id = pid
-                            logger.info(f"[CONTINUATION] Category '{kw}' matched project {selected_project_id} (category={proj_category})")
-                            break
-                    if selected_project_id:
+                            type_matches = requested_type and requested_type in proj_type
+                            is_schedulable = proj_status in schedulable_statuses
+
+                            # Prefer: schedulable + type match > schedulable > type match > any
+                            if type_matches and is_schedulable:
+                                best_match = pid
+                                best_match_has_type = True
+                                logger.info(f"[CONTINUATION] Perfect match: category '{kw}' + type '{requested_type}' + schedulable → {pid}")
+                                break  # Found perfect match
+                            elif is_schedulable and not best_match_has_type:
+                                best_match = pid
+                                logger.info(f"[CONTINUATION] Schedulable match: category '{kw}' → {pid} (status={proj_status})")
+                            elif not best_match:
+                                best_match = pid
+                                logger.info(f"[CONTINUATION] Fallback match: category '{kw}' → {pid}")
+
+                    if best_match:
+                        selected_project_id = best_match
                         break
 
         # If we found a project, go directly to get_available_dates
         if selected_project_id:
-            logger.info(f"[CONTINUATION] SCHEDULE PROJECT SELECTION: User selected project {selected_project_id} from schedulable list - going to get_available_dates")
+            # Get project info for context preservation
+            matched_project_info = project_mapping.get(str(selected_project_id), {})
+            matched_category = matched_project_info.get('category', '')
+            matched_type = matched_project_info.get('project_type', '')
+            matched_status = matched_project_info.get('status', '').lower()
+
+            # Check if this is a reschedule scenario
+            scheduled_statuses = ['scheduled', 'customer scheduled', 'tentatively scheduled']
+            is_project_scheduled = matched_status in scheduled_statuses
+            is_reschedule_context = 'reschedule' in message_lower or is_project_scheduled
+
+            logger.info(f"[CONTINUATION] SCHEDULE PROJECT SELECTION: User selected project {selected_project_id} ({matched_category} {matched_type}, status={matched_status}) - is_reschedule={is_reschedule_context}")
             return {
                 'continue_workflow': True,
                 'action': 'get_available_dates',
                 'params': {
-                    'project_id': str(selected_project_id)
+                    'project_id': str(selected_project_id),
+                    'is_reschedule': is_reschedule_context  # Use rescheduler API if already scheduled
                 },
                 'next_stage': 'awaiting_date_selection',
                 'preserve_context': {
                     'project_id': str(selected_project_id),
+                    'category': matched_category,
+                    'project_type': matched_type,
                     'project_ids': project_ids,
-                    'project_mapping': project_mapping
+                    'project_mapping': project_mapping,
+                    'is_reschedule': is_reschedule_context
                 },
-                'workflow_type': 'schedule_appointment'
+                'workflow_type': 'reschedule_appointment' if is_reschedule_context else 'schedule_appointment'
             }
 
     # Stage: Awaiting cancel confirmation (two-step cancel flow)
@@ -1243,14 +1344,16 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
         else:
             date = extract_date_from_message(message)
             if date:
-                logger.info(f"[CONTINUATION] User provided date '{date}' at stage '{current_stage}' - bypassing classification")
+                is_reschedule = context.get('is_reschedule', False) or workflow_type == 'reschedule_appointment'
+                logger.info(f"[CONTINUATION] User provided date '{date}' at stage '{current_stage}' (is_reschedule={is_reschedule}) - bypassing classification")
                 return {
                     'continue_workflow': True,
                     'action': 'get_time_slots',
                     'params': {
                         'project_id': context.get('project_id'),
                         'date': date,
-                        'request_id': context.get('request_id')
+                        'request_id': context.get('request_id'),
+                        'is_reschedule': is_reschedule  # Use rescheduler API if in reschedule workflow
                     },
                     'next_stage': 'awaiting_time_selection',
                     'preserve_context': {
@@ -1261,7 +1364,50 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                         'project_type': context.get('project_type'),
                         'city': context.get('city'),
                         'state': context.get('state'),
+                        'is_reschedule': is_reschedule,  # Preserve for subsequent calls
                         # Preserve batch mode context if present
+                        'batch_mode': context.get('batch_mode'),
+                        'project_ids': context.get('project_ids'),
+                        'current_index': context.get('current_index'),
+                        'total_projects': context.get('total_projects'),
+                        'completed_projects': context.get('completed_projects')
+                    },
+                    'workflow_type': workflow_type
+                }
+
+            # Handle "Yes" confirmation when only 1 date was offered
+            # User says "Yes" → auto-select the single available date
+            available_dates = context.get('available_dates', [])
+            confirm_patterns = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'that works', 'sounds good', 'perfect', 'go ahead']
+            first_patterns = ['the first', 'first one', 'first date', 'first option']
+            is_confirmation = any(pattern in message_lower for pattern in confirm_patterns)
+            is_first_selection = any(pattern in message_lower for pattern in first_patterns)
+
+            # Auto-select first date if user says "the first one" (any number of dates)
+            # OR if user says "yes" and only 1 date available
+            if (is_first_selection and available_dates) or (is_confirmation and len(available_dates) == 1):
+                single_date = available_dates[0] if isinstance(available_dates[0], str) else available_dates[0].get('date')
+                is_reschedule = context.get('is_reschedule', False) or workflow_type == 'reschedule_appointment'
+                logger.info(f"[CONTINUATION] User said 'Yes' with 1 available date - auto-selecting {single_date} (is_reschedule={is_reschedule})")
+                return {
+                    'continue_workflow': True,
+                    'action': 'get_time_slots',
+                    'params': {
+                        'project_id': context.get('project_id'),
+                        'date': single_date,
+                        'request_id': context.get('request_id'),
+                        'is_reschedule': is_reschedule  # Use rescheduler API if in reschedule workflow
+                    },
+                    'next_stage': 'awaiting_time_selection',
+                    'preserve_context': {
+                        'project_id': context.get('project_id'),
+                        'date': single_date,
+                        'request_id': context.get('request_id'),
+                        'category': context.get('category'),
+                        'project_type': context.get('project_type'),
+                        'city': context.get('city'),
+                        'state': context.get('state'),
+                        'is_reschedule': is_reschedule,  # Preserve for subsequent calls
                         'batch_mode': context.get('batch_mode'),
                         'project_ids': context.get('project_ids'),
                         'current_index': context.get('current_index'),
@@ -1273,23 +1419,57 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
 
             # Check for month-only reference (e.g., "February", "March", "how about feb")
             # This calls get_available_dates with the month name for the LLM interpreter
+            # BUT FIRST: Check if user provided BOTH date AND time (e.g., "11 AM January 30th")
+            # In that case, skip straight to confirm_appointment
+            time_val = extract_time_from_message(message)
+            if time_val:
+                # User provided time at date selection stage - they're giving us both date and time
+                # Extract the date and go straight to confirmation
+                date_val = extract_date_from_message(message)
+                if date_val:
+                    logger.info(f"[CONTINUATION] User provided BOTH date '{date_val}' AND time '{time_val}' at stage '{current_stage}' - confirming directly")
+                    confirm_params = {
+                        'project_id': context.get('project_id'),
+                        'date': date_val,
+                        'time': time_val,
+                        'request_id': context.get('request_id')
+                    }
+                    if channel == 'voice':
+                        confirm_params['confirmed'] = True
+                        logger.info(f"[CONTINUATION] Voice channel - booking immediately with date+time")
+                    return {
+                        'continue_workflow': True,
+                        'action': 'confirm_appointment',
+                        'params': confirm_params,
+                        'next_stage': 'complete',
+                        'preserve_context': context,
+                        'workflow_type': workflow_type
+                    }
+
             month_ref = extract_month_reference(message)
             if month_ref:
-                logger.info(f"[CONTINUATION] User provided month reference '{month_ref}' at stage '{current_stage}' - calling get_available_dates")
+                # Preserve is_reschedule from context (set during initial project selection)
+                is_reschedule = context.get('is_reschedule', False) or workflow_type == 'reschedule_appointment'
+                logger.info(f"[CONTINUATION] User provided month reference '{month_ref}' at stage '{current_stage}' (is_reschedule={is_reschedule}) - calling get_available_dates")
                 return {
                     'continue_workflow': True,
                     'action': 'get_available_dates',
                     'params': {
                         'project_id': context.get('project_id'),
-                        'date': month_ref  # Pass month name as-is for LLM interpreter
+                        'date': month_ref,  # Pass month name as-is for LLM interpreter
+                        'request_id': context.get('request_id'),  # Preserve for rebooking
+                        'is_reschedule': is_reschedule  # Use rescheduler API if in reschedule workflow
                     },
                     'next_stage': 'awaiting_date_selection',  # Stay in date selection
                     'preserve_context': {
                         'project_id': context.get('project_id'),
+                        'request_id': context.get('request_id'),  # CRITICAL: Preserve request_id!
+                        'available_dates': context.get('available_dates'),  # Preserve cached dates
                         'category': context.get('category'),
                         'project_type': context.get('project_type'),
                         'city': context.get('city'),
-                        'state': context.get('state')
+                        'state': context.get('state'),
+                        'is_reschedule': is_reschedule
                     },
                     'workflow_type': workflow_type
                 }
@@ -1299,15 +1479,48 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
         time_val = extract_time_from_message(message)
         if time_val:
             logger.info(f"[CONTINUATION] User provided time '{time_val}' at stage '{current_stage}' - bypassing classification")
+            # For voice channel, book immediately (confirmed=True) since GPT-4o manages the conversation
+            # For chat/SMS, use two-step confirmation flow
+            confirm_params = {
+                'project_id': context.get('project_id'),
+                'date': context.get('date'),
+                'time': time_val,
+                'request_id': context.get('request_id')
+            }
+            if channel == 'voice':
+                confirm_params['confirmed'] = True  # Voice: book immediately, GPT-4o handles conversation
+                logger.info(f"[CONTINUATION] Voice channel - booking immediately with confirmed=True")
             return {
                 'continue_workflow': True,
                 'action': 'confirm_appointment',
-                'params': {
-                    'project_id': context.get('project_id'),
-                    'date': context.get('date'),
-                    'time': time_val,
-                    'request_id': context.get('request_id')
-                },
+                'params': confirm_params,
+                'next_stage': 'complete',
+                'preserve_context': context,
+                'workflow_type': workflow_type
+            }
+
+        # CHAD FEEDBACK FIX: Handle "Yes" or "That works" after time slots are offered
+        # Auto-select the FIRST time slot when user confirms generically
+        available_times = context.get('time_slots', [])
+        confirm_patterns = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'that works', 'sounds good', 'perfect', 'the first', 'first one']
+        is_confirmation = any(pattern in message_lower for pattern in confirm_patterns)
+
+        if is_confirmation and available_times:
+            first_time = available_times[0] if isinstance(available_times[0], str) else available_times[0].get('time', available_times[0].get('slot'))
+            logger.info(f"[CONTINUATION] User said 'Yes' with time slots available - auto-selecting first time: {first_time}")
+            confirm_params = {
+                'project_id': context.get('project_id'),
+                'date': context.get('date'),
+                'time': first_time,
+                'request_id': context.get('request_id')
+            }
+            if channel == 'voice':
+                confirm_params['confirmed'] = True
+                logger.info(f"[CONTINUATION] Voice channel - booking immediately with first time slot")
+            return {
+                'continue_workflow': True,
+                'action': 'confirm_appointment',
+                'params': confirm_params,
                 'next_stage': 'complete',
                 'preserve_context': context,
                 'workflow_type': workflow_type
@@ -1335,14 +1548,16 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                 # Priority 1: Check if user provided a date in their message (e.g., "schedule the project for 01/27")
                 message_date = extract_date_from_message(message)
                 if message_date:
-                    logger.info(f"[CONTINUATION] Using date from user's message: {message_date}")
+                    is_reschedule = context.get('is_reschedule', False) or context.get('status', '').lower() in ['scheduled', 'customer scheduled', 'tentatively scheduled']
+                    logger.info(f"[CONTINUATION] Using date from user's message: {message_date} (is_reschedule={is_reschedule})")
                     return {
                         'continue_workflow': True,
                         'action': 'get_time_slots',
                         'params': {
                             'project_id': context_project_id,
                             'date': message_date,
-                            'request_id': context.get('request_id')
+                            'request_id': context.get('request_id'),
+                            'is_reschedule': is_reschedule  # Use rescheduler API if project is scheduled
                         },
                         'next_stage': 'awaiting_time_selection',
                         'preserve_context': {
@@ -1352,23 +1567,26 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                             'category': context.get('category'),
                             'project_type': context.get('project_type'),
                             'city': context.get('city'),
-                            'state': context.get('state')
+                            'state': context.get('state'),
+                            'is_reschedule': is_reschedule
                         },
-                        'workflow_type': 'schedule_appointment'
+                        'workflow_type': 'reschedule_appointment' if is_reschedule else 'schedule_appointment'
                     }
 
                 # Priority 2: Check if user has a calendar date in context (from "what day is X" query)
                 last_calendar_date = context.get('last_calendar_date')
                 last_calendar_display = context.get('last_calendar_date_display')
                 if last_calendar_date:
-                    logger.info(f"[CONTINUATION] Using last_calendar_date from context: {last_calendar_date} ({last_calendar_display})")
+                    is_reschedule = context.get('is_reschedule', False) or context.get('status', '').lower() in ['scheduled', 'customer scheduled', 'tentatively scheduled']
+                    logger.info(f"[CONTINUATION] Using last_calendar_date from context: {last_calendar_date} ({last_calendar_display}) (is_reschedule={is_reschedule})")
                     return {
                         'continue_workflow': True,
                         'action': 'get_time_slots',
                         'params': {
                             'project_id': context_project_id,
                             'date': last_calendar_date,
-                            'request_id': context.get('request_id')
+                            'request_id': context.get('request_id'),
+                            'is_reschedule': is_reschedule  # Use rescheduler API if project is scheduled
                         },
                         'next_stage': 'awaiting_time_selection',
                         'preserve_context': {
@@ -1378,17 +1596,24 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                             'category': context.get('category'),
                             'project_type': context.get('project_type'),
                             'city': context.get('city'),
-                            'state': context.get('state')
+                            'state': context.get('state'),
+                            'is_reschedule': is_reschedule
                         },
-                        'workflow_type': 'schedule_appointment'
+                        'workflow_type': 'reschedule_appointment' if is_reschedule else 'schedule_appointment'
                     }
 
                 # Priority 3: No date provided - show available dates
+                # Check if project is already scheduled - use rescheduler API
+                project_status = context.get('status', '').lower()
+                scheduled_statuses = ['scheduled', 'customer scheduled', 'tentatively scheduled']
+                is_reschedule = project_status in scheduled_statuses or context.get('is_reschedule', False)
+
                 return {
                     'continue_workflow': True,
                     'action': 'get_available_dates',
                     'params': {
-                        'project_id': context_project_id
+                        'project_id': context_project_id,
+                        'is_reschedule': is_reschedule  # Use rescheduler API if already scheduled
                     },
                     'next_stage': 'awaiting_date_selection',
                     'preserve_context': {
@@ -1397,9 +1622,10 @@ def check_workflow_continuation(message: str, workflow_state: Dict) -> Optional[
                         'project_type': context.get('project_type'),
                         'city': context.get('city'),
                         'state': context.get('state'),
-                        'address': context.get('address')
+                        'address': context.get('address'),
+                        'is_reschedule': is_reschedule
                     },
-                    'workflow_type': 'schedule_appointment'
+                    'workflow_type': 'reschedule_appointment' if is_reschedule else 'schedule_appointment'
                 }
 
     # Not a continuation - proceed with normal classification
@@ -2676,11 +2902,17 @@ def orchestrate_intelligent_workflow(
     from_phone: str = '',  # For voice cache lookup
     project_id: str = '',  # From GPT-4o smart prompt embedded state (voice)
     project_status: str = '',  # From GPT-4o smart prompt embedded state (voice)
-    confirmed: bool = False  # From GPT-4o: True when user confirms appointment (Step 2)
+    confirmed: bool = False,  # From GPT-4o: True when user confirms appointment (Step 2)
+    gpt_action: str = '',  # CRITICAL: Action from GPT-4o - TRUST THIS unless empty!
+    gpt_date: str = '',  # From GPT-4o: selected date in YYYY-MM-DD format
+    gpt_time: str = ''  # From GPT-4o: selected time in HH:MM format
 ) -> Dict[str, Any]:
     """
     Main intelligent orchestration function
-    Uses Sonnet 3.7 for ALL decisions - NO hardcoding!
+
+    IMPORTANT: When GPT-4o provides gpt_action, we TRUST IT and execute directly.
+    GPT-4o has full context via the smart system prompt (all projects, statuses, etc.)
+    and knows exactly what action the user wants. Don't second-guess it.
 
     Args:
         message: User's message
@@ -2694,6 +2926,9 @@ def orchestrate_intelligent_workflow(
         project_id: Optional project_id from GPT-4o smart prompt (voice fast path)
         project_status: Optional project_status from GPT-4o smart prompt (voice fast path)
         confirmed: True when GPT-4o indicates user confirmed appointment (Step 2 of two-step booking)
+        gpt_action: Action specified by GPT-4o - TRUST THIS when provided!
+        gpt_date: Selected date from GPT-4o in YYYY-MM-DD format
+        gpt_time: Selected time from GPT-4o in HH:MM format
 
     Returns:
         Response dictionary with text, intent, action, timing
@@ -2742,6 +2977,259 @@ def orchestrate_intelligent_workflow(
                 }
             }
             state_manager.save_state(session_id, workflow_state)
+
+    # ========================================================================
+    # GPT-4O TRUST FAST PATH (Voice)
+    # When GPT-4o provides both action AND project_id, TRUST IT and execute directly!
+    # GPT-4o has full context via smart prompt and knows exactly what the user wants.
+    # Don't second-guess with NLU/Sonnet - just execute the action.
+    # ========================================================================
+    valid_gpt_actions = [
+        'get_available_dates', 'get_time_slots', 'confirm_appointment',
+        'reschedule_appointment', 'cancel_appointment', 'get_project_details',
+        'list_projects'  # Even list_projects can be trusted if GPT-4o says so
+    ]
+
+    if channel == 'voice' and gpt_action and gpt_action in valid_gpt_actions:
+        logger.info(f"[GPT-4O-TRUST] GPT-4o specified action='{gpt_action}', project_id='{project_id}', date='{gpt_date}', time='{gpt_time}' - TRUSTING IT!")
+
+        # For actions that require project_id, check we have it
+        project_required_actions = ['get_available_dates', 'get_time_slots', 'confirm_appointment', 'reschedule_appointment', 'cancel_appointment', 'get_project_details']
+
+        # If GPT-4O didn't provide project_id, get it from workflow state context
+        if not project_id and workflow_state:
+            context_project_id = workflow_state.get('context', {}).get('project_id')
+            if context_project_id:
+                project_id = str(context_project_id)
+                logger.info(f"[GPT-4O-TRUST] Using project_id from workflow state: {project_id}")
+
+        if gpt_action in project_required_actions and project_id:
+            logger.info(f"[GPT-4O-TRUST] Executing {gpt_action} directly with project_id={project_id}")
+
+            # Build params for Lambda call
+            gpt_params = {
+                'project_id': project_id,
+                'customer_id': customer_id,
+                'client_id': client_id,
+                'pf_bearer_token': pf_bearer_token,
+                'from_phone': from_phone
+            }
+
+            # Define message_lower early so it's available for all action types
+            message_lower = message.lower() if message else ''
+
+            # CRITICAL: For get_available_dates, check if this is a reschedule scenario
+            # Use rescheduler API when: user said "reschedule", or GPT action is reschedule, or project is already scheduled
+            if gpt_action == 'get_available_dates':
+                reschedule_keywords = ['reschedule', 'change date', 'different date', 'move appointment', 'change appointment']
+                is_reschedule_context = any(kw in message_lower for kw in reschedule_keywords)
+
+                # Also check if workflow indicates reschedule
+                workflow_context = workflow_state.get('context', {}) if workflow_state else {}
+                workflow_is_reschedule = workflow_context.get('is_reschedule', False)
+                workflow_type = workflow_state.get('workflow_type', '') if workflow_state else ''
+
+                # Check conversation history - if last assistant message mentioned reschedule and user confirmed
+                history_indicates_reschedule = False
+                if conversation_history and len(conversation_history) >= 1:
+                    # Check if user is confirming ("yes", "yeah", "ok") after reschedule was mentioned
+                    confirm_words = ['yes', 'yeah', 'yep', 'ok', 'okay', 'sure', 'please', 'go ahead']
+                    is_confirmation = any(w in message_lower.split() for w in confirm_words) and len(message_lower.split()) <= 5
+                    if is_confirmation:
+                        # Check last assistant message for reschedule mention
+                        last_messages = conversation_history[-2:] if len(conversation_history) >= 2 else conversation_history
+                        for msg in last_messages:
+                            if msg.get('role') == 'assistant':
+                                assistant_text = (msg.get('content', '') or msg.get('message', '')).lower()
+                                if 'reschedule' in assistant_text or 'already scheduled' in assistant_text:
+                                    history_indicates_reschedule = True
+                                    logger.info(f"[GPT-4O-TRUST] History indicates reschedule - user confirmed after reschedule prompt")
+                                    break
+
+                if is_reschedule_context or workflow_is_reschedule or workflow_type == 'reschedule_appointment' or history_indicates_reschedule:
+                    gpt_params['is_reschedule'] = True
+                    logger.info(f"[GPT-4O-TRUST] Setting is_reschedule=True (keywords={is_reschedule_context}, workflow={workflow_is_reschedule}, type={workflow_type}, history={history_indicates_reschedule})")
+
+            # Add date from GPT-4o if provided
+            if gpt_date:
+                gpt_params['date'] = gpt_date
+                logger.info(f"[GPT-4O-TRUST] Using date from GPT-4o: {gpt_date}")
+            elif gpt_action == 'get_available_dates':
+                # Fallback: try to extract date from message
+                extracted_date = extract_date_from_message(message)
+                if extracted_date:
+                    gpt_params['date'] = extracted_date
+                    logger.info(f"[GPT-4O-TRUST] Extracted date from message: {extracted_date}")
+
+            # Add time from GPT-4o if provided
+            if gpt_time:
+                gpt_params['time'] = gpt_time
+                logger.info(f"[GPT-4O-TRUST] Using time from GPT-4o: {gpt_time}")
+
+            # For confirm_appointment or reschedule_appointment, include confirmed flag
+            # Also detect if user is saying "yes" to a reschedule prompt
+            if gpt_action in ['confirm_appointment', 'reschedule_appointment']:
+                # Check if confirmed flag is already True (from handler)
+                if confirmed:
+                    gpt_params['confirmed'] = True
+                    logger.info(f"[GPT-4O-TRUST] Including confirmed=True for {gpt_action} (from handler)")
+                # Or detect affirmative response in message
+                elif message_lower:
+                    affirm_words = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'please', 'go ahead', 'do it', 'proceed']
+                    is_affirmative = any(word in message_lower.split() for word in affirm_words) and len(message_lower.split()) <= 5
+                    if is_affirmative:
+                        gpt_params['confirmed'] = True
+                        logger.info(f"[GPT-4O-TRUST] Including confirmed=True for {gpt_action} (detected affirmative: '{message}')")
+
+            # Get request_id from workflow state if available
+            if workflow_state and workflow_state.get('context', {}).get('request_id'):
+                gpt_params['request_id'] = workflow_state['context']['request_id']
+                logger.info(f"[GPT-4O-TRUST] Using request_id from workflow state: {gpt_params['request_id']}")
+
+            try:
+                lambda_response = call_lambda_directly(gpt_action, gpt_params)
+
+                # Extract response
+                response_data = lambda_response.get('response', {})
+                function_response = response_data.get('functionResponse', {})
+                response_body_wrapper = function_response.get('responseBody', {})
+                text_wrapper = response_body_wrapper.get('TEXT', {})
+                response_body_str = text_wrapper.get('body', '{}')
+
+                if isinstance(response_body_str, str):
+                    response_body = json.loads(response_body_str)
+                else:
+                    response_body = response_body_str
+
+                # Check for errors
+                if response_body.get('error'):
+                    error_msg = response_body.get('error', 'Unknown error')
+                    logger.warning(f"[GPT-4O-TRUST] Lambda returned error: {error_msg}")
+                    # Fall through to normal processing on error
+                else:
+                    # Success! Format response for voice
+                    response_text = response_body.get('message', '')
+                    if not response_text:
+                        # Simple inline formatting for voice
+                        if gpt_action == 'get_available_dates':
+                            dates = response_body.get('available_dates', [])
+                            if dates:
+                                date_list = ', '.join(d.get('date', str(d)) if isinstance(d, dict) else str(d) for d in dates[:3])
+                                response_text = f"I have these dates available: {date_list}. Which one works for you?"
+                            else:
+                                response_text = "I don't see any available dates right now. Would you like to try a different week?"
+                        elif gpt_action == 'get_time_slots':
+                            # scheduling-actions returns: available_slots, timeSlots, slots (rescheduler), or time_slots
+                            slots = response_body.get('available_slots') or response_body.get('timeSlots') or response_body.get('slots') or response_body.get('time_slots', [])
+                            logger.info(f"[GPT-4O-TRUST] Time slots response keys: {list(response_body.keys())}, slots found: {len(slots) if slots else 0}")
+                            if slots:
+                                # Format time slots nicely for voice (convert 08:00:00 to 8 AM)
+                                def format_time_voice(t):
+                                    try:
+                                        if isinstance(t, str) and ':' in t:
+                                            h, m = int(t.split(':')[0]), int(t.split(':')[1])
+                                            suffix = 'AM' if h < 12 else 'PM'
+                                            h = h if h <= 12 else h - 12
+                                            h = 12 if h == 0 else h
+                                            return f"{h} {suffix}" if m == 0 else f"{h}:{m:02d} {suffix}"
+                                        return str(t)
+                                    except:
+                                        return str(t)
+                                slot_list = ', '.join(format_time_voice(s) for s in slots[:4])
+                                response_text = f"I have these times available: {slot_list}. Which works best for you?"
+                            else:
+                                response_text = "No time slots available for that date. Would you like to try a different day?"
+                        elif gpt_action == 'get_project_details':
+                            response_text = response_body.get('summary', "Here are your project details.")
+                        elif gpt_action == 'reschedule_appointment':
+                            status = response_body.get('status', '')
+                            if status == 'awaiting_confirmation':
+                                # Step 1: Ask for confirmation
+                                response_text = response_body.get('message', "Would you like to reschedule this appointment?")
+                            elif status == 'awaiting_date_selection':
+                                # Step 2: Show available dates after cancel
+                                dates = response_body.get('available_dates', [])
+                                if dates:
+                                    date_list = ', '.join(d.get('date', str(d)) if isinstance(d, dict) else str(d) for d in dates[:5])
+                                    response_text = f"Great, I've cancelled your current appointment. Here are the available dates: {date_list}. Which one works for you?"
+                                else:
+                                    response_text = response_body.get('message', "I've cancelled your appointment but couldn't find available dates.")
+                            elif status == 'rescheduled':
+                                response_text = response_body.get('message', "Your appointment has been rescheduled!")
+                            elif status == 'no_dates_available':
+                                response_text = response_body.get('message', "No alternative dates available. Your current appointment remains unchanged.")
+                            else:
+                                response_text = response_body.get('message', '')
+
+                    # Update workflow state based on action
+                    if gpt_action == 'get_available_dates':
+                        new_state = {
+                            'workflow_type': 'schedule_appointment',
+                            'current_stage': 'awaiting_date_selection',
+                            'context': {
+                                'project_id': project_id,
+                                'project_status': project_status,
+                                'available_dates': response_body.get('available_dates', []),
+                                'request_id': response_body.get('request_id')
+                            }
+                        }
+                        state_manager.save_state(session_id, new_state)
+                        logger.info(f"[GPT-4O-TRUST] Saved workflow state: awaiting_date_selection")
+
+                    elif gpt_action == 'get_time_slots':
+                        # Get slots using correct field names from scheduling-actions (includes rescheduler's 'slots')
+                        slots_for_state = response_body.get('available_slots') or response_body.get('timeSlots') or response_body.get('slots') or response_body.get('time_slots', [])
+                        new_state = {
+                            'workflow_type': 'schedule_appointment',
+                            'current_stage': 'awaiting_time_selection',
+                            'context': {
+                                'project_id': project_id,
+                                'project_status': project_status,
+                                'date': gpt_params.get('date'),
+                                'time_slots': slots_for_state,
+                                'request_id': response_body.get('request_id')
+                            }
+                        }
+                        state_manager.save_state(session_id, new_state)
+                        logger.info(f"[GPT-4O-TRUST] Saved workflow state: awaiting_time_selection")
+
+                    elif gpt_action == 'reschedule_appointment':
+                        status = response_body.get('status', '')
+                        if status == 'awaiting_date_selection':
+                            new_state = {
+                                'workflow_type': 'reschedule_appointment',
+                                'current_stage': 'awaiting_date_selection',
+                                'context': {
+                                    'project_id': project_id,
+                                    'project_status': project_status,
+                                    'available_dates': response_body.get('available_dates', []),
+                                    'request_id': response_body.get('request_id'),
+                                    'is_reschedule': True
+                                }
+                            }
+                            state_manager.save_state(session_id, new_state)
+                            logger.info(f"[GPT-4O-TRUST] Saved workflow state: reschedule awaiting_date_selection")
+
+                    timing['total'] = time.time() - start_time
+                    logger.info(f"[GPT-4O-TRUST] SUCCESS! Returning response directly (bypassed classification)")
+                    return {
+                        'response': response_text,
+                        'intent': 'scheduling',
+                        'action': gpt_action,
+                        'agent_name': 'Intelligent Orchestrator (GPT-4o Trust)',
+                        'direct_call': True,
+                        'timing': timing,
+                        'pf_http_status_code': response_body.get('pf_http_status_code', 200)
+                    }
+
+            except Exception as e:
+                logger.error(f"[GPT-4O-TRUST] Error executing {gpt_action}: {e}", exc_info=True)
+                # Fall through to normal processing on error
+
+        elif gpt_action == 'list_projects':
+            # For list_projects, we can execute without project_id
+            logger.info(f"[GPT-4O-TRUST] Executing list_projects (no project_id required)")
+            # Fall through to normal processing - list_projects has complex filtering logic
 
     # ========================================================================
     # GPT-4O CONFIRMED FLAG HANDLER (Voice Step 2)
@@ -3022,7 +3510,7 @@ def orchestrate_intelligent_workflow(
     # STEP 0: Check for workflow continuation FIRST (before classification)
     # This prevents "5th Dec" from being interpreted as "5th project"
     # ========================================================================
-    continuation = check_workflow_continuation(message, workflow_state)
+    continuation = check_workflow_continuation(message, workflow_state, channel)
 
     # Handle CONTEXT SWITCH: User mentioned a different project
     # Preserve viewed_projects history while switching to new project context
@@ -3379,11 +3867,24 @@ def orchestrate_intelligent_workflow(
                     # Also extract request_id from response for next step
                     if response_body.get('request_id'):
                         new_context['request_id'] = response_body['request_id']
+                    # CRITICAL: Save time_slots for "Yes" auto-select logic
+                    # When user says "Yes" or "That works", auto-select first time slot
+                    # scheduling-actions returns: available_slots, timeSlots, slots (rescheduler), or time_slots
+                    saved_slots = response_body.get('available_slots') or response_body.get('timeSlots') or response_body.get('slots') or response_body.get('time_slots')
+                    if saved_slots:
+                        new_context['time_slots'] = saved_slots
+                        logger.info(f"[CONTINUATION] Saved {len(saved_slots)} time_slots for auto-select")
 
-                # Extract request_id from reschedule_appointment step 2 response (dates)
-                if action == 'reschedule_appointment' and response_body.get('request_id'):
-                    new_context['request_id'] = response_body['request_id']
-                    logger.info(f"[CONTINUATION] Extracted request_id from reschedule dates: {response_body['request_id']}")
+                # Extract request_id and available_dates from reschedule_appointment step 2 response (dates)
+                if action == 'reschedule_appointment':
+                    if response_body.get('request_id'):
+                        new_context['request_id'] = response_body['request_id']
+                        logger.info(f"[CONTINUATION] Extracted request_id from reschedule dates: {response_body['request_id']}")
+                    # CRITICAL: Save available_dates for single-date auto-select logic
+                    # When only 1 date is available and user says "yes", continuation handler needs this
+                    if response_body.get('available_dates'):
+                        new_context['available_dates'] = response_body['available_dates']
+                        logger.info(f"[CONTINUATION] Saved {len(response_body['available_dates'])} available_dates for reschedule workflow")
 
                 # Preserve project_mapping from existing state
                 existing_mapping = workflow_state.get('project_mapping', {}) if workflow_state else {}
@@ -5744,6 +6245,55 @@ What would you like to do?"""
         lambda_action = decision['lambda_action']
         lambda_params = decision['lambda_params']
 
+        # CHAD FEEDBACK FIX: Lock project context - don't re-list if user is mid-workflow
+        # "The AI is re-listing projects after a customer has already selected one, causing loops"
+        if lambda_action == 'list_projects' and workflow_state:
+            current_stage = workflow_state.get('current_stage', '')
+            ws_context = workflow_state.get('context', {})
+            selected_project_id = ws_context.get('project_id')
+
+            # Scheduling workflow stages where we should NOT re-list
+            scheduling_stages = [
+                'awaiting_date_selection', 'awaiting_time_selection',
+                'awaiting_appointment_confirm', 'awaiting_reschedule_confirm',
+                'awaiting_cancel_confirmation'
+            ]
+
+            # Check if user EXPLICITLY asked to see all projects
+            msg_lower = message.lower()
+            explicit_list_patterns = [
+                'list all', 'show all', 'all my project', 'all project',
+                'what project', 'how many project', 'my project',
+                'start over', 'different project', 'other project', 'back to'
+            ]
+            is_explicit_list_request = any(p in msg_lower for p in explicit_list_patterns)
+
+            if selected_project_id and current_stage in scheduling_stages and not is_explicit_list_request:
+                logger.warning(f"[LIST_PROJECTS] BLOCKED - mid-workflow. stage={current_stage}, project={selected_project_id}, msg='{message[:50]}'")
+                # Don't re-list - return helpful message and keep workflow state
+                category = ws_context.get('category', 'your project')
+                if current_stage == 'awaiting_date_selection':
+                    return {
+                        'response': f"We're currently scheduling your {category} project. Please select a date, or say 'start over' to choose a different project.",
+                        'intent': 'scheduling',
+                        'action': 'blocked_relist',
+                        'agent_name': 'Intelligent Orchestrator (Context Lock)'
+                    }
+                elif current_stage == 'awaiting_time_selection':
+                    return {
+                        'response': f"We're selecting a time for your {category} appointment. Please pick a time, or say 'start over' to choose a different project.",
+                        'intent': 'scheduling',
+                        'action': 'blocked_relist',
+                        'agent_name': 'Intelligent Orchestrator (Context Lock)'
+                    }
+                else:
+                    return {
+                        'response': f"We're in the middle of scheduling your {category} project. Please confirm or say 'start over' to begin again.",
+                        'intent': 'scheduling',
+                        'action': 'blocked_relist',
+                        'agent_name': 'Intelligent Orchestrator (Context Lock)'
+                    }
+
         # FIX: Prevent conversation context bleeding for list_projects
         # When user says "list my projects", we should ALWAYS fetch ALL projects
         # from the API, not filter by project_ids extracted from conversation history.
@@ -6339,6 +6889,52 @@ What would you like to do?"""
                 'pending_action': pending_action.get('preview', {}),
                 'pf_http_status_code': 200
             }
+
+        # ====================================================================
+        # VOICE: For confirm_appointment, add confirmed=True to book immediately
+        # GPT-4o manages the conversation, so we trust it when it sends confirm_appointment
+        # This ensures voice calls skip Step 1 preview and go directly to Step 2 booking
+        # ====================================================================
+        if lambda_action == 'confirm_appointment' and channel == 'voice':
+            lambda_params['confirmed'] = True
+            logger.info(f"[VOICE-CONFIRM] Voice channel - adding confirmed=True to confirm_appointment params")
+
+        # ====================================================================
+        # VALIDATION: confirm_appointment requires both date AND time
+        # If GPT-4o calls confirm_appointment without time, return error
+        # This is a safety net - GPT-4o should follow the scheduling flow
+        # ====================================================================
+        if lambda_action == 'confirm_appointment':
+            has_date = lambda_params.get('date') or context.get('date')
+            has_time = lambda_params.get('time') or context.get('time')
+
+            if not has_time:
+                logger.warning(f"[CONFIRM-VALIDATION] confirm_appointment called without time - date={has_date}, time={has_time}")
+                # Try to get time slots for the date if we have a date
+                if has_date and lambda_params.get('project_id'):
+                    timing['total'] = time.time() - start_time
+                    return {
+                        'response': f"Before I can confirm, I need to know what time works for you. What time would you prefer?",
+                        'intent': 'scheduling',
+                        'action': 'confirm_appointment',
+                        'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                        'direct_call': True,
+                        'timing': timing,
+                        'validation_error': 'missing_time',
+                        'pf_http_status_code': 200
+                    }
+                else:
+                    timing['total'] = time.time() - start_time
+                    return {
+                        'response': "I need both a date and time to confirm your appointment. What date and time would you like?",
+                        'intent': 'scheduling',
+                        'action': 'confirm_appointment',
+                        'agent_name': 'Intelligent Orchestrator (Sonnet 3.7)',
+                        'direct_call': True,
+                        'timing': timing,
+                        'validation_error': 'missing_date_time',
+                        'pf_http_status_code': 200
+                    }
 
         try:
             lambda_response = call_lambda_directly(lambda_action, lambda_params)
@@ -6985,6 +7581,39 @@ What would you like to do?"""
                 if response_body.get('start_date'):
                     decision['update_workflow_state']['context']['start_date'] = response_body['start_date']
                     logger.info(f"[DATES] Saved start_date/base_date: {response_body['start_date']}")
+
+            # CHAD FEEDBACK FIX: Save time_slots to workflow state for "Yes" auto-select
+            # When user says "Yes" or "That works" after times are shown, auto-select first slot
+            # scheduling-actions returns: available_slots, timeSlots, slots (rescheduler), or time_slots
+            time_slots_data = response_body.get('available_slots') or response_body.get('timeSlots') or response_body.get('slots') or response_body.get('time_slots')
+            if lambda_action == 'get_time_slots' and time_slots_data:
+                logger.info(f"[TIME_SLOTS] Saving {len(time_slots_data)} time slots to workflow state")
+
+                # Ensure update_workflow_state exists for time slots
+                if not decision.get('update_workflow_state'):
+                    existing_context = workflow_state.get('context', {}) if workflow_state else {}
+                    decision['update_workflow_state'] = {
+                        'workflow_type': workflow_state.get('workflow_type', 'schedule_appointment') if workflow_state else 'schedule_appointment',
+                        'current_stage': 'awaiting_time_selection',
+                        'context': {
+                            'project_id': existing_context.get('project_id') or lambda_params.get('project_id'),
+                            'date': lambda_params.get('date') or existing_context.get('date'),
+                            'request_id': existing_context.get('request_id'),
+                            'category': existing_context.get('category'),
+                            'city': existing_context.get('city'),
+                            'state': existing_context.get('state')
+                        }
+                    }
+                    logger.info(f"[TIME_SLOTS] Created update_workflow_state for time_slots preservation")
+
+                if 'context' not in decision['update_workflow_state']:
+                    decision['update_workflow_state']['context'] = {}
+
+                # Set stage to awaiting_time_selection
+                decision['update_workflow_state']['current_stage'] = 'awaiting_time_selection'
+                decision['update_workflow_state']['context']['time_slots'] = time_slots_data
+                decision['update_workflow_state']['context']['date'] = lambda_params.get('date') or decision['update_workflow_state']['context'].get('date')
+                logger.info(f"[TIME_SLOTS] Saved time_slots and set stage to awaiting_time_selection")
 
             # ========================================================================
             # PAST DATE CLEANUP: When user requests a date that's entirely in the past,
