@@ -296,9 +296,15 @@ def extract_date_from_message(message: str) -> Optional[str]:
     Extract date from message without LLM - simple patterns only.
     Returns date in YYYY-MM-DD format or None if no date found.
     """
-    from datetime import datetime
+    from datetime import datetime, timedelta
 
     msg = message.lower().strip()
+
+    # Pattern 0: Relative dates - "today", "tomorrow"
+    if 'today' in msg:
+        return datetime.now().strftime('%Y-%m-%d')
+    if 'tomorrow' in msg:
+        return (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
 
     # Month name patterns (3-letter abbreviations)
     months = {
@@ -5750,6 +5756,13 @@ What would you like to do?"""
                 logger.info(f"[LIST_PROJECTS] Removing conversation project_id from params - will fetch fresh from API")
                 del lambda_params['project_id']
 
+            # Extract date filter from message for appointment status queries
+            # e.g., "Is someone coming today?" → filter by today's date
+            extracted_date = extract_date_from_message(message)
+            if extracted_date and 'scheduled_date' not in lambda_params:
+                logger.info(f"[LIST_PROJECTS] Extracted date filter from message: {extracted_date}")
+                lambda_params['scheduled_date'] = extracted_date
+
         # WORKFLOW SWITCH DETECTION (Hybrid Approach):
         # Clear stale workflow state when user starts a DIFFERENT workflow type
         # This prevents issues like "schedule 3rd project" using reschedule API
@@ -6760,12 +6773,21 @@ What would you like to do?"""
 
                 # Preserve project_mapping from existing state
                 existing_mapping = workflow_state.get('project_mapping', {}) if workflow_state else {}
+                existing_context = workflow_state.get('context', {}) if workflow_state else {}
+
+                # Build project_mapping with this project if not already present
+                if project_id and str(project_id) not in existing_mapping:
+                    existing_mapping[str(project_id)] = existing_context.get('project_info', {})
+
                 # Save workflow state so we can handle "yes" confirmation
+                # NOTE: Use 'awaiting_reschedule_confirm' and 'reschedule_offer' to match continuation handler
                 state_manager.save_state(session_id, {
-                    'workflow_type': 'reschedule_appointment',
-                    'current_stage': 'awaiting_reschedule_offer_confirmation',
+                    'workflow_type': 'reschedule_offer',  # Matches handler at line 804
+                    'current_stage': 'awaiting_reschedule_confirm',  # Matches handler at line 804
                     'context': {
                         'project_id': project_id,
+                        'selected_project_id': project_id,  # Handler expects this
+                        'project_ids': [project_id] if project_id else [],
                         'already_scheduled': True,
                         'project_mapping': existing_mapping
                     },

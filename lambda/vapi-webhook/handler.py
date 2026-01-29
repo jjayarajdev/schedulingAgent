@@ -855,7 +855,18 @@ These are requests for available appointment dates - ALWAYS pass exact words:
 - "The second option" → (pass exact words - backend resolves ordinal)
 - "Different date please" → get_available_dates, message: "different date please"
 
-**CONTEXT QUERIES (info from conversation/project context):**
+**APPOINTMENT STATUS QUERIES (when NO project context exists yet):**
+⚠️ If user asks about appointments but you haven't discussed a specific project yet, call list_projects FIRST:
+- "Is someone coming today?" → list_projects, message: "is someone coming today"
+- "When is my appointment?" → list_projects, message: "when is my appointment"
+- "Is the technician coming?" → list_projects, message: "is the technician coming"
+- "Are they coming to measure?" → list_projects, message: "are they coming to measure"
+- "Do I have an appointment today?" → list_projects, message: "do I have an appointment today"
+- "What time is someone coming?" → list_projects, message: "what time is someone coming"
+- "Is anyone coming this week?" → list_projects, message: "is anyone coming this week"
+The backend will find scheduled projects and return the relevant appointment info.
+
+**CONTEXT QUERIES (when project context ALREADY exists from prior conversation):**
 - "Who is the technician?" → get_project_details, message: "who is the technician"
 - "Who is coming?" → get_project_details, message: "who is coming"
 - "What time is my appointment?" → get_project_details, message: "what time is my appointment"
@@ -1198,6 +1209,12 @@ def handle_function_call(message: Dict) -> Dict:
         if project_id:
             logger.info(f"[VAPI] GPT-4o passed project_id from embedded state: {project_id}, status: {project_status}")
 
+        # FALLBACK: If message is empty but action is provided, synthesize message from action
+        # This handles cases where GPT-4o knows the intent (action) but doesn't provide message
+        if not user_message and action and action != 'other':
+            user_message = action.replace('_', ' ')  # e.g., "get_available_dates" -> "get available dates"
+            logger.info(f"[VAPI] Synthesized message from action: '{user_message}' (original message was empty)")
+
         if not user_message:
             return create_function_response({
                 "error": "No message provided",
@@ -1301,6 +1318,12 @@ def handle_tool_calls(message: Dict) -> Dict:
             project_id = arguments.get('project_id', '')  # From smart prompt embedded state
             project_status = arguments.get('project_status', '')  # From smart prompt embedded state
             confirmed = arguments.get('confirmed', False)  # For two-step appointment confirmation
+
+            # FALLBACK: If message is empty but action is provided, synthesize message from action
+            # This handles cases where user says "Yes" and GPT-4o knows the intent but doesn't provide message
+            if not user_message and action and action != 'other':
+                user_message = action.replace('_', ' ')  # e.g., "get_available_dates" -> "get available dates"
+                logger.info(f"[VAPI] Synthesized message from action: '{user_message}' (original message was empty)")
 
             if project_id:
                 logger.info(f"[VAPI] GPT-4o passed project_id from embedded state: {project_id}, status: {project_status}")

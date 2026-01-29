@@ -17,6 +17,7 @@ Supports both MOCK and REAL API modes via USE_MOCK_API environment variable
 
 import json
 import logging
+import re
 import requests
 import boto3
 import calendar
@@ -899,8 +900,35 @@ def handle_list_projects(params: Dict, config: Dict, auth_headers: Dict) -> Dict
 
                     if include and filter_scheduled_date:
                         scheduled_date = project.get('scheduledDate', '')
-                        if scheduled_date != filter_scheduled_date:
+                        if not scheduled_date:
                             include = False
+                        else:
+                            # Match date using same logic as API path (handles multiple formats)
+                            try:
+                                from datetime import datetime
+                                filter_date = datetime.strptime(filter_scheduled_date, "%Y-%m-%d")
+                                filter_day = filter_date.day
+                                filter_month = filter_date.month
+                                filter_year = filter_date.year
+                                date_matched = False
+                                # Format 1: "Jan 13, 2026 1:00 PM"
+                                match = re.search(r'(\w{3})\s+(\d{1,2}),?\s+(\d{4})', scheduled_date)
+                                if match:
+                                    month_abbr = match.group(1).lower()
+                                    day = int(match.group(2))
+                                    year = int(match.group(3))
+                                    month_map = {'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                                                 'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12}
+                                    if month_map.get(month_abbr) == filter_month and day == filter_day and year == filter_year:
+                                        date_matched = True
+                                # Format 2: ISO "2026-01-13" or "2026-01-13T..."
+                                if not date_matched and filter_scheduled_date in scheduled_date:
+                                    date_matched = True
+                                if not date_matched:
+                                    include = False
+                            except (ValueError, AttributeError):
+                                if filter_scheduled_date not in scheduled_date:
+                                    include = False
 
                     if include:
                         filtered_projects.append(project)
@@ -2490,6 +2518,8 @@ def handle_reschedule_appointment(params: Dict, config: Dict, auth_headers: Dict
     new_date = params.get('new_date')
     new_time = params.get('new_time')
     request_id = params.get('request_id')
+    user_message = params.get('message', '').lower()  # User's original message for intent detection
+
     # confirmed comes as string "True" from Lambda event params
     confirmed_raw = params.get('confirmed', False)
     confirmed = confirmed_raw in [True, 'True', 'true', '1']
@@ -2499,91 +2529,162 @@ def handle_reschedule_appointment(params: Dict, config: Dict, auth_headers: Dict
     if fetch_dates:
         confirmed = True
 
+    # SMART INTENT DETECTION: If user's message clearly indicates reschedule intent,
+    # skip confirmation step and go straight to fetching dates.
+    # This prevents the annoying "Would you like to reschedule?" when user already said "reschedule"
+    reschedule_intent_words = ['reschedule', 'change date', 'change time', 'change the date',
+                               'change the time', 'move appointment', 'move the appointment',
+                               'different date', 'different time', 'new date', 'new time',
+                               'change my appointment', 'move my appointment']
+    if not confirmed and user_message:
+        for intent_word in reschedule_intent_words:
+            if intent_word in user_message:
+                logger.info(f"[RESCHEDULE] Auto-confirming based on user intent: '{intent_word}' found in message")
+                confirmed = True
+                break
+
     if not project_id:
         raise ValueError("Missing required parameter: project_id")
 
-    logger.info(f"Rescheduling appointment for project {project_id}, confirmed={confirmed}")
+    logger.info(f"Rescheduling appointment for project {project_id}, confirmed={confirmed}, message='{user_message[:50]}...'" if len(user_message) > 50 else f"Rescheduling appointment for project {project_id}, confirmed={confirmed}, message='{user_message}'")
 
-    # STEP 2: If confirmed=True, user consented - cancel existing and fetch dates
+    # STEP 2: If confirmed=True, user consented - fetch dates FIRST, then cancel only if dates available
     if confirmed and not new_date:
-        logger.info(f"[RESCHEDULE STEP 2] User confirmed - cancelling and fetching dates for project {project_id}")
+        logger.info(f"[RESCHEDULE STEP 2] User confirmed - checking available dates BEFORE cancelling for project {project_id}")
 
-        # First, cancel the existing appointment
+        # First, check current project status
+        current_scheduled_date = None
+        is_currently_scheduled = False
         try:
-            cancel_result = handle_cancel_appointment(
+            project_info = handle_get_project_details(
+                {'project_id': project_id, 'client_id': client_id, 'customer_id': customer_id},
+                config, auth_headers
+            )
+            project = project_info.get('project', {})
+            current_status = project.get('status', '').lower()
+            current_scheduled_date = project.get('scheduledDate', '')
+
+            # Determine if project is currently scheduled
+            scheduled_statuses = ['scheduled', 'customer scheduled', 'tentatively scheduled']
+            is_currently_scheduled = current_status in scheduled_statuses or bool(current_scheduled_date)
+            logger.info(f"[RESCHEDULE] Project status: {current_status}, scheduledDate: {current_scheduled_date}, is_scheduled: {is_currently_scheduled}")
+        except Exception as e:
+            logger.warning(f"[RESCHEDULE] Could not fetch project status: {e}")
+
+        # CRITICAL: Fetch available dates FIRST (before cancelling)
+        # Use rescheduler API which can get dates even for scheduled projects
+        try:
+            dates_result = handle_get_rescheduler_slots(
                 {
                     'project_id': project_id,
                     'client_id': client_id,
-                    'customer_id': customer_id,
-                    'confirmed': True  # Skip validation, directly proceed with cancel-reschedule API
+                    'customer_id': customer_id
                 },
                 config,
                 auth_headers
             )
-            logger.info(f"Cancel result: {cancel_result}")
+            logger.info(f"Rescheduler dates result: {dates_result}")
 
-            # If project cannot be cancelled, return early
-            if cancel_result.get('status') in ['cannot_cancel', 'error']:
-                return {
-                    "action": "reschedule_appointment",
-                    "project_id": project_id,
-                    "status": "cannot_reschedule",
-                    "message": cancel_result.get('message') or cancel_result.get('error', 'Cannot reschedule this project'),
-                    "mock_mode": USE_MOCK_API
-                }
-        except Exception as e:
-            logger.warning(f"Cancel failed: {str(e)}")
-            return {
-                "action": "reschedule_appointment",
-                "project_id": project_id,
-                "status": "error",
-                "message": f"Failed to cancel existing appointment: {str(e)}",
-                "mock_mode": USE_MOCK_API
-            }
-
-        # Now fetch available dates
-        try:
-            # Use regular get_available_dates - it's faster and project is now in "Ready To Schedule" status
-            dates_result = handle_get_available_dates(
-                {
-                    'project_id': project_id,
-                    'client_id': client_id
-                },
-                config,
-                auth_headers
-            )
-            logger.info(f"Available dates result: {dates_result}")
-
-            # Sort dates chronologically
             available_dates = dates_result.get('available_dates', [])
-            available_dates_sorted = sorted(available_dates)
+            available_dates_sorted = sorted(available_dates) if available_dates else []
 
-            # Get formatted dates for UI (with dayName, dayShort, monthDay)
-            formatted_dates = dates_result.get('dates', [])
-            # Sort formatted dates to match available_dates_sorted order
-            formatted_dates_sorted = sorted(formatted_dates, key=lambda x: x.get('date', ''))
-
-            return {
-                "action": "reschedule_appointment",
-                "project_id": project_id,
-                "status": "awaiting_date_selection",
-                "available_dates": available_dates_sorted,
-                "dates": formatted_dates_sorted,  # Include formatted dates for UI
-                "dateCount": len(available_dates_sorted),
-                "request_id": dates_result.get('request_id'),
-                "start_date": dates_result.get('start_date'),  # Needed for get_time_slots
-                "message": "I've cancelled your existing appointment. Here are the available dates for rescheduling. Please select a date.",
-                "mock_mode": USE_MOCK_API
-            }
         except Exception as e:
-            logger.error(f"Failed to get available dates: {str(e)}")
+            logger.warning(f"[RESCHEDULE] Rescheduler API failed, trying regular dates: {e}")
+            # Fallback: If rescheduler fails, try regular get_available_dates
+            # This may fail for scheduled projects, but worth trying
+            try:
+                dates_result = handle_get_available_dates(
+                    {'project_id': project_id, 'client_id': client_id},
+                    config, auth_headers
+                )
+                available_dates = dates_result.get('available_dates', [])
+                available_dates_sorted = sorted(available_dates) if available_dates else []
+            except Exception as e2:
+                logger.error(f"[RESCHEDULE] Both date APIs failed: {e2}")
+                available_dates_sorted = []
+                dates_result = {'dates': [], 'available_dates': []}
+
+        # DECISION POINT: Only cancel if we have alternative dates
+        if not available_dates_sorted:
+            # NO DATES AVAILABLE - DO NOT CANCEL, keep existing appointment
+            logger.info(f"[RESCHEDULE] No alternative dates - keeping existing appointment")
+
+            if current_scheduled_date:
+                message = f"No alternative dates are available right now. Your current appointment on {current_scheduled_date} remains unchanged. Would you like me to check again later, or would you prefer our office number?"
+            else:
+                message = "No alternative dates are available right now. Would you like me to check again in a few days, or would you prefer to call our office?"
+
             return {
                 "action": "reschedule_appointment",
                 "project_id": project_id,
-                "status": "error",
-                "message": f"Failed to get available dates: {str(e)}",
+                "status": "no_dates_available",
+                "available_dates": [],
+                "dates": [],
+                "dateCount": 0,
+                "current_appointment_kept": True,
+                "current_scheduled_date": current_scheduled_date,
+                "message": message,
                 "mock_mode": USE_MOCK_API
             }
+
+        # DATES AVAILABLE - Now safe to cancel existing appointment
+        if is_currently_scheduled:
+            logger.info(f"[RESCHEDULE] Dates available ({len(available_dates_sorted)}) - now cancelling existing appointment")
+            try:
+                cancel_result = handle_cancel_appointment(
+                    {
+                        'project_id': project_id,
+                        'client_id': client_id,
+                        'customer_id': customer_id,
+                        'confirmed': True
+                    },
+                    config,
+                    auth_headers
+                )
+                logger.info(f"Cancel result: {cancel_result}")
+
+                if cancel_result.get('status') in ['cannot_cancel', 'error']:
+                    error_msg = cancel_result.get('message') or cancel_result.get('error', '')
+                    # If it's just a status issue, proceed anyway (project may already be unscheduled)
+                    if not ('status' in error_msg.lower() or 'not scheduled' in error_msg.lower()):
+                        return {
+                            "action": "reschedule_appointment",
+                            "project_id": project_id,
+                            "status": "cannot_reschedule",
+                            "message": error_msg or 'Cannot reschedule this project',
+                            "mock_mode": USE_MOCK_API
+                        }
+            except Exception as e:
+                error_str = str(e)
+                # Only fail if it's not a status-related error
+                if not ('status' in error_str.lower() or 'not scheduled' in error_str.lower()):
+                    logger.error(f"Cancel failed: {error_str}")
+                    return {
+                        "action": "reschedule_appointment",
+                        "project_id": project_id,
+                        "status": "error",
+                        "message": f"Failed to cancel existing appointment: {error_str}",
+                        "mock_mode": USE_MOCK_API
+                    }
+        else:
+            logger.info(f"[RESCHEDULE] Project not currently scheduled - skipping cancel step")
+
+        # Return available dates
+        formatted_dates = dates_result.get('dates', [])
+        formatted_dates_sorted = sorted(formatted_dates, key=lambda x: x.get('date', '')) if formatted_dates else []
+
+        return {
+            "action": "reschedule_appointment",
+            "project_id": project_id,
+            "status": "awaiting_date_selection",
+            "available_dates": available_dates_sorted,
+            "dates": formatted_dates_sorted,
+            "dateCount": len(available_dates_sorted),
+            "request_id": dates_result.get('request_id'),
+            "start_date": dates_result.get('start_date'),
+            "message": "Here are the available dates for rescheduling. Please select a date.",
+            "mock_mode": USE_MOCK_API
+        }
 
     # STEP 3: If date/time provided, confirm the new appointment
     if new_date:

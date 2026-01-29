@@ -457,11 +457,14 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
                     "offer_reschedule": True
                 }
                 if channel == 'voice':
-                    return "This project is already scheduled. Would you like to reschedule it instead?"
+                    # More direct message - user likely already indicated scheduling intent
+                    return "This project already has an appointment. Say 'reschedule' if you'd like to change it, or 'details' to hear the appointment info."
                 return f"This project is already scheduled. Would you like to reschedule it?\n\n```json\n{json.dumps(result, indent=2)}\n```"
 
             dates = response_body.get('available_dates', [])
             if not dates:
+                if channel == 'voice':
+                    return "No dates are available for this project right now. Would you like me to give you our office number to check for openings?"
                 return "Hmm, no open dates for this project right now. Want me to check again in a few days, or should we look at a different project?"
 
             # Check for weather-enriched dates (proactive weather warnings)
