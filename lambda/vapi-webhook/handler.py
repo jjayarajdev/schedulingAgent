@@ -643,19 +643,29 @@ def create_assistant_config_response(first_message: str, support_number: str = '
         client_name: Client company name
         projects_data: Optional cached projects data for smart system prompt
     """
-    # Format support number for voice - natural formatting (no SSML, GPT-4o outputs as text)
-    # Use commas and ellipsis for natural pauses when spoken by TTS
+    # Format support number for voice - use WORDS for slower, clearer speech
+    # Words naturally slow down TTS compared to digits
+    digit_words = {
+        '0': 'zero', '1': 'one', '2': 'two', '3': 'three', '4': 'four',
+        '5': 'five', '6': 'six', '7': 'seven', '8': 'eight', '9': 'nine'
+    }
     support_number_voice = ''
     if support_number:
         digits = ''.join(c for c in support_number if c.isdigit())
         if len(digits) == 10:
-            # Format: "7, 6, 7... 6, 7, 6... 7, 6, 7, 6" - commas for micro-pauses, ellipsis for group breaks
-            support_number_voice = f"{', '.join(digits[0:3])}... {', '.join(digits[3:6])}... {', '.join(digits[6:10])}"
+            # Format: "eight, six, zero... two, six, nine... nine, zero, four, zero"
+            part1 = ', '.join(digit_words[d] for d in digits[0:3])
+            part2 = ', '.join(digit_words[d] for d in digits[3:6])
+            part3 = ', '.join(digit_words[d] for d in digits[6:10])
+            support_number_voice = f"{part1}... {part2}... {part3}"
         elif len(digits) == 11 and digits[0] == '1':
-            support_number_voice = f"1... {', '.join(digits[1:4])}... {', '.join(digits[4:7])}... {', '.join(digits[7:11])}"
+            part1 = ', '.join(digit_words[d] for d in digits[1:4])
+            part2 = ', '.join(digit_words[d] for d in digits[4:7])
+            part3 = ', '.join(digit_words[d] for d in digits[7:11])
+            support_number_voice = f"one... {part1}... {part2}... {part3}"
         else:
-            # Fallback: commas between all digits
-            support_number_voice = ', '.join(digits)
+            # Fallback: words for all digits
+            support_number_voice = ', '.join(digit_words.get(d, d) for d in digits)
     assistant_config = {
         'name': 'ProjectForce Scheduling',
         'voice': {
@@ -723,12 +733,13 @@ The system will automatically say filler phrases during tool calls.
 IMPORTANT: When you receive a tool result, your VERY NEXT words must be the content from the "response" field. Do not add any preamble or filler - just speak the response directly.
 - "This will just take a sec" - BANNED
 
-## RULE #1b - PHONE NUMBER READOUT
+## RULE #1b - PHONE NUMBER READOUT (SPEAK SLOWLY)
 
-When reading phone numbers, output exactly as formatted in this prompt.
-The format uses commas between digits and ellipsis (...) between groups.
-Example output: "7, 6, 7... 6, 7, 6... 7, 6, 7, 6"
-Do NOT add words like "pause" or "break" - the punctuation creates natural pauses.
+When reading phone numbers, SPEAK SLOWLY and clearly. Use the WORD form of each digit.
+Output exactly as formatted in this prompt - the words create natural slower pacing.
+Example output: "eight, six, zero... two, six, nine... nine, zero, four, zero"
+
+CRITICAL: Speak each digit as a WORD (eight, not 8). The ellipsis creates pauses between groups. Do NOT rush.
 
 ---
 
