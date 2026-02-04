@@ -21,7 +21,7 @@ import re
 import requests
 import boto3
 import calendar
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from botocore.exceptions import ClientError
 
@@ -2554,7 +2554,7 @@ def handle_confirm_appointment(params: Dict, config: Dict, auth_headers: Dict) -
             time = f"{time}:00"  # Add seconds if missing
 
         payload = {
-            "created_at": datetime.now().strftime("%m/%d/%Y %H:%M:%S"),
+            "created_at": datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S"),
             "date": date,
             "time": time,
             "request_id": int(request_id),  # Ensure request_id is integer

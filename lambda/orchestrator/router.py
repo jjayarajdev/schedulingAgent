@@ -1973,11 +1973,13 @@ def route_request(
                     'routing_method': 'calendar_info_handler'
                 }
 
-            # CHITCHAT ACTIONS: Always pass the message so chitchat Lambda can do its own intent detection
-            chitchat_actions = ['help', 'general', 'chitchat']  # 'greet' handled above
-            if action in chitchat_actions:
+            # ACTIONS THAT NEED MESSAGE: Pass user's original message for intent detection
+            # - Chitchat: for chitchat Lambda's own intent detection
+            # - Reschedule: for smart intent detection (auto-confirm when user says "reschedule")
+            message_actions = ['help', 'general', 'chitchat', 'reschedule_appointment']  # 'greet' handled above
+            if action in message_actions:
                 lambda_params['message'] = message  # Pass original message
-                logger.info(f"[CHITCHAT] Passing message to chitchat Lambda: '{message[:50]}...'")
+                logger.info(f"[LAMBDA] Passing message to {action}: '{message[:50]}...'" if len(message) > 50 else f"[LAMBDA] Passing message to {action}: '{message}'")
 
             # WEATHER AUTO-FETCH: If no location provided, try to get it from conversation history
             if action == 'get_weather' and not lambda_params.get('location'):

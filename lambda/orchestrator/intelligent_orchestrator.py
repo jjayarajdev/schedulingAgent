@@ -3112,12 +3112,16 @@ def orchestrate_intelligent_workflow(
                     if not response_text:
                         # Simple inline formatting for voice
                         if gpt_action == 'get_available_dates':
-                            dates = response_body.get('available_dates', [])
-                            if dates:
-                                date_list = ', '.join(d.get('date', str(d)) if isinstance(d, dict) else str(d) for d in dates[:3])
-                                response_text = f"I have these dates available: {date_list}. Which one works for you?"
+                            # CRITICAL: Check already_scheduled FIRST - project may be scheduled, not "no dates"
+                            if response_body.get('already_scheduled'):
+                                response_text = "This project already has an appointment. Say 'reschedule' if you'd like to change it, or 'details' to hear the appointment info."
                             else:
-                                response_text = "I don't see any available dates right now. Would you like to try a different week?"
+                                dates = response_body.get('available_dates', [])
+                                if dates:
+                                    date_list = ', '.join(d.get('date', str(d)) if isinstance(d, dict) else str(d) for d in dates[:3])
+                                    response_text = f"I have these dates available: {date_list}. Which one works for you?"
+                                else:
+                                    response_text = "I don't see any available dates right now. Would you like to try a different week?"
                         elif gpt_action == 'get_time_slots':
                             # scheduling-actions returns: available_slots, timeSlots, slots (rescheduler), or time_slots
                             slots = response_body.get('available_slots') or response_body.get('timeSlots') or response_body.get('slots') or response_body.get('time_slots', [])

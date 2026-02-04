@@ -188,10 +188,14 @@ def get_classifier_few_shots() -> str:
     global _dspy_classifier
 
     if not _dspy_classifier:
+        logger.info("[DSPY] Classifier not loaded, attempting to load models...")
         load_optimized_models()
 
     if not _dspy_classifier:
+        logger.warning("[DSPY] Classifier still not loaded after load attempt")
         return ""
+
+    logger.info("[DSPY] Classifier loaded, extracting demos...")
 
     # Extract demos from the optimized model
     demos = _dspy_classifier.get('classifier.predict', {}).get('demos', [])
@@ -535,10 +539,14 @@ def enhance_nlu_prompt(base_prompt: str) -> str:
         prompt = NLU_PROMPT_TEMPLATE.format(...)
         prompt = enhance_nlu_prompt(prompt)  # Add DSPy examples
     """
+    logger.info("[DSPY] enhance_nlu_prompt called")
     few_shots = get_classifier_few_shots()
 
     if not few_shots:
+        logger.info("[DSPY] No few-shots returned, using base prompt")
         return base_prompt
+
+    logger.info(f"[DSPY] Adding {len(few_shots)} chars of few-shot examples to prompt")
 
     # Insert few-shots after "## INTENT TAXONOMY" section
     marker = "## USER UTTERANCE"

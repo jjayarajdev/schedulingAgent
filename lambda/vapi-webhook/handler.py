@@ -492,6 +492,88 @@ def resolve_to_phone(call: Dict) -> str:
     return TWILIO_NUMBER
 
 
+def send_support_sms(from_phone: str, to_phone: str, client_id: str, bearer_token: str, support_number: str, call_id: str = '', user_id: str = '') -> Dict[str, Any]:
+    """
+    Send support contact info via SMS to the customer.
+
+    Calls the ProjectForce support-sms API to send the customer a text message
+    with the office phone number they can call.
+
+    Args:
+        from_phone: Customer's phone number (recipient of SMS)
+        to_phone: Our VAPI/Twilio number (sender)
+        client_id: Client identifier
+        bearer_token: Auth token for the API
+        support_number: The support phone number to include
+        call_id: VAPI call ID for audit trail
+        user_id: Customer user ID for audit trail
+
+    Returns:
+        Dict with success status and voice-formatted support number
+    """
+    import urllib.request
+    import urllib.error
+
+    # Determine environment from Lambda function name or use dev
+    environment = os.environ.get('ENVIRONMENT', 'dev')
+    if environment == 'prod':
+        api_base = 'https://api-cx-portal.apps.projectsforce.com'
+    else:
+        api_base = 'https://api-cx-portal.dev.projectsforce.com'
+
+    url = f'{api_base}/authentication/support-sms'
+
+    # Build request payload
+    payload = json.dumps({
+        'client_id': client_id,
+        'to_phone': from_phone,  # SMS goes TO the customer (from_phone is customer's number)
+        'from_phone': to_phone   # SMS comes FROM our number
+    }).encode('utf-8')
+
+    # Audit context for logging
+    audit_ctx = f"call_id={call_id}, user_id={user_id}, client_id={client_id}, to={mask_phone(from_phone)}"
+
+    try:
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {bearer_token}'
+            },
+            method='POST'
+        )
+
+        with urllib.request.urlopen(req, timeout=10) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            logger.info(f"[SUPPORT_SMS] SUCCESS - {audit_ctx}, support_number={support_number}")
+
+            return {
+                'success': True,
+                'sms_sent': True,
+                'support_number': support_number,
+                'message': result.get('message', 'SMS sent')
+            }
+
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8') if e.fp else ''
+        logger.error(f"[SUPPORT_SMS] FAILED - {audit_ctx}, http_code={e.code}, error={error_body}")
+        return {
+            'success': False,
+            'sms_sent': False,
+            'support_number': support_number,
+            'error': f'HTTP {e.code}'
+        }
+    except Exception as e:
+        logger.error(f"[SUPPORT_SMS] FAILED - {audit_ctx}, error={str(e)}")
+        return {
+            'success': False,
+            'sms_sent': False,
+            'support_number': support_number,
+            'error': str(e)
+        }
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Main Lambda handler for VAPI webhook.
@@ -687,8 +769,8 @@ def create_assistant_config_response(first_message: str, support_number: str = '
                         'properties': {
                             'action': {
                                 'type': 'string',
-                                'enum': ['list_projects', 'get_project_details', 'get_available_dates', 'get_time_slots', 'schedule_project', 'confirm_appointment', 'reschedule_appointment', 'get_weather', 'calendar_info', 'other'],
-                                'description': 'The type of action requested. Use calendar_info for "what day is X date" questions. CRITICAL: Use confirm_appointment ONLY after user has selected BOTH a DATE and a TIME SLOT. Never call confirm_appointment with just a date - always get_time_slots first!'
+                                'enum': ['list_projects', 'get_project_details', 'get_available_dates', 'get_time_slots', 'schedule_project', 'confirm_appointment', 'reschedule_appointment', 'get_weather', 'calendar_info', 'send_support_sms', 'other'],
+                                'description': 'The type of action requested. Use calendar_info for "what day is X date" questions. Use send_support_sms when user asks for office number or you need to escalate - this sends them an SMS AND returns the number to read. CRITICAL: Use confirm_appointment ONLY after user has selected BOTH a DATE and a TIME SLOT.'
                             },
                             'message': {
                                 'type': 'string',
@@ -779,8 +861,12 @@ NEVER dodge this question. NEVER pretend to be human. NEVER deflect with unrelat
 
 ## RULE #4 - ESCALATION TO HUMAN
 
-If customer asks for "representative", "real person", "customer service", "office number":
-''' + (f'''RESPONSE: "I can give you our office contact. For {client_name}, you can reach them at {support_number_voice}. Would you like me to repeat that?"''' if support_number_voice else '''RESPONSE: "I don't have the office number available right now, but you can check your confirmation email or the company website for contact details."''') + '''
+If customer asks for "representative", "real person", "customer service", "office number", OR you need to give them the office number:
+**CALL the tool** with action='send_support_sms' - this returns the office number for you to read.
+
+After the tool returns, read the response directly - it contains the formatted office number.
+
+''' + (f'''If tool unavailable, fallback: "You can reach {client_name} at {support_number_voice}."''' if support_number_voice else '''If no number available: "You can check your confirmation email or the company website for contact details."''') + '''
 
 ---
 
@@ -790,7 +876,13 @@ You are **J**, a friendly voice assistant, helping homeowners manage their home 
 
 **Today's date: ''' + datetime.now().strftime("%A, %B %d, %Y") + '''**
 
-**CALENDAR QUESTIONS:** When customer asks "what day is [date]" or "which day does [date] fall on", you MUST call the tool with action="calendar_info". Do NOT calculate yourself - your math may be wrong.
+**CALENDAR QUESTIONS (CRITICAL - DO NOT GUESS):**
+When customer asks "what day is [date]" or "which day does [date] fall on":
+1. Say "Sure, let me check." and call the tool with action="calendar_info"
+2. WAIT for the tool response - do NOT say any day name (Monday, Tuesday, etc.) until you receive the result
+3. Speak ONLY the tool response - it will say "[Date] is a [Day]."
+
+⚠️ NEVER guess or calculate days yourself - your math WILL be wrong. Just wait for the tool.
 
 ## Personality
 
@@ -810,19 +902,19 @@ Help customers with:
 - Answering project questions
 - Details of a project
 
-## What You CANNOT Do (redirect to office immediately)
+## What You CANNOT Do (redirect to office - USE send_support_sms)
 
-**CRITICAL - These features do NOT exist. Do NOT attempt them:**
+**CRITICAL - These features do NOT exist. When you need to give the office number, CALL the tool with action='send_support_sms':**
 
-1. **CANCEL appointments**: "I'm not able to cancel appointments directly. Let me give you our office number - they can take care of that for you right away."
+1. **CANCEL appointments**: "I'm not able to cancel appointments directly. Let me give you our office number." → CALL send_support_sms
 
-2. **Change ADDRESS**: "I can't update addresses in the system. Our office can make that change for you - would you like their number?"
+2. **Change ADDRESS**: "I can't update addresses in the system. Would you like the office number?" → CALL send_support_sms
 
-3. **Pricing/cost questions**: "I don't have pricing information. Our office can help with that - would you like the number?"
+3. **Pricing/cost questions**: "I don't have pricing information. Let me give you the office number." → CALL send_support_sms
 
-4. **Product questions** (not about their project): "For product questions, our office would be the best resource."
+4. **Product questions** (not about their project): "For product questions, our office would be the best resource." → CALL send_support_sms
 
-5. **Complaints about service**: "I'm sorry to hear that. Let me give you our office number so you can speak with someone who can help."
+5. **Complaints about service**: "I'm sorry to hear that. Let me give you the office number so you can speak with someone." → CALL send_support_sms
 
 6. **Technical/installation questions**: "That's a great question for the installer. I can tell you when they're scheduled, or give you the office number."
 
@@ -855,7 +947,7 @@ You MUST call `projectforce_api` for ANY project-related request. Never make up 
 - "Any openings next week?" → action: get_available_dates, message: "Any openings next week?" (PASS EXACT WORDS!)
 - "What about the week of the 20th?" → action: get_available_dates, message: "What about the week of the 20th?" (PASS EXACT WORDS!)
 - "Yes" (after showing project) → action: get_available_dates
-- "Cancel my appointment" → DO NOT call tool. Say: "I'm not able to cancel appointments directly. Let me give you our office number."
+- "Cancel my appointment" → action: send_support_sms. Say: "I'm not able to cancel appointments directly. Let me give you our office number."
 - "Reschedule to next week" → action: reschedule_appointment
 - "Tell me about my project" → action: get_project_details
 - "What's the weather on my appointment day?" → action: get_weather
@@ -1333,6 +1425,52 @@ def handle_function_call(message: Dict) -> Dict:
 
         logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, action={action}")
 
+        # Handle send_support_sms action - send SMS + return number for voice
+        if action == 'send_support_sms':
+            support_number = credentials.get('support_number', '')
+            client_id = credentials.get('client_id', '')
+            bearer_token = credentials.get('bearer_token', '')
+
+            # Format number for voice (words)
+            digit_words = {
+                '0': 'zero', '1': 'one', '2': 'two', '3': 'three', '4': 'four',
+                '5': 'five', '6': 'six', '7': 'seven', '8': 'eight', '9': 'nine'
+            }
+            digits = ''.join(c for c in support_number if c.isdigit())
+            if len(digits) == 10:
+                part1 = ', '.join(digit_words[d] for d in digits[0:3])
+                part2 = ', '.join(digit_words[d] for d in digits[3:6])
+                part3 = ', '.join(digit_words[d] for d in digits[6:10])
+                support_number_voice = f"{part1}... {part2}... {part3}"
+            else:
+                support_number_voice = ', '.join(digit_words.get(d, d) for d in digits)
+
+            # Send the SMS silently (don't mention it to user)
+            user_id = credentials.get('user_id', '')
+            sms_result = send_support_sms(
+                from_phone=from_phone,  # Customer's phone (recipient)
+                to_phone=to_phone,      # Our number (sender)
+                client_id=client_id,
+                bearer_token=bearer_token,
+                support_number=support_number,
+                call_id=call_id,        # For audit trail
+                user_id=user_id         # For audit trail
+            )
+
+            if not sms_result.get('sms_sent'):
+                logger.warning(f"[VAPI] SMS send failed: {sms_result.get('error')}")
+
+            # Just return the number - AI reads it out, SMS is silent
+            client_name = credentials.get('client_name', 'our office')
+            response_text = f"You can reach {client_name} at {support_number_voice}. Would you like me to repeat that?"
+
+            return create_function_response({
+                "success": True,
+                "response": response_text,
+                "sms_sent": sms_result.get('sms_sent', False),
+                "support_number": support_number
+            })
+
         # Call orchestrator with the user's message
         # CRITICAL: Pass GPT-4o's action - the orchestrator should TRUST it!
         # GPT-4o has full context via smart prompt and knows what action to take
@@ -1465,6 +1603,56 @@ def handle_tool_calls(message: Dict) -> Dict:
                 continue
 
             logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, action={action}")
+
+            # Handle send_support_sms action directly - send SMS + return number for voice
+            if action == 'send_support_sms':
+                support_number = credentials.get('support_number', '')
+                client_id = credentials.get('client_id', '')
+                bearer_token = credentials.get('bearer_token', '')
+
+                # Format number for voice (words)
+                digit_words = {
+                    '0': 'zero', '1': 'one', '2': 'two', '3': 'three', '4': 'four',
+                    '5': 'five', '6': 'six', '7': 'seven', '8': 'eight', '9': 'nine'
+                }
+                digits = ''.join(c for c in support_number if c.isdigit())
+                if len(digits) == 10:
+                    part1 = ', '.join(digit_words[d] for d in digits[0:3])
+                    part2 = ', '.join(digit_words[d] for d in digits[3:6])
+                    part3 = ', '.join(digit_words[d] for d in digits[6:10])
+                    support_number_voice = f"{part1}... {part2}... {part3}"
+                else:
+                    support_number_voice = ', '.join(digit_words.get(d, d) for d in digits)
+
+                # Send the SMS silently (don't mention it to user)
+                user_id = credentials.get('user_id', '')
+                sms_result = send_support_sms(
+                    from_phone=from_phone,
+                    to_phone=to_phone,
+                    client_id=client_id,
+                    bearer_token=bearer_token,
+                    support_number=support_number,
+                    call_id=call_id,
+                    user_id=user_id
+                )
+
+                if not sms_result.get('sms_sent'):
+                    logger.warning(f"[VAPI] SMS send failed: {sms_result.get('error')}")
+
+                # Return the number - AI reads it out, SMS is silent
+                client_name = credentials.get('client_name', 'our office')
+                response_text = f"You can reach {client_name} at {support_number_voice}. Would you like me to repeat that?"
+
+                results.append({
+                    "toolCallId": tool_call_id,
+                    "result": json.dumps({
+                        "success": True,
+                        "response": response_text,
+                        "sms_sent": sms_result.get('sms_sent', False),
+                        "support_number": support_number
+                    })
+                })
+                continue
 
             # Call orchestrator with GPT-4o's action - TRUST IT!
             # GPT-4o has full context via smart prompt and knows what to do
