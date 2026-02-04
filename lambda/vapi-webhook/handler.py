@@ -524,10 +524,11 @@ def send_support_sms(from_phone: str, to_phone: str, client_id: str, bearer_toke
     url = f'{api_base}/authentication/support-sms'
 
     # Build request payload
+    # API expects: from_phone = customer (recipient), to_phone = VAPI/Twilio (sender)
     payload = json.dumps({
         'client_id': client_id,
-        'to_phone': from_phone,  # SMS goes TO the customer (from_phone is customer's number)
-        'from_phone': to_phone   # SMS comes FROM our number
+        'from_phone': from_phone,  # Customer receives the SMS
+        'to_phone': to_phone       # VAPI/Twilio number sends it
     }).encode('utf-8')
 
     # Audit context for logging
