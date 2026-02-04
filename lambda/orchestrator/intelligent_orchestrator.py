@@ -3018,6 +3018,12 @@ def orchestrate_intelligent_workflow(
             # Define message_lower early so it's available for all action types
             message_lower = message.lower() if message else ''
 
+            # CRITICAL: Pass message to reschedule_appointment for smart intent detection
+            # This allows auto-confirm when user says "reschedule" (skips redundant confirmation)
+            if gpt_action == 'reschedule_appointment' and message:
+                gpt_params['message'] = message
+                logger.info(f"[GPT-4O-TRUST] Passing message to reschedule_appointment for smart intent")
+
             # CRITICAL: For get_available_dates, check if this is a reschedule scenario
             # Use rescheduler API when: user said "reschedule", or GPT action is reschedule, or project is already scheduled
             if gpt_action == 'get_available_dates':
