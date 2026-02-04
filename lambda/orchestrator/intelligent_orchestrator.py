@@ -3219,6 +3219,21 @@ def orchestrate_intelligent_workflow(
                             }
                             state_manager.save_state(session_id, new_state)
                             logger.info(f"[GPT-4O-TRUST] Saved workflow state: reschedule awaiting_date_selection")
+                        elif status == 'no_dates_available':
+                            # CRITICAL: Save is_reschedule even when no dates, so subsequent
+                            # get_available_dates calls use rescheduler API (not slotsChatbot)
+                            new_state = {
+                                'workflow_type': 'reschedule_appointment',
+                                'current_stage': 'no_dates_retry',
+                                'context': {
+                                    'project_id': project_id,
+                                    'project_status': project_status,
+                                    'is_reschedule': True,
+                                    'current_scheduled_date': response_body.get('current_scheduled_date')
+                                }
+                            }
+                            state_manager.save_state(session_id, new_state)
+                            logger.info(f"[GPT-4O-TRUST] Saved workflow state: reschedule no_dates (is_reschedule=True for retry)")
 
                     timing['total'] = time.time() - start_time
                     logger.info(f"[GPT-4O-TRUST] SUCCESS! Returning response directly (bypassed classification)")
