@@ -79,8 +79,14 @@ _phone_number_cache = {}
 # AWS clients - use ORCHESTRATOR_REGION for Lambda calls
 lambda_client = boto3.client('lambda', region_name=ORCHESTRATOR_REGION)
 
-# Session cache (in-memory for Lambda warm starts)
-_session_cache = {}
+# DynamoDB for session tracking (persists across Lambda containers)
+# Table: pf-syn-call-tracking-{env} with call_id as primary key
+CALL_TRACKING_TABLE = os.environ.get('CALL_TRACKING_TABLE', f'pf-syn-sessions-{ENVIRONMENT}')
+dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
+call_tracking_table = dynamodb.Table(CALL_TRACKING_TABLE)
+
+# Notes Lambda configuration
+NOTES_LAMBDA = os.environ.get('NOTES_LAMBDA', f'pf-syn-notes-actions-{ENVIRONMENT}')
 
 # Filler messages - SIMPLIFIED
 # Only used for genuinely slow operations (12s+)
@@ -91,6 +97,257 @@ FILLER_MESSAGES = {
         "Just a moment more.",
     ]
 }
+
+
+def track_project_in_session(call_id: str, project_id: str, action: str, credentials: Dict = None):
+    """
+    Track a project that was discussed during a call.
+    Uses DynamoDB to persist across Lambda containers.
+
+    Args:
+        call_id: VAPI call ID
+        project_id: Project ID being discussed
+        action: Action being performed (e.g., 'get_available_dates', 'reschedule_appointment')
+        credentials: Optional credentials to store for later use
+    """
+    if not call_id or not project_id:
+        return
+
+    try:
+        # Use call:call_id as session_id to differentiate from phone:xxx sessions
+        session_id = f"call:{call_id}"
+
+        # Get existing session data from DynamoDB
+        response = call_tracking_table.get_item(Key={'session_id': session_id})
+        existing = response.get('Item', {})
+
+        # Build session data
+        projects_discussed = existing.get('projects_discussed', {})
+        if isinstance(projects_discussed, str):
+            projects_discussed = json.loads(projects_discussed)
+
+        actions_taken = existing.get('actions_taken', [])
+        if isinstance(actions_taken, str):
+            actions_taken = json.loads(actions_taken)
+
+        # Track this project
+        if project_id not in projects_discussed:
+            projects_discussed[project_id] = []
+
+        # Add action if not already tracked for this project
+        if action and action not in projects_discussed[project_id]:
+            projects_discussed[project_id].append(action)
+
+        # Track all actions taken
+        actions_taken.append({
+            'action': action,
+            'project_id': project_id,
+            'timestamp': datetime.utcnow().isoformat()
+        })
+
+        # Build item to store
+        item = {
+            'session_id': session_id,
+            'call_id': call_id,
+            'projects_discussed': json.dumps(projects_discussed),
+            'actions_taken': json.dumps(actions_taken),
+            'start_time': existing.get('start_time', datetime.utcnow().isoformat()),
+            'updated_at': datetime.utcnow().isoformat(),
+            'ttl': int(datetime.utcnow().timestamp()) + 3600  # 1 hour TTL
+        }
+
+        # Store credentials if provided
+        if credentials:
+            item['client_id'] = credentials.get('client_id', '')
+            item['bearer_token'] = credentials.get('bearer_token', '')
+            item['user_id'] = credentials.get('user_id', '')
+
+        # Write to DynamoDB
+        call_tracking_table.put_item(Item=item)
+
+        logger.info(f"[CALL_TRACKING] call_id={call_id}, project_id={project_id}, action={action}")
+
+    except Exception as e:
+        logger.error(f"[CALL_TRACKING] Failed to track project: {e}")
+
+
+def store_credentials_in_session(call_id: str, credentials: Dict):
+    """
+    Store credentials in session without a project.
+    Used when credentials are available but no project_id yet.
+    IMPORTANT: Merges with existing data to not overwrite project tracking.
+
+    Args:
+        call_id: VAPI call ID
+        credentials: Credentials dict with client_id, bearer_token, user_id
+    """
+    if not call_id or not credentials:
+        return
+
+    try:
+        session_id = f"call:{call_id}"
+
+        # Get existing session data to preserve project tracking
+        response = call_tracking_table.get_item(Key={'session_id': session_id})
+        existing = response.get('Item', {})
+
+        # Build item preserving existing project data
+        item = {
+            'session_id': session_id,
+            'call_id': call_id,
+            'client_id': credentials.get('client_id', ''),
+            'bearer_token': credentials.get('bearer_token', ''),
+            'user_id': credentials.get('user_id', ''),
+            'projects_discussed': existing.get('projects_discussed', '{}'),  # Preserve!
+            'actions_taken': existing.get('actions_taken', '[]'),  # Preserve!
+            'start_time': existing.get('start_time', datetime.utcnow().isoformat()),
+            'updated_at': datetime.utcnow().isoformat(),
+            'ttl': int(datetime.utcnow().timestamp()) + 3600  # 1 hour TTL
+        }
+
+        # Write to DynamoDB
+        call_tracking_table.put_item(Item=item)
+        logger.info(f"[CALL_TRACKING] Stored credentials for call {call_id}")
+
+    except Exception as e:
+        logger.error(f"[CALL_TRACKING] Failed to store credentials: {e}")
+
+
+def add_call_notes_to_projects(call_id: str, summary: str, duration: float, customer_phone: str = ''):
+    """
+    Add notes to all projects discussed during the call.
+    Reads session data from DynamoDB.
+
+    Args:
+        call_id: VAPI call ID
+        summary: Call summary from VAPI
+        duration: Call duration in seconds
+        customer_phone: Customer's phone number (masked for privacy)
+    """
+    try:
+        # Read session data from DynamoDB
+        session_id = f"call:{call_id}"
+        response = call_tracking_table.get_item(Key={'session_id': session_id})
+        session_data = response.get('Item', {})
+
+        if not session_data:
+            logger.info(f"[CALL_NOTES] No session data found for call {call_id}, skipping notes")
+            return
+
+        # Parse JSON fields
+        projects_discussed_str = session_data.get('projects_discussed', '{}')
+        projects_discussed = json.loads(projects_discussed_str) if isinstance(projects_discussed_str, str) else projects_discussed_str
+
+        # Build credentials from session data
+        credentials = {
+            'client_id': session_data.get('client_id', ''),
+            'bearer_token': session_data.get('bearer_token', ''),
+            'user_id': session_data.get('user_id', '')
+        }
+
+        if not projects_discussed:
+            logger.info(f"[CALL_NOTES] No projects discussed for call {call_id}, skipping notes")
+            return
+
+        if not credentials.get('client_id') or not credentials.get('bearer_token'):
+            logger.warning(f"[CALL_NOTES] No credentials for call {call_id}, cannot add notes")
+            return
+
+    except Exception as e:
+        logger.error(f"[CALL_NOTES] Failed to read session data: {e}")
+        return
+
+    # Format duration
+    minutes = int(duration // 60)
+    seconds = int(duration % 60)
+    duration_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+
+    # Get call timestamp
+    call_time = datetime.utcnow().strftime("%b %d, %Y at %I:%M %p UTC")
+
+    # Build action summary per project
+    for project_id, project_actions in projects_discussed.items():
+        # Build note text
+        action_list = ', '.join(project_actions) if project_actions else 'general inquiry'
+
+        note_text = f"Customer called on {call_time} via AI Scheduling Assistant (J). Duration: {duration_str}. Actions: {action_list}."
+
+        if summary:
+            # Truncate summary if too long
+            truncated_summary = summary[:200] + '...' if len(summary) > 200 else summary
+            note_text += f" Summary: {truncated_summary}"
+
+        # Invoke notes lambda asynchronously
+        try:
+            invoke_notes_lambda(
+                project_id=project_id,
+                note_text=note_text,
+                credentials=credentials,
+                call_id=call_id
+            )
+            logger.info(f"[CALL_NOTES] Added note to project {project_id} for call {call_id}")
+        except Exception as e:
+            logger.error(f"[CALL_NOTES] Failed to add note to project {project_id}: {e}")
+
+    # Clean up session data from DynamoDB (TTL will also handle this)
+    try:
+        call_tracking_table.delete_item(Key={'session_id': session_id})
+        logger.info(f"[CALL_NOTES] Cleaned up session data for call {call_id}")
+    except Exception as e:
+        logger.warning(f"[CALL_NOTES] Failed to clean up session data: {e}")
+
+
+def invoke_notes_lambda(project_id: str, note_text: str, credentials: Dict, call_id: str = ''):
+    """
+    Invoke the notes Lambda to add a note to a project.
+
+    Args:
+        project_id: Project ID to add note to
+        note_text: The note text
+        credentials: Auth credentials (client_id, bearer_token)
+        call_id: Optional call ID for logging
+    """
+    client_id = credentials.get('client_id', '')
+    bearer_token = credentials.get('bearer_token', '')
+
+    if not client_id or not bearer_token:
+        logger.error(f"[CALL_NOTES] Missing client_id or bearer_token for project {project_id}")
+        return
+
+    # Build Lambda event (Bedrock agent format)
+    event = {
+        'actionGroup': 'notes',
+        'function': 'add_note',
+        'apiPath': '/add-note',
+        'httpMethod': 'POST',
+        'parameters': [
+            {'name': 'project_id', 'value': str(project_id)},
+            {'name': 'note_text', 'value': note_text},
+            {'name': 'author', 'value': 'AI Scheduling Assistant (J)'}
+        ],
+        'sessionAttributes': {
+            'client_id': client_id,
+            'pf_bearer_token': bearer_token
+        }
+    }
+
+    try:
+        # Invoke asynchronously (Event) so we don't block the response
+        response = lambda_client.invoke(
+            FunctionName=NOTES_LAMBDA,
+            InvocationType='Event',  # Async - don't wait for response
+            Payload=json.dumps(event)
+        )
+
+        status_code = response.get('StatusCode', 0)
+        if status_code == 202:  # 202 = accepted for async
+            logger.info(f"[CALL_NOTES] Notes Lambda invoked for project {project_id}, call {call_id}")
+        else:
+            logger.warning(f"[CALL_NOTES] Notes Lambda returned status {status_code} for project {project_id}")
+
+    except Exception as e:
+        logger.error(f"[CALL_NOTES] Failed to invoke notes Lambda for project {project_id}: {e}")
+        raise
 
 
 def build_smart_project_context(projects_data: Optional[Dict]) -> str:
@@ -1357,11 +1614,8 @@ def handle_conversation_update(message: Dict) -> Dict:
 
     logger.info(f"[VAPI] Conversation update: call={call_id}, status={status}")
 
-    # Clear session cache on call end
-    if status in ['ended', 'completed', 'failed']:
-        if call_id in _session_cache:
-            del _session_cache[call_id]
-            logger.info(f"[VAPI] Cleared session cache for {call_id}")
+    # Note: Session cleanup is handled by add_call_notes_to_projects in handle_end_of_call
+    # DynamoDB entries also have TTL for automatic cleanup
 
     return create_response(200, {"status": "ok"})
 
@@ -1425,6 +1679,13 @@ def handle_function_call(message: Dict) -> Dict:
             })
 
         logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, action={action}")
+
+        # Track project in session for end-of-call notes (stored in DynamoDB)
+        if project_id:
+            track_project_in_session(call_id, project_id, action, credentials)
+        elif credentials:
+            # Store credentials even without project_id for later use
+            store_credentials_in_session(call_id, credentials)
 
         # Handle send_support_sms action - send SMS + return number for voice
         if action == 'send_support_sms':
@@ -1605,6 +1866,13 @@ def handle_tool_calls(message: Dict) -> Dict:
 
             logger.info(f"[VAPI] Authenticated: user_id={credentials.get('user_id')}, action={action}")
 
+            # Track project in session for end-of-call notes (stored in DynamoDB)
+            if project_id:
+                track_project_in_session(call_id, project_id, action, credentials)
+            elif credentials:
+                # Store credentials even without project_id for later use
+                store_credentials_in_session(call_id, credentials)
+
             # Handle send_support_sms action directly - send SMS + return number for voice
             if action == 'send_support_sms':
                 support_number = credentials.get('support_number', '')
@@ -1695,20 +1963,33 @@ def handle_tool_calls(message: Dict) -> Dict:
 
 def handle_end_of_call(message: Dict) -> Dict:
     """
-    Handle end-of-call-report: Call ended, cleanup.
+    Handle end-of-call-report: Call ended, cleanup and add notes.
+
+    At the end of each call:
+    1. Add notes to all projects that were discussed during the call
+    2. Clear the session data from DynamoDB
     """
     call = message.get('call', {})
     call_id = call.get('id', 'unknown')
+    customer = call.get('customer', {})
+    customer_phone = customer.get('number', '')
 
-    # Get call summary
+    # Get call summary from VAPI
     summary = message.get('summary', '')
     duration = message.get('durationSeconds', 0)
 
     logger.info(f"[VAPI] Call ended: {call_id}, duration={duration}s")
 
-    # Clear cache
-    if call_id in _session_cache:
-        del _session_cache[call_id]
+    # Add notes to projects discussed (reads from DynamoDB, handles cleanup)
+    try:
+        add_call_notes_to_projects(
+            call_id=call_id,
+            summary=summary,
+            duration=duration,
+            customer_phone=mask_phone(customer_phone) if customer_phone else ''
+        )
+    except Exception as e:
+        logger.error(f"[VAPI] Failed to add call notes: {e}")
 
     return create_response(200, {"status": "ok"})
 

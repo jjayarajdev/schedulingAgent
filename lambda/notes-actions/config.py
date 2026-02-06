@@ -84,7 +84,8 @@ def get_api_config(client_id: str, env: str = None) -> Dict[str, str]:
     env = env or ENVIRONMENT
 
     return {
-        "add_note_url": f"{CUSTOMER_SCHEDULER_BASE_API_URL}/project-notes/add/{client_id}",
+        # URL format: /communication/client/{client_id}/project/{project_id}/note
+        "add_note_base_url": f"{CUSTOMER_SCHEDULER_BASE_API_URL}/communication/client/{client_id}/project",
         "list_notes_url": f"{CUSTOMER_SCHEDULER_BASE_API_URL}/project-notes/list/{client_id}",
         "dynamodb_table": DYNAMODB_TABLE,
         "environment": env,

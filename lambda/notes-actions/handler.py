@@ -210,14 +210,14 @@ def handle_add_note(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str,
         logger.info(f"[MOCK] Adding note to project {project_id}")
         response = get_mock_add_note(project_id, note_text, author)
     else:
-        logger.info(f"[REAL] Adding note to project {project_id}")
-        url = config['add_note_url']
+        # API: /communication/client/{client_id}/project/{project_id}/note
+        url = f"{config['add_note_base_url']}/{project_id}/note"
+        logger.info(f"[REAL] Adding note to project {project_id}, URL: {url}")
 
+        # Include author in note_text since API only accepts note_text field
+        note_with_author = f"{note_text}\n\n— {author}"
         payload = {
-            "project_id": project_id,
-            "note": note_text,
-            "author": author,
-            "created_at": datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+            "note_text": note_with_author
         }
 
         try:
@@ -330,7 +330,7 @@ def lambda_handler(event, context):
         client_id = session_attrs.get('client_id') or params.get('client_id', 'default')
         logger.info(f"Using client_id: {client_id} (from sessionAttributes: {session_attrs.get('client_id')})")
         config = get_api_config(client_id)
-        logger.info(f"API config: add_note_url={config.get('add_note_url')}")
+        logger.info(f"API config: add_note_base_url={config.get('add_note_base_url')}")
 
         # Get auth headers (if not using mock)
         auth_headers = {}
