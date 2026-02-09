@@ -2124,10 +2124,10 @@ def handle_get_time_slots(params: Dict, config: Dict, auth_headers: Dict) -> Dic
     # This API works for already-scheduled projects (slotsChatbot returns 400)
     # ========================================================================
     if is_reschedule and not USE_MOCK_API and client_id:
-        logger.info(f"[get_time_slots] RESCHEDULE MODE: Using get-rescheduler-slots API for project {project_id}, date {selected_date}")
+        logger.info(f"[get_time_slots] RESCHEDULE MODE: Using get-reschedule-slotsChatBot API for project {project_id}, date {selected_date}")
 
         # Rescheduler API endpoint - use selected_date for both date and selected_date to get slots for that specific day
-        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/date/{selected_date}/selected/{selected_date}/get-rescheduler-slots"
+        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/date/{selected_date}/selected/{selected_date}/get-reschedule-slotsChatBot"
         logger.info(f"[get_time_slots] GET {url}")
 
         try:
@@ -3110,10 +3110,10 @@ def handle_get_rescheduler_slots(params: Dict, config: Dict, auth_headers: Dict)
         if not client_id:
             raise ValueError("Missing required parameter for real API: client_id")
 
-        logger.info(f"[REAL] Getting rescheduler slots for project {project_id}, date {date}")
+        logger.info(f"[REAL] Getting reschedule slots for project {project_id}, date {date}")
 
-        # API endpoint from documentation
-        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/date/{date}/selected/{selected_date}/get-rescheduler-slots"
+        # API endpoint - using new slotsChatBot backend for better reliability
+        url = f"{config['scheduler_base_url']}/scheduler/client/{client_id}/project/{project_id}/date/{date}/selected/{selected_date}/get-reschedule-slotsChatBot"
 
         logger.info(f"GET {url}")
 

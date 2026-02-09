@@ -2905,7 +2905,8 @@ def orchestrate_intelligent_workflow(
     confirmed: bool = False,  # From GPT-4o: True when user confirms appointment (Step 2)
     gpt_action: str = '',  # CRITICAL: Action from GPT-4o - TRUST THIS unless empty!
     gpt_date: str = '',  # From GPT-4o: selected date in YYYY-MM-DD format
-    gpt_time: str = ''  # From GPT-4o: selected time in HH:MM format
+    gpt_time: str = '',  # From GPT-4o: selected time in HH:MM format
+    pre_classification: Dict = None  # Classification from router (avoids duplicate NLU call)
 ) -> Dict[str, Any]:
     """
     Main intelligent orchestration function
@@ -4966,16 +4967,27 @@ You can say something like:
     # ========================================================================
     # Step 1: NLU CLASSIFICATION (Source of Truth for Action)
     # NLU is fast, deterministic, and usually correct
+    # OPTIMIZATION: Skip if pre_classification provided by router (avoids duplicate call)
     # ========================================================================
-    logger.info("[NLU] Step 1: NLU classification (action source of truth)")
     nlu_start = time.time()
 
-    nlu_result = classify_intent_and_action(message, conversation_history)
-    nlu_action = nlu_result.get('action')
-    nlu_intent = nlu_result.get('intent', 'scheduling')
-    nlu_params = nlu_result.get('params', {})
+    if pre_classification:
+        # Use classification from router - avoid duplicate NLU call
+        logger.info("[NLU] Step 1: Using pre_classification from router (skipping duplicate NLU)")
+        nlu_result = pre_classification
+        nlu_action = nlu_result.get('action')
+        nlu_intent = nlu_result.get('intent', 'scheduling')
+        nlu_params = nlu_result.get('params', {})
+        timing['nlu_classification'] = 0  # No time spent - reused from router
+    else:
+        # No pre_classification - run NLU classification
+        logger.info("[NLU] Step 1: NLU classification (action source of truth)")
+        nlu_result = classify_intent_and_action(message, conversation_history)
+        nlu_action = nlu_result.get('action')
+        nlu_intent = nlu_result.get('intent', 'scheduling')
+        nlu_params = nlu_result.get('params', {})
+        timing['nlu_classification'] = time.time() - nlu_start
 
-    timing['nlu_classification'] = time.time() - nlu_start
     logger.info(f"[NLU] Result: intent={nlu_intent}, action={nlu_action}, params={nlu_params}")
 
     # ========================================================================

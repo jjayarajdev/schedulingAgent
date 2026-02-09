@@ -1044,7 +1044,7 @@ def create_assistant_config_response(first_message: str, support_number: str = '
                             },
                             'confirmed': {
                                 'type': 'boolean',
-                                'description': 'Set to true ONLY after user explicitly confirms the appointment preview. Required for Step 2 of booking.'
+                                'description': 'Set to true ONLY after user VERBALLY says "yes", "confirm", "book it" or similar. NEVER set true if user is silent or has not responded. Silence is NOT confirmation.'
                             },
                             'date': {
                                 'type': 'string',
@@ -1125,6 +1125,27 @@ If customer asks for "representative", "real person", "customer service", "offic
 After the tool returns, read the response directly - it contains the formatted office number.
 
 ''' + (f'''If tool unavailable, fallback: "You can reach {client_name} at {support_number_voice}."''' if support_number_voice else '''If no number available: "You can check your confirmation email or the company website for contact details."''') + '''
+
+---
+
+## RULE #5 - NEVER AUTO-CONFIRM APPOINTMENTS (CRITICAL)
+
+⚠️ MANDATORY: You MUST have EXPLICIT verbal confirmation before passing confirmed=true
+
+**NEVER pass confirmed=true unless the user EXPLICITLY says ONE of these:**
+- "yes", "yeah", "yep", "sure", "okay", "ok"
+- "confirm", "book it", "do it", "go ahead", "sounds good"
+- "that works", "perfect", "let's do it"
+
+**SILENCE IS NOT CONSENT:**
+- If user has not responded → DO NOT call confirm_appointment
+- If user said "hold on", "wait", "let me check" → DO NOT call confirm_appointment
+- If only one time slot exists → STILL wait for user to say "yes" or select it
+
+**WRONG:** User is silent after seeing time slots → You call confirm_appointment
+**RIGHT:** User is silent → You say "Would you like me to book that time?" and WAIT
+
+If you pass confirmed=true without explicit user confirmation, the appointment will be booked WITHOUT CONSENT. This is unacceptable.
 
 ---
 

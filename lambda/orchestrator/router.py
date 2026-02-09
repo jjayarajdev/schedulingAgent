@@ -1846,7 +1846,8 @@ def route_request(
                 confirmed=confirmed,  # For two-step appointment confirmation (Step 2)
                 gpt_action=gpt_action,  # CRITICAL: Action from GPT-4o - TRUST THIS!
                 gpt_date=gpt_date,  # From GPT-4o: selected date
-                gpt_time=gpt_time  # From GPT-4o: selected time
+                gpt_time=gpt_time,  # From GPT-4o: selected time
+                pre_classification=classification  # Pass router's classification to avoid duplicate NLU
             )
 
             # VOICE ADAPTATION: For voice channel, format the response
@@ -1868,6 +1869,29 @@ def route_request(
         except Exception as e:
             logger.error(f"Intelligent orchestration failed: {e}")
             # Fall through to direct Lambda call below
+
+            # FIX: Load workflow state to extract parameters for fallback Lambda call
+            # This prevents "Missing required parameters" error when orchestration fails
+            try:
+                from workflow_state import get_state_manager
+                fallback_state_manager = get_state_manager()
+                fallback_workflow_state = fallback_state_manager.get_state(session_id)
+                if fallback_workflow_state:
+                    fallback_context = fallback_workflow_state.get('context', {})
+                    # Extract scheduling parameters from workflow state
+                    if 'project_id' in fallback_context and 'project_id' not in merged_params:
+                        merged_params['project_id'] = fallback_context['project_id']
+                        logger.info(f"[FALLBACK] Extracted project_id from workflow state: {fallback_context['project_id']}")
+                    if 'selected_date' in fallback_context and 'date' not in merged_params:
+                        merged_params['date'] = fallback_context['selected_date']
+                        logger.info(f"[FALLBACK] Extracted date from workflow state: {fallback_context['selected_date']}")
+                    if 'selected_time' in fallback_context and 'time' not in merged_params:
+                        merged_params['time'] = fallback_context['selected_time']
+                        logger.info(f"[FALLBACK] Extracted time from workflow state: {fallback_context['selected_time']}")
+                    if 'category' in fallback_context and 'category' not in merged_params:
+                        merged_params['category'] = fallback_context['category']
+            except Exception as state_err:
+                logger.warning(f"[FALLBACK] Could not load workflow state: {state_err}")
 
     # OPTIMIZATION: Call Lambda directly for simple data retrieval
     if config.allow_direct_lambda and can_call_direct and action:
