@@ -203,6 +203,10 @@ def handle_add_note(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str,
     note_text = params.get('note_text') or params.get('note')
     author = params.get('author', 'Agent')
 
+    # Optional: viewed_by and viewed_at for marking note as read (call summary notes)
+    viewed_by = params.get('viewed_by')
+    viewed_at = params.get('viewed_at')
+
     if not all([project_id, note_text]):
         raise ValueError("Missing required parameters: project_id, note_text")
 
@@ -219,6 +223,15 @@ def handle_add_note(params: Dict, config: Dict, auth_headers: Dict) -> Dict[str,
         payload = {
             "note_text": note_with_author
         }
+
+        # Add viewed_by/viewed_at and reviewed_by/reviewed_at if provided (marks note as already read)
+        if viewed_by:
+            payload["viewed_by"] = viewed_by
+            payload["reviewed_by"] = viewed_by  # Same user for both
+        if viewed_at:
+            payload["viewed_at"] = viewed_at
+            payload["reviewed_at"] = viewed_at  # Same timestamp for both
+            logger.info(f"[REAL] Note marked as viewed/reviewed by {viewed_by} at {viewed_at}")
 
         try:
             res = requests.post(url, headers=auth_headers, json=payload, timeout=30)

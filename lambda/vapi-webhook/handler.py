@@ -315,6 +315,10 @@ def invoke_notes_lambda(project_id: str, note_text: str, credentials: Dict, call
         return
 
     # Build Lambda event (Bedrock agent format)
+    # Include viewed_by and viewed_at to mark note as read (prevents unread notification)
+    from datetime import datetime, timezone
+    viewed_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
     event = {
         'actionGroup': 'notes',
         'function': 'add_note',
@@ -323,7 +327,9 @@ def invoke_notes_lambda(project_id: str, note_text: str, credentials: Dict, call
         'parameters': [
             {'name': 'project_id', 'value': str(project_id)},
             {'name': 'note_text', 'value': note_text},
-            {'name': 'author', 'value': 'AI Scheduling Assistant (J)'}
+            {'name': 'author', 'value': 'AI Scheduling Assistant (J)'},
+            {'name': 'viewed_by', 'value': '6fb91b7b-f5bf-11ec-8fa1-0a924d8c6a19'},
+            {'name': 'viewed_at', 'value': viewed_at}
         ],
         'sessionAttributes': {
             'client_id': client_id,
