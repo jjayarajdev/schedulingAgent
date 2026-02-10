@@ -464,9 +464,24 @@ def format_lambda_response(action: str, response_body: Dict[str, Any], user_mess
 
             dates = response_body.get('available_dates', [])
             if not dates:
+                # Check if we already expanded the search (10 -> 21 days)
+                auto_expanded = response_body.get('auto_expanded', False)
+                circuit_breaker = response_body.get('circuit_breaker_triggered', False)
+
                 if channel == 'voice':
+                    # Priority 1: Circuit breaker (2+ no-date responses in session)
+                    if circuit_breaker:
+                        return "Our schedule is quite full right now. Would you like me to give you our office number so they can help you directly?"
+                    # Priority 2: Already expanded to 21 days - don't ask "check further out" (causes loop)
+                    if auto_expanded:
+                        return "I'm sorry, our schedule is quite full for the next few weeks. Would you like me to give you our office number? They can check further out or put you on a waitlist."
+                    # First time without expansion
                     return "No dates are available for this project right now. Would you like me to give you our office number to check for openings?"
-                return "Hmm, no open dates for this project right now. Want me to check again in a few days, or should we look at a different project?"
+
+                # Chat channel
+                if auto_expanded:
+                    return "Our schedule is fully booked for the next few weeks. Would you like our office number? They can check availability further out or add you to a waitlist."
+                return "Hmm, no open dates for this project right now. Want me to give you our office number, or should we look at a different project?"
 
             # Check for weather-enriched dates (proactive weather warnings)
             dates_with_weather = response_body.get('dates_with_weather', [])
