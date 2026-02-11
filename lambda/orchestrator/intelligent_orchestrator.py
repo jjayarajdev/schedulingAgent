@@ -3128,7 +3128,12 @@ def orchestrate_intelligent_workflow(
                                     date_list = ', '.join(d.get('date', str(d)) if isinstance(d, dict) else str(d) for d in dates[:3])
                                     response_text = f"I have these dates available: {date_list}. Which one works for you?"
                                 else:
-                                    response_text = "I don't see any available dates right now. Would you like to try a different week?"
+                                    # Check if we already expanded search - don't ask "check further out" (causes loop)
+                                    auto_expanded = response_body.get('auto_expanded', False)
+                                    if auto_expanded:
+                                        response_text = "I'm sorry, our schedule is quite full for the next few weeks. Would you like me to give you our office number? They can check further out or put you on a waitlist."
+                                    else:
+                                        response_text = "I don't see any available dates right now. Would you like me to give you our office number to check for openings?"
                         elif gpt_action == 'get_time_slots':
                             # scheduling-actions returns: available_slots, timeSlots, slots (rescheduler), or time_slots
                             slots = response_body.get('available_slots') or response_body.get('timeSlots') or response_body.get('slots') or response_body.get('time_slots', [])
@@ -3168,7 +3173,12 @@ def orchestrate_intelligent_workflow(
                             elif status == 'rescheduled':
                                 response_text = response_body.get('message', "Your appointment has been rescheduled!")
                             elif status == 'no_dates_available':
-                                response_text = response_body.get('message', "No alternative dates available. Your current appointment remains unchanged.")
+                                # Check if we already expanded search - don't ask "check further out" (causes loop)
+                                auto_expanded = response_body.get('auto_expanded', False)
+                                if auto_expanded:
+                                    response_text = "I'm sorry, our schedule is quite full for the next few weeks. Would you like me to give you our office number? They can check further out or put you on a waitlist."
+                                else:
+                                    response_text = "No alternative dates available right now. Would you like me to give you our office number to check for more options?"
                             else:
                                 response_text = response_body.get('message', '')
 
